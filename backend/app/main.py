@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import boms, drafts, health, inventory, masters
+from app.routers import boms, delivery_drafts, drafts, health, inventory, masters
 
 app = FastAPI(
     title=settings.app_name,
@@ -22,6 +22,7 @@ prefix = settings.api_prefix
 
 app.include_router(health.router, prefix=prefix)
 app.include_router(drafts.router, prefix=prefix)
+app.include_router(delivery_drafts.router, prefix=prefix)
 app.include_router(masters.router, prefix=prefix)
 app.include_router(boms.router, prefix=prefix)
 app.include_router(inventory.router, prefix=prefix)

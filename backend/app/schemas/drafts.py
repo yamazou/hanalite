@@ -20,6 +20,7 @@ class SourceType(str, Enum):
 
 class DraftLineCreate(BaseModel):
     item_id: int = Field(gt=0)
+    location_id: int | None = Field(default=None, gt=0)
     lot: Annotated[str, Field(min_length=1, max_length=50)]
     qty: Decimal = Field(gt=0)
     line_no: int = Field(default=1, ge=1)
@@ -31,9 +32,16 @@ class DraftLineRead(BaseModel):
     inv_receipt_draft_line_id: int
     line_no: int
     item_id: int
+    location_id: int
+    location_cd: str | None = None
+    location_nm: str | None = None
     item_nm: str | None = None
     lot: str
     qty: Decimal
+
+
+class DraftLineUpsert(DraftLineCreate):
+    inv_receipt_draft_line_id: int | None = Field(default=None, gt=0)
 
 
 class DraftCreate(BaseModel):
@@ -42,6 +50,14 @@ class DraftCreate(BaseModel):
     reference_no: str | None = Field(default=None, max_length=100)
     notes: str | None = None
     lines: list[DraftLineCreate] = Field(default_factory=list)
+
+
+class DraftUpdate(BaseModel):
+    receipt_at: datetime
+    suppliers_id: int | None = None
+    reference_no: str | None = Field(default=None, max_length=100)
+    notes: str | None = None
+    lines: list[DraftLineUpsert] = Field(default_factory=list)
 
 
 class DraftRead(BaseModel):
@@ -72,9 +88,14 @@ class DraftListItem(BaseModel):
     receipt_at: datetime
     reference_no: str | None
     supplier_nm: str | None = None
+    notes: str | None = None
     line_count: int
     source_type: SourceType = SourceType.manual
+    approved_at: datetime | None = None
+    cancelled_at: datetime | None = None
     created_at: datetime
+    has_attachment: bool = False
+    parse_message: str | None = None
 
 
 class MessageResponse(BaseModel):

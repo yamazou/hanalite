@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $period_filter = trim($_GET['period'] ?? '');
 $sql = 'SELECT b.period_year_month, b.lot, b.qty, b.beg_qty, b.beg_at, i.item_nm
         FROM inv_balances b
-        JOIN items i ON i.item_id = b.item_id
+        JOIN m_items i ON i.item_id = b.item_id
         WHERE b.deleted_at IS NULL';
 $params = [];
 if ($period_filter !== '') {

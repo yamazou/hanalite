@@ -88,20 +88,36 @@ def main() -> int:
         print("\nStart API: uvicorn app.main:app --host 127.0.0.1 --port 8000")
         return 1
 
-    code, raw = req("GET", "/receipt-drafts/template")
+    code, raw = req("GET", "/pch-receipt-drafts/template")
     if code == 200 and isinstance(raw, bytes) and len(raw) > 1000:
         ok("excel template download")
     else:
         fail("excel template", f"code={code}")
 
+    code, locations = req("GET", "/masters/locations")
+    if code == 200 and isinstance(locations, list) and len(locations) > 0:
+        ok("masters locations list")
+        location_id = locations[0]["location_id"]
+    else:
+        fail("masters locations list", str(locations))
+        location_id = 1
+
     receipt_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     code, draft = req(
         "POST",
-        "/receipt-drafts",
+        "/pch-receipt-drafts",
         {
             "receipt_at": receipt_at,
             "reference_no": "VERIFY-MANUAL",
-            "lines": [{"item_id": 1, "lot": f"LOT-V-M-{datetime.now().strftime('%H%M%S')}", "qty": 10, "line_no": 1}],
+            "lines": [
+                {
+                    "item_id": 1,
+                    "location_id": location_id,
+                    "lot": f"LOT-V-M-{datetime.now().strftime('%H%M%S')}",
+                    "qty": 10,
+                    "line_no": 1,
+                }
+            ],
         },
     )
     if code == 201:
@@ -113,7 +129,7 @@ def main() -> int:
 
     if isinstance(raw, bytes):
         code, excel_draft = multipart_import(
-            "/receipt-drafts/import",
+            "/pch-receipt-drafts/import",
             raw,
             "hanalite_receipt_template.xlsx",
             {"receipt_at": receipt_at, "reference_no": "VERIFY-EXCEL"},
@@ -144,7 +160,7 @@ def main() -> int:
 
     if pdf_bytes:
         code, pdf_draft = multipart_import(
-            "/receipt-drafts/import-pdf",
+            "/pch-receipt-drafts/import-pdf",
             pdf_bytes if isinstance(pdf_bytes, bytes) else bytes(pdf_bytes),
             "verify_receipt.pdf",
             {"receipt_at": receipt_at, "reference_no": "VERIFY-PDF"},
@@ -164,14 +180,14 @@ def main() -> int:
 
     approve_id = excel_id or manual_id
     if approve_id:
-        code, approved = req("POST", f"/receipt-drafts/{approve_id}/approve")
+        code, approved = req("POST", f"/pch-receipt-drafts/{approve_id}/approve")
         if code == 200 and approved.get("status") == "approved":
             ok("approve draft")
         else:
             fail("approve", str(approved))
 
     if manual_id:
-        code, listed = req("GET", "/receipt-drafts")
+        code, listed = req("GET", "/pch-receipt-drafts")
         if code == 200 and isinstance(listed, list) and len(listed) > 0:
             ok("list drafts")
         else:
@@ -189,6 +205,7 @@ def main() -> int:
     else:
         fail("inventory grgi list", str(grgi_list))
 
+    stock_lot: str | None = None
     code, movetyps = req("GET", "/inventory/movetyps")
     if code == 200 and isinstance(movetyps, list) and len(movetyps) >= 1:
         ok("inventory movetyps")
@@ -199,6 +216,7 @@ def main() -> int:
             "/inventory/grgi",
             {
                 "item_id": 1,
+                "location_id": location_id,
                 "lot": trace_lot,
                 "move_qty": 5,
                 "movetyps_id": gr_id,
@@ -207,6 +225,7 @@ def main() -> int:
         )
         if code == 201:
             ok("inventory manual GR")
+            stock_lot = trace_lot
         else:
             fail("inventory manual GR", str(grgi))
 
@@ -217,6 +236,92 @@ def main() -> int:
             fail("inventory lot trace", str(trace))
     else:
         fail("inventory movetyps", str(movetyps))
+
+    print("\nDelivery drafts (sls-delivery-drafts)")
+
+    code, raw_dlv_tpl = req("GET", "/sls-delivery-drafts/template")
+    if code == 200 and isinstance(raw_dlv_tpl, bytes) and len(raw_dlv_tpl) > 1000:
+        ok("delivery excel template download")
+    else:
+        fail("delivery excel template", f"code={code}")
+
+    delivery_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    delivery_lot = stock_lot or f"LOT-DLV-{datetime.now().strftime('%H%M%S')}"
+    code, delivery_draft = req(
+        "POST",
+        "/sls-delivery-drafts",
+        {
+            "delivery_at": delivery_at,
+            "reference_no": "VERIFY-DELIVERY-MANUAL",
+            "lines": [
+                {
+                    "item_id": 1,
+                    "location_id": location_id,
+                    "lot": delivery_lot,
+                    "qty": 2,
+                    "line_no": 1,
+                }
+            ],
+        },
+    )
+    if code == 201:
+        ok("delivery manual draft create")
+        delivery_manual_id = delivery_draft["sls_delivery_draft_id"]
+    else:
+        fail("delivery manual draft create", str(delivery_draft))
+        delivery_manual_id = None
+
+    if isinstance(raw_dlv_tpl, bytes) and stock_lot:
+        code, delivery_excel = multipart_import(
+            "/sls-delivery-drafts/import",
+            raw_dlv_tpl,
+            "hanalite_delivery_template.xlsx",
+            {"delivery_at": delivery_at, "reference_no": "VERIFY-DELIVERY-EXCEL"},
+        )
+        if code == 201 and delivery_excel.get("source_type") == "excel":
+            ok("delivery excel import")
+            delivery_excel_id = delivery_excel["sls_delivery_draft_id"]
+        else:
+            fail("delivery excel import", str(delivery_excel))
+            delivery_excel_id = None
+    else:
+        delivery_excel_id = None
+
+    code, delivery_list = req("GET", "/sls-delivery-drafts")
+    if code == 200 and isinstance(delivery_list, list):
+        ok("delivery list drafts")
+    else:
+        fail("delivery list drafts", str(delivery_list))
+
+    if delivery_manual_id:
+        code, delivery_detail = req("GET", f"/sls-delivery-drafts/{delivery_manual_id}")
+        if code == 200 and delivery_detail.get("sls_delivery_draft_id") == delivery_manual_id:
+            ok("delivery get draft")
+        else:
+            fail("delivery get draft", str(delivery_detail))
+
+    delivery_approve_id = delivery_manual_id if stock_lot else None
+    if delivery_approve_id:
+        code, delivery_approved = req("POST", f"/sls-delivery-drafts/{delivery_approve_id}/approve")
+        if code == 200 and delivery_approved.get("status") == "approved":
+            ok("delivery approve draft (GI)")
+        else:
+            fail("delivery approve draft", str(delivery_approved))
+
+        code, delivery_cancelled = req("POST", f"/sls-delivery-drafts/{delivery_approve_id}/cancel")
+        if code == 200 and delivery_cancelled.get("status") == "cancelled":
+            ok("delivery cancel approved draft")
+        else:
+            fail("delivery cancel approved draft", str(delivery_cancelled))
+    elif delivery_manual_id:
+        fail("delivery approve draft", "no stock lot from inventory GR; skipped GI test")
+
+    if delivery_excel_id:
+        code, delivery_pending_cancel = req("POST", f"/sls-delivery-drafts/{delivery_excel_id}/cancel")
+        if code == 200 and delivery_pending_cancel.get("status") == "cancelled":
+            ok("delivery cancel registered draft")
+        else:
+            fail("delivery cancel registered draft", str(delivery_pending_cancel))
 
     period = datetime.now().strftime("%Y%m")
     code, bal = req("POST", f"/inventory/balances?period={period}")

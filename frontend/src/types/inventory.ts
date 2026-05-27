@@ -1,6 +1,9 @@
 export interface CurrentStock {
   inv_current_id: number
   item_id: number
+  location_id: number
+  location_cd: string
+  location_nm: string
   item_nm: string
   itemtyp_nm: string
   lot: string
@@ -11,6 +14,9 @@ export interface CurrentStock {
 export interface GrgiHistory {
   inv_grgi_id: number
   item_id: number
+  location_id: number
+  location_cd: string
+  location_nm: string
   item_nm: string
   lot: string
   move_qty: string | number
@@ -27,6 +33,7 @@ export interface MoveTyp {
 
 export interface GrgiCreatePayload {
   item_id: number
+  location_id: number
   lot: string
   move_qty: number
   movetyps_id: number
@@ -37,6 +44,9 @@ export interface LotTraceResult {
   lot: string
   current: {
     item_id: number
+    location_id: number
+    location_cd: string
+    location_nm: string
     item_nm: string
     itemtyp_nm: string
     lot: string
@@ -45,6 +55,9 @@ export interface LotTraceResult {
   }[]
   history: {
     inv_grgi_id: number
+    location_id: number
+    location_cd: string
+    location_nm: string
     item_nm: string
     movetyps_nm: string
     move_qty: string | number
@@ -54,6 +67,9 @@ export interface LotTraceResult {
   }[]
   balances: {
     period_year_month: string
+    location_id: number
+    location_cd: string
+    location_nm: string
     item_nm: string
     lot: string
     beg_at: string
@@ -66,9 +82,21 @@ export interface BalanceItem {
   inv_balance_id: number
   period_year_month: string
   item_id: number
+  location_id: number
+  location_cd: string
+  location_nm: string
   item_nm: string
   lot: string
   beg_at: string
   beg_qty: string | number
   qty: string | number
+}
+
+export interface LocationMovePayload {
+  item_id: number
+  from_location_id: number
+  to_location_id: number
+  lot: string
+  qty: number
+  actual_at: string
 }

@@ -3,7 +3,7 @@
 
 SET NAMES utf8mb4;
 
-CREATE TABLE IF NOT EXISTS boms (
+CREATE TABLE IF NOT EXISTS m_boms (
     bom_id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
     p_item_id   INT UNSIGNED NOT NULL COMMENT 'Parent item (e.g. FG)',
     c_item_id   INT UNSIGNED NOT NULL COMMENT 'Child item (e.g. RM)',
@@ -15,6 +15,6 @@ CREATE TABLE IF NOT EXISTS boms (
     UNIQUE KEY uk_boms_parent_child (p_item_id, c_item_id),
     KEY idx_boms_parent (p_item_id),
     KEY idx_boms_child (c_item_id),
-    CONSTRAINT fk_boms_parent FOREIGN KEY (p_item_id) REFERENCES items (item_id),
-    CONSTRAINT fk_boms_child FOREIGN KEY (c_item_id) REFERENCES items (item_id)
+    CONSTRAINT fk_boms_parent FOREIGN KEY (p_item_id) REFERENCES m_items (item_id),
+    CONSTRAINT fk_boms_child FOREIGN KEY (c_item_id) REFERENCES m_items (item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

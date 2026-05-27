@@ -14,8 +14,8 @@ if ($lot !== '') {
     $stmt = db()->prepare(
         'SELECT c.lot, c.qty, c.updated_at, i.item_id, i.item_nm, t.itemtyp_nm
          FROM inv_currents c
-         JOIN items i ON i.item_id = c.item_id
-         JOIN itemtyps t ON t.itemtyp_id = i.itemtyp_id
+         JOIN m_items i ON i.item_id = c.item_id
+         JOIN m_itemtyps t ON t.itemtyp_id = i.itemtyp_id
          WHERE c.deleted_at IS NULL AND c.lot = ?
          ORDER BY i.item_id'
     );
@@ -25,8 +25,8 @@ if ($lot !== '') {
     $stmt = db()->prepare(
         'SELECT g.inv_grgi_id, g.move_qty, g.qty, g.actual_at, g.created_at, m.movetyps_nm, i.item_nm
          FROM inv_grgi g
-         JOIN items i ON i.item_id = g.item_id
-         JOIN movetyps m ON m.movetyps_id = g.movetyps_id
+         JOIN m_items i ON i.item_id = g.item_id
+         JOIN m_movetyps m ON m.movetyps_id = g.movetyps_id
          WHERE g.deleted_at IS NULL AND g.lot = ?
          ORDER BY g.actual_at ASC, g.inv_grgi_id ASC'
     );
@@ -36,7 +36,7 @@ if ($lot !== '') {
     $stmt = db()->prepare(
         'SELECT b.period_year_month, b.qty, b.beg_qty, b.beg_at, i.item_nm
          FROM inv_balances b
-         JOIN items i ON i.item_id = b.item_id
+         JOIN m_items i ON i.item_id = b.item_id
          WHERE b.deleted_at IS NULL AND b.lot = ?
          ORDER BY b.period_year_month DESC'
     );

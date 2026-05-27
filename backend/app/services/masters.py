@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.inventory import MoveTyp
-from app.models.masters import Item, ItemTyp, Supplier
+from app.models.masters import Item, ItemTyp, Location, Supplier
 from app.schemas.masters import (
     ItemCreate,
     ItemDetailOut,
@@ -17,6 +17,8 @@ from app.schemas.masters import (
     ItemSearchOut,
     ItemTypCreate,
     ItemTypOut,
+    LocationCreate,
+    LocationOut,
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
@@ -107,6 +109,94 @@ def delete_movetyp(db: Session, movetyps_id: int) -> None:
     if not row or row.deleted_at is not None:
         raise MasterError("Move type not found.")
     _soft_delete(row)
+
+
+def list_locations(db: Session) -> list[LocationOut]:
+    rows = db.scalars(
+        select(Location).where(Location.deleted_at.is_(None)).order_by(Location.location_id)
+    ).all()
+    return [LocationOut.model_validate(r) for r in rows]
+
+
+def create_location(db: Session, payload: LocationCreate) -> LocationOut:
+    now = _now()
+    row = Location(
+        location_cd=payload.location_cd.strip(),
+        location_nm=payload.location_nm.strip(),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Location code or name already exists.") from e
+    return LocationOut.model_validate(row)
+
+
+def delete_location(db: Session, location_id: int) -> None:
+    row = db.get(Location, location_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Location not found.")
+    _soft_delete(row)
+
+
+def get_default_location_id(db: Session) -> int:
+    row = db.scalar(
+        select(Location)
+        .where(Location.deleted_at.is_(None))
+        .order_by(Location.location_id.asc())
+        .limit(1)
+    )
+    if not row:
+        raise MasterError("No active location found. Create at least one location in m_locations.")
+    return row.location_id
+
+
+def resolve_location_id(db: Session, location_id: int | None) -> int:
+    if location_id is None:
+        return get_default_location_id(db)
+    row = db.get(Location, location_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError(f"Location {location_id} not found.")
+    return location_id
+
+
+def resolve_location_by_ref(
+    db: Session,
+    *,
+    location_id: int | None = None,
+    location_cd: str | None = None,
+    location_nm: str | None = None,
+) -> Location:
+    if location_id is not None:
+        row = db.get(Location, location_id)
+        if row and row.deleted_at is None:
+            return row
+        raise MasterError(f"Location id {location_id} not found.")
+
+    if location_cd is not None and str(location_cd).strip():
+        code = str(location_cd).strip()
+        row = db.scalar(select(Location).where(Location.location_cd == code, Location.deleted_at.is_(None)))
+        if row:
+            return row
+        raise MasterError(f"Location code '{code}' not found.")
+
+    if location_nm is not None and str(location_nm).strip():
+        name = str(location_nm).strip()
+        row = db.scalar(
+            select(Location).where(Location.location_nm == name, Location.deleted_at.is_(None)).limit(1)
+        )
+        if row:
+            return row
+        raise MasterError(f"Location name '{name}' not found.")
+
+    row = db.scalar(
+        select(Location).where(Location.deleted_at.is_(None)).order_by(Location.location_id.asc()).limit(1)
+    )
+    if row:
+        return row
+    raise MasterError("No active location found. Create at least one location in m_locations.")
 
 
 def _normalize_item_cd(item_cd: str) -> str:

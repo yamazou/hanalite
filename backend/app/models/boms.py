@@ -12,11 +12,11 @@ if TYPE_CHECKING:
 
 
 class Bom(Base):
-    __tablename__ = "boms"
+    __tablename__ = "m_boms"
 
     bom_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    p_item_id: Mapped[int] = mapped_column(ForeignKey("items.item_id"))
-    c_item_id: Mapped[int] = mapped_column(ForeignKey("items.item_id"))
+    p_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
+    c_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
     c_req_qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)

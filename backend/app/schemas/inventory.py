@@ -7,6 +7,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class CurrentStockItem(BaseModel):
     inv_current_id: int
     item_id: int
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     itemtyp_nm: str
     lot: str
@@ -17,6 +20,9 @@ class CurrentStockItem(BaseModel):
 class GrgiHistoryItem(BaseModel):
     inv_grgi_id: int
     item_id: int
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     lot: str
     move_qty: Decimal
@@ -28,6 +34,7 @@ class GrgiHistoryItem(BaseModel):
 
 class GrgiCreate(BaseModel):
     item_id: int = Field(gt=0)
+    location_id: int = Field(gt=0)
     lot: str = Field(min_length=1, max_length=50)
     move_qty: Decimal = Field(gt=0)
     movetyps_id: int = Field(gt=0)
@@ -42,6 +49,9 @@ class MoveTypOut(BaseModel):
 
 class LotTraceCurrent(BaseModel):
     item_id: int
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     itemtyp_nm: str
     lot: str
@@ -51,6 +61,9 @@ class LotTraceCurrent(BaseModel):
 
 class LotTraceHistory(BaseModel):
     inv_grgi_id: int
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     movetyps_nm: str
     move_qty: Decimal
@@ -61,6 +74,9 @@ class LotTraceHistory(BaseModel):
 
 class LotTraceBalance(BaseModel):
     period_year_month: str
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     lot: str
     beg_at: datetime
@@ -79,6 +95,9 @@ class BalanceItem(BaseModel):
     inv_balance_id: int
     period_year_month: str
     item_id: int
+    location_id: int
+    location_cd: str
+    location_nm: str
     item_nm: str
     lot: str
     beg_at: datetime
@@ -89,3 +108,12 @@ class BalanceItem(BaseModel):
 class BalanceCreateResult(BaseModel):
     period_year_month: str
     rows_saved: int
+
+
+class LocationMoveCreate(BaseModel):
+    item_id: int = Field(gt=0)
+    from_location_id: int = Field(gt=0)
+    to_location_id: int = Field(gt=0)
+    lot: str = Field(min_length=1, max_length=50)
+    qty: Decimal = Field(gt=0)
+    actual_at: datetime

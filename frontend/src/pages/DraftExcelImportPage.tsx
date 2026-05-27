@@ -2,10 +2,16 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
+import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { Supplier } from '../types'
 import { datetimeLocalToIso, toDatetimeLocalValue } from '../utils/format'
 
-export function DraftExcelImportPage() {
+type Props = {
+  variant?: DraftVariant
+}
+
+export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
+  const copy = getDraftPageCopy(variant)
   const navigate = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [receiptAt, setReceiptAt] = useState(toDatetimeLocalValue())
@@ -21,14 +27,14 @@ export function DraftExcelImportPage() {
     api
       .listSuppliers()
       .then(setSuppliers)
-      .catch((e) => setError(e instanceof Error ? e.message : 'マスタ読み込み失敗'))
+      .catch((e) => setError(e instanceof Error ? e.message : copy.masterLoadFail))
       .finally(() => setLoading(false))
-  }, [])
+  }, [copy.masterLoadFail])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!file) {
-      setError('.xlsx ファイルを選択してください。')
+      setError(copy.selectExcel)
       return
     }
     setSubmitting(true)
@@ -39,10 +45,10 @@ export function DraftExcelImportPage() {
         suppliers_id: suppliersId === '' ? undefined : suppliersId,
         reference_no: referenceNo.trim() || undefined,
         notes: notes.trim() || undefined,
-      })
-      navigate(`/drafts/${draft.inv_receipt_draft_id}`)
+      }, variant)
+      navigate(copy.listPathWithId(draft.inv_receipt_draft_id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '取込に失敗しました')
+      setError(err instanceof Error ? err.message : copy.importFail)
     } finally {
       setSubmitting(false)
     }
@@ -52,45 +58,52 @@ export function DraftExcelImportPage() {
     <>
       <header className="page-header">
         <div>
-          <Link to="/" className="back-link">
-            ← 一覧
+          <Link to={copy.listPath} className="back-link">
+            {copy.backToList}
           </Link>
-          <h1>Excel 入荷リスト取込</h1>
-          <p className="page-desc">
-            テンプレートに明細を入力してアップロード。未承認ドラフトとして保存されます。
-          </p>
+          <h1>{copy.excelTitle}</h1>
+          <p className="page-desc">{copy.excelDesc}</p>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={() => api.downloadTemplate()}>
-          テンプレート DL
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => api.downloadTemplate(variant)}
+        >
+          {copy.templateBtn}
         </button>
       </header>
 
       {error && <Alert type="error" message={error} />}
 
       <div className="card hint">
-        <strong>Excel 形式</strong>
+        <strong>{copy.excelFormatTitle}</strong>
         <ul className="help-list">
           <li>
-            <code>lines</code> シート（または先頭シート）1行目: ヘッダ
-          </li>
-          <li>必須列: <code>lot</code>（ロット）, <code>qty</code>（数量）</li>
-          <li>
-            品目: <code>item_id</code> / <code>item_cd</code> / <code>item_nm</code> のいずれか
+            <code>lines</code> sheet (or first sheet), row 1: headers
           </li>
           <li>
-            任意: <code>header</code> シートで入荷日・参照番号（画面入力が優先）
+            Required: <code>lot</code>, <code>qty</code>
+          </li>
+          <li>
+            Item: one of <code>item_id</code>, <code>item_cd</code>, <code>item_nm</code>
+          </li>
+          <li>
+            Location: one of <code>location_id</code>, <code>location_cd</code>, <code>location_nm</code>
+          </li>
+          <li>
+            Optional: <code>header</code> sheet for date/reference (form values take priority)
           </li>
         </ul>
       </div>
 
       {loading ? (
-        <p className="muted">読み込み中…</p>
+        <p className="muted">{copy.loadingText}</p>
       ) : (
         <form className="card" onSubmit={handleSubmit}>
-          <h2>アップロード</h2>
+          <h2>{copy.uploadTitle}</h2>
           <div className="form-grid">
             <label className="full">
-              Excel ファイル (.xlsx)
+              {copy.excelFileLabel}
               <input
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -99,7 +112,7 @@ export function DraftExcelImportPage() {
               />
             </label>
             <label>
-              入荷日時
+              {copy.dateTimeLabel}
               <input
                 type="datetime-local"
                 value={receiptAt}
@@ -108,18 +121,18 @@ export function DraftExcelImportPage() {
               />
             </label>
             <label>
-              参照番号
+              {copy.referenceCol}
               <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} />
             </label>
             <label>
-              仕入先
+              {copy.supplierLabel}
               <select
                 value={suppliersId}
                 onChange={(e) =>
                   setSuppliersId(e.target.value === '' ? '' : Number(e.target.value))
                 }
               >
-                <option value="">（未選択）</option>
+                <option value="">{copy.noneOption}</option>
                 {suppliers.map((s) => (
                   <option key={s.suppliers_id} value={s.suppliers_id}>
                     {s.suppliers_nm}
@@ -128,17 +141,17 @@ export function DraftExcelImportPage() {
               </select>
             </label>
             <label className="full">
-              備考
+              {copy.notesLabel}
               <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
             </label>
           </div>
 
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? '取込中…' : '取込してドラフト作成'}
+              {submitting ? copy.submittingImport : copy.submitImport}
             </button>
-            <Link to="/" className="btn btn-secondary">
-              キャンセル
+            <Link to={copy.listPath} className="btn btn-secondary">
+              {copy.cancelBtn}
             </Link>
           </div>
         </form>

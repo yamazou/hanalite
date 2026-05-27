@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -9,7 +9,14 @@ from sqlalchemy import select
 
 from app.database import get_db
 from app.models.drafts import InvReceiptDraft
-from app.schemas.drafts import DraftCreate, DraftLineCreate, DraftListItem, DraftRead, DraftStatus
+from app.schemas.drafts import (
+    DraftCreate,
+    DraftLineCreate,
+    DraftListItem,
+    DraftRead,
+    DraftStatus,
+    DraftUpdate,
+)
 from app.services.drafts import (
     DraftServiceError,
     add_draft_line,
@@ -18,6 +25,7 @@ from app.services.drafts import (
     create_draft,
     get_draft,
     list_drafts,
+    update_draft,
 )
 from app.services.excel_import import ExcelImportError, build_template_workbook, parse_excel_to_draft_create
 from app.services.pdf_import import (
@@ -27,15 +35,28 @@ from app.services.pdf_import import (
     save_pdf_file,
 )
 
-router = APIRouter(prefix="/receipt-drafts", tags=["receipt-drafts"])
+router = APIRouter(prefix="/pch-receipt-drafts", tags=["pch-receipt-drafts"])
 
 
 @router.get("", response_model=list[DraftListItem])
 def api_list_drafts(
     db: Annotated[Session, Depends(get_db)],
     status: DraftStatus | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    suppliers_id: int | None = Query(default=None, gt=0),
+    item_id: int | None = Query(default=None, gt=0),
+    lot: str | None = Query(default=None, min_length=1, max_length=50),
 ):
-    return list_drafts(db, status=status)
+    return list_drafts(
+        db,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        suppliers_id=suppliers_id,
+        item_id=item_id,
+        lot=lot,
+    )
 
 
 @router.post("", response_model=DraftRead, status_code=201)
@@ -142,6 +163,18 @@ async def api_import_pdf(
         return get_draft(db, draft.inv_receipt_draft_id)
     except PdfImportError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except DraftServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.put("/{draft_id}", response_model=DraftRead)
+def api_update_draft(
+    draft_id: int,
+    payload: DraftUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        return update_draft(db, draft_id, payload)
     except DraftServiceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

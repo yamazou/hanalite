@@ -13,11 +13,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($name === '') {
                 throw new RuntimeException('Name is required.');
             }
-            $stmt = db()->prepare('INSERT INTO movetyps (movetyps_nm) VALUES (?)');
+            $stmt = db()->prepare('INSERT INTO m_movetyps (movetyps_nm) VALUES (?)');
             $stmt->execute([$name]);
             flash('success', 'Move type created.');
         } elseif ($action === 'delete') {
-            soft_delete_table('movetyps', 'movetyps_id', (int) ($_POST['movetyps_id'] ?? 0));
+            soft_delete_table('m_movetyps', 'movetyps_id', (int) ($_POST['movetyps_id'] ?? 0));
             flash('success', 'Move type deleted.');
         }
     } catch (Throwable $e) {
@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('/masters/movetyps.php');
 }
 
-$rows = db()->query('SELECT movetyps_id, movetyps_nm, created_at FROM movetyps WHERE deleted_at IS NULL ORDER BY movetyps_id')->fetchAll();
+$rows = db()->query('SELECT movetyps_id, movetyps_nm, created_at FROM m_movetyps WHERE deleted_at IS NULL ORDER BY movetyps_id')->fetchAll();
 ?>
 <div class="page-header"><h1>Move Types</h1></div>
 

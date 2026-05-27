@@ -14,6 +14,7 @@ import type {
   ItemSearchRow,
   ItemTyp,
   MoveTypMaster,
+  LocationMaster,
   SupplierMaster,
 } from '../types/masters'
 import type {
@@ -21,12 +22,77 @@ import type {
   CurrentStock,
   GrgiCreatePayload,
   GrgiHistory,
+  LocationMovePayload,
   LotTraceResult,
   MoveTyp,
 } from '../types/inventory'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 const API_PREFIX = '/api/v1'
+export type DraftListFilters = {
+  status?: DraftStatus
+  date_from?: string
+  date_to?: string
+  suppliers_id?: number
+  item_id?: number
+  lot?: string
+}
+
+type DraftKind = 'receipt' | 'delivery'
+
+function draftBase(kind: DraftKind) {
+  return kind === 'delivery' ? '/sls-delivery-drafts' : '/pch-receipt-drafts'
+}
+
+function normalizeListItem(kind: DraftKind, row: any): DraftListItem {
+  if (kind === 'receipt') return row as DraftListItem
+  return {
+    inv_receipt_draft_id: row.sls_delivery_draft_id,
+    status: row.status,
+    source_type: row.source_type,
+    receipt_at: row.delivery_at,
+    reference_no: row.reference_no,
+    supplier_nm: row.supplier_nm,
+    notes: row.notes ?? null,
+    line_count: row.line_count,
+    approved_at: row.approved_at ?? null,
+    cancelled_at: row.cancelled_at ?? null,
+    created_at: row.created_at,
+    has_attachment: false,
+    parse_message: null,
+  }
+}
+
+function normalizeDetail(kind: DraftKind, row: any): DraftDetail {
+  if (kind === 'receipt') return row as DraftDetail
+  return {
+    inv_receipt_draft_id: row.sls_delivery_draft_id,
+    status: row.status,
+    source_type: row.source_type,
+    receipt_at: row.delivery_at,
+    suppliers_id: row.suppliers_id,
+    supplier_nm: row.supplier_nm,
+    reference_no: row.reference_no,
+    notes: row.notes,
+    approved_at: row.approved_at,
+    cancelled_at: row.cancelled_at,
+    created_at: row.created_at,
+    attachment_original_name: null,
+    has_attachment: false,
+    parse_message: null,
+    lines: (row.lines ?? []).map((ln: any) => ({
+      inv_receipt_draft_line_id: ln.sls_delivery_draft_line_id,
+      line_no: ln.line_no,
+      item_id: ln.item_id,
+      location_id: ln.location_id,
+      location_cd: ln.location_cd,
+      location_nm: ln.location_nm,
+      item_nm: ln.item_nm,
+      lot: ln.lot,
+      qty: ln.qty,
+    })),
+  }
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${API_PREFIX}${path}`
@@ -65,24 +131,65 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<{ status: string }>('/health'),
 
-  listDrafts: (status?: DraftStatus) => {
-    const q = status ? `?status=${status}` : ''
-    return request<DraftListItem[]>(`/receipt-drafts${q}`)
+  listDrafts: async (filters: DraftListFilters = {}, kind: DraftKind = 'receipt') => {
+    const params = new URLSearchParams()
+    if (filters.status) params.set('status', filters.status)
+    if (filters.date_from) params.set('date_from', filters.date_from)
+    if (filters.date_to) params.set('date_to', filters.date_to)
+    if (filters.suppliers_id != null) params.set('suppliers_id', String(filters.suppliers_id))
+    if (filters.item_id != null) params.set('item_id', String(filters.item_id))
+    if (filters.lot?.trim()) params.set('lot', filters.lot.trim())
+    const q = params.toString()
+    const rows = await request<any[]>(`${draftBase(kind)}${q ? `?${q}` : ''}`)
+    return rows.map((row) => normalizeListItem(kind, row))
   },
 
-  getDraft: (id: number) => request<DraftDetail>(`/receipt-drafts/${id}`),
+  getDraft: async (id: number, kind: DraftKind = 'receipt') => {
+    const row = await request<any>(`${draftBase(kind)}/${id}`)
+    return normalizeDetail(kind, row)
+  },
 
-  createDraft: (payload: DraftCreatePayload) =>
-    request<DraftDetail>('/receipt-drafts', {
+  createDraft: async (payload: DraftCreatePayload, kind: DraftKind = 'receipt') => {
+    const body =
+      kind === 'delivery'
+        ? { ...payload, delivery_at: payload.receipt_at, receipt_at: undefined }
+        : payload
+    const row = await request<any>(draftBase(kind), {
       method: 'POST',
-      body: JSON.stringify(payload),
-    }),
+      body: JSON.stringify(body),
+    })
+    return normalizeDetail(kind, row)
+  },
 
-  approveDraft: (id: number) =>
-    request<DraftDetail>(`/receipt-drafts/${id}/approve`, { method: 'POST' }),
+  updateDraft: async (id: number, payload: DraftCreatePayload, kind: DraftKind = 'receipt') => {
+    const lines =
+      kind === 'delivery'
+        ? payload.lines.map((ln) => ({
+            ...ln,
+            sls_delivery_draft_line_id: ln.inv_receipt_draft_line_id,
+            inv_receipt_draft_line_id: undefined,
+          }))
+        : payload.lines
+    const body =
+      kind === 'delivery'
+        ? { ...payload, lines, delivery_at: payload.receipt_at, receipt_at: undefined }
+        : { ...payload, lines }
+    const row = await request<any>(`${draftBase(kind)}/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    })
+    return normalizeDetail(kind, row)
+  },
 
-  cancelDraft: (id: number) =>
-    request<DraftDetail>(`/receipt-drafts/${id}/cancel`, { method: 'POST' }),
+  approveDraft: async (id: number, kind: DraftKind = 'receipt') => {
+    const row = await request<any>(`${draftBase(kind)}/${id}/approve`, { method: 'POST' })
+    return normalizeDetail(kind, row)
+  },
+
+  cancelDraft: async (id: number, kind: DraftKind = 'receipt') => {
+    const row = await request<any>(`${draftBase(kind)}/${id}/cancel`, { method: 'POST' })
+    return normalizeDetail(kind, row)
+  },
 
   listItems: () => request<Item[]>('/masters/items'),
   listSuppliers: () => request<Supplier[]>('/masters/suppliers'),
@@ -114,6 +221,15 @@ export const api = {
   deleteMoveTyp: (movetyps_id: number) =>
     request<void>(`/masters/movetyps/${movetyps_id}`, { method: 'DELETE' }),
 
+  listLocationsMaster: () => request<LocationMaster[]>('/masters/locations'),
+  createLocation: (location_cd: string, location_nm: string) =>
+    request<LocationMaster>('/masters/locations', {
+      method: 'POST',
+      body: JSON.stringify({ location_cd, location_nm }),
+    }),
+  deleteLocation: (location_id: number) =>
+    request<void>(`/masters/locations/${location_id}`, { method: 'DELETE' }),
+
   listItemsMaster: () => request<ItemListRow[]>('/masters/items'),
   searchItems: (q: string, limit = 20) =>
     request<ItemSearchRow[]>(
@@ -143,14 +259,14 @@ export const api = {
 
   deleteBom: (bom_id: number) => request<void>(`/boms/${bom_id}`, { method: 'DELETE' }),
 
-  downloadTemplate: async () => {
-    const url = `${API_BASE}${API_PREFIX}/receipt-drafts/template`
+  downloadTemplate: async (kind: DraftKind = 'receipt') => {
+    const url = `${API_BASE}${API_PREFIX}${draftBase(kind)}/template`
     const res = await fetch(url)
-    if (!res.ok) throw new Error('テンプレートのダウンロードに失敗しました')
+    if (!res.ok) throw new Error('Failed to download template.')
     const blob = await res.blob()
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = 'hanalite_receipt_template.xlsx'
+    a.download = kind === 'delivery' ? 'hanalite_delivery_template.xlsx' : 'hanalite_receipt_template.xlsx'
     a.click()
     URL.revokeObjectURL(a.href)
   },
@@ -162,18 +278,25 @@ export const api = {
       suppliers_id?: number
       reference_no?: string
       notes?: string
-    }
+    },
+    kind: DraftKind = 'receipt'
   ) => {
     const form = new FormData()
     form.append('file', file)
-    if (fields.receipt_at) form.append('receipt_at', fields.receipt_at)
     if (fields.suppliers_id != null) form.append('suppliers_id', String(fields.suppliers_id))
     if (fields.reference_no) form.append('reference_no', fields.reference_no)
     if (fields.notes) form.append('notes', fields.notes)
-    return request<DraftDetail>('/receipt-drafts/import', {
+    const path = kind === 'delivery' ? '/sls-delivery-drafts/import' : '/pch-receipt-drafts/import'
+    if (kind === 'delivery' && fields.receipt_at) {
+      form.append('delivery_at', fields.receipt_at)
+    } else if (fields.receipt_at) {
+      form.append('receipt_at', fields.receipt_at)
+    }
+    const row = await request<any>(path, {
       method: 'POST',
       body: form,
     })
+    return normalizeDetail(kind, row)
   },
 
   importPdf: async (
@@ -191,32 +314,42 @@ export const api = {
     if (fields.suppliers_id != null) form.append('suppliers_id', String(fields.suppliers_id))
     if (fields.reference_no) form.append('reference_no', fields.reference_no)
     if (fields.notes) form.append('notes', fields.notes)
-    return request<DraftDetail>('/receipt-drafts/import-pdf', {
+    return request<DraftDetail>('/pch-receipt-drafts/import-pdf', {
       method: 'POST',
       body: form,
     })
   },
 
-  addDraftLine: (draftId: number, line: DraftLineInput) =>
-    request<DraftDetail>(`/receipt-drafts/${draftId}/lines`, {
+  addDraftLine: async (draftId: number, line: DraftLineInput, kind: DraftKind = 'receipt') => {
+    const row = await request<any>(`${draftBase(kind)}/${draftId}/lines`, {
       method: 'POST',
       body: JSON.stringify(line),
-    }),
+    })
+    return normalizeDetail(kind, row)
+  },
 
-  attachmentUrl: (draftId: number) =>
-    `${API_BASE}${API_PREFIX}/receipt-drafts/${draftId}/attachment`,
+  attachmentUrl: (draftId: number, kind: DraftKind = 'receipt') =>
+    `${API_BASE}${API_PREFIX}${draftBase(kind)}/${draftId}/attachment`,
 
-  listCurrentStock: (params?: { lot?: string; item_id?: number; include_zero?: boolean }) => {
+  listCurrentStock: (params?: {
+    lot?: string
+    item_id?: number
+    location_id?: number
+    include_zero?: boolean
+  }) => {
     const q = new URLSearchParams()
     if (params?.lot) q.set('lot', params.lot)
     if (params?.item_id != null) q.set('item_id', String(params.item_id))
+    if (params?.location_id != null) q.set('location_id', String(params.location_id))
     if (params?.include_zero) q.set('include_zero', 'true')
     const qs = q.toString()
     return request<CurrentStock[]>(`/inventory/currents${qs ? `?${qs}` : ''}`)
   },
 
-  listGrgiHistory: (limit = 50) =>
-    request<GrgiHistory[]>(`/inventory/grgi?limit=${limit}`),
+  listGrgiHistory: (limit = 50, location_id?: number) =>
+    request<GrgiHistory[]>(
+      `/inventory/grgi?limit=${limit}${location_id != null ? `&location_id=${location_id}` : ''}`
+    ),
 
   listMovetyps: () => request<MoveTyp[]>('/inventory/movetyps'),
 
@@ -226,17 +359,29 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  traceLot: (lot: string) =>
-    request<LotTraceResult>(`/inventory/trace?lot=${encodeURIComponent(lot)}`),
+  createLocationMove: (payload: LocationMovePayload) =>
+    request<GrgiHistory[]>('/inventory/move', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
-  listBalances: (period?: string) => {
+  traceLot: (lot: string, location_id?: number) =>
+    request<LotTraceResult>(
+      `/inventory/trace?lot=${encodeURIComponent(lot)}${
+        location_id != null ? `&location_id=${location_id}` : ''
+      }`
+    ),
+
+  listBalances: (period?: string, location_id?: number) => {
     const q = period ? `?period=${period}` : ''
-    return request<BalanceItem[]>(`/inventory/balances${q}`)
+    const sep = q ? '&' : '?'
+    const q2 = location_id != null ? `${q}${sep}location_id=${location_id}` : q
+    return request<BalanceItem[]>(`/inventory/balances${q2}`)
   },
 
-  createPeriodBalance: (period: string) =>
+  createPeriodBalance: (period: string, location_id?: number) =>
     request<{ period_year_month: string; rows_saved: number }>(
-      `/inventory/balances?period=${period}`,
+      `/inventory/balances?period=${period}${location_id != null ? `&location_id=${location_id}` : ''}`,
       { method: 'POST' }
     ),
 }

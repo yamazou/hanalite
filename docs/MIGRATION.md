@@ -6,7 +6,7 @@
 |------|--------|--------|
 | 場所 | `hanalite/*.php` | `hanalite/backend/` |
 | URL | http://localhost:8080/hanalite/ | http://127.0.0.1:8000/docs |
-| 入荷ドラフト | 未実装 | `receipt-drafts` API |
+| 入荷ドラフト | 未実装 | `pch-receipt-drafts` API |
 | マスタ CRUD | 画面あり | API のみ（React で再実装） |
 
 ## 移行ステップ
@@ -32,7 +32,7 @@ ALTER TABLE inv_grgi
 ### Step 3 — 動作確認（curl / Swagger）
 
 1. マスタに品目が無ければ PHP 画面または SQL で登録
-2. Swagger で `POST /api/v1/receipt-drafts` 作成
+2. Swagger で `POST /api/v1/pch-receipt-drafts` 作成
 3. `POST .../approve` で在庫反映
 4. PHP の Current Stock / Lot Trace でロット確認
 

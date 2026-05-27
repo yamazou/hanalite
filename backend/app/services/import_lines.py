@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.schemas.drafts import DraftLineCreate
-from app.services.masters import MasterError, resolve_item_by_ref
+from app.services.masters import MasterError, resolve_item_by_ref, resolve_location_by_ref
 
 HEADER_ALIASES: dict[str, list[str]] = {
     "item_id": ["item_id", "品目id", "品目ID", "itemid", "id"],
@@ -17,6 +17,9 @@ HEADER_ALIASES: dict[str, list[str]] = {
     "lot": ["lot", "ロット", "lot_no", "lotno", "ロット番号", "ロットno"],
     "qty": ["qty", "数量", "quantity", "入荷数量", "入数"],
     "line_no": ["line_no", "行", "行番号", "lineno", "line", "#", "no"],
+    "location_id": ["location_id", "ロケーションid", "ロケーションID", "loc_id"],
+    "location_cd": ["location_cd", "ロケーションコード", "loc_cd", "loc_code"],
+    "location_nm": ["location_nm", "ロケーション名", "location_name", "loc_name"],
 }
 
 
@@ -128,6 +131,31 @@ def parse_data_rows(
             _cell_value(row_tuple, col_map.get("item_nm")),
             row_num,
         )
+        location_id_raw = _cell_value(row_tuple, col_map.get("location_id"))
+        location_cd_raw = _cell_value(row_tuple, col_map.get("location_cd"))
+        location_nm_raw = _cell_value(row_tuple, col_map.get("location_nm"))
+        parsed_location_id: int | None = None
+        if location_id_raw is not None and str(location_id_raw).strip() != "":
+            try:
+                parsed_location_id = int(float(str(location_id_raw)))
+            except (ValueError, TypeError) as e:
+                raise ExcelImportError(f"Invalid location_id: {location_id_raw}", row_num) from e
+        location_cd = (
+            str(location_cd_raw).strip()
+            if location_cd_raw is not None and str(location_cd_raw).strip()
+            else None
+        )
+        location_nm = (
+            str(location_nm_raw).strip()
+            if location_nm_raw is not None and str(location_nm_raw).strip()
+            else None
+        )
+        try:
+            location = resolve_location_by_ref(
+                db, location_id=parsed_location_id, location_cd=location_cd, location_nm=location_nm
+            )
+        except MasterError as e:
+            raise ExcelImportError(str(e), row_num) from e
 
         line_no_raw = _cell_value(row_tuple, col_map.get("line_no"))
         if line_no_raw is not None and str(line_no_raw).strip() != "":
@@ -139,6 +167,7 @@ def parse_data_rows(
         lines.append(
             DraftLineCreate(
                 item_id=item_id,
+                location_id=location.location_id,
                 lot=str(lot_val).strip(),
                 qty=qty,
                 line_no=parsed_line_no,

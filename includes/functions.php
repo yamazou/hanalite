@@ -69,7 +69,7 @@ function format_datetime(?string $dt): string
 
 function soft_delete_table(string $table, string $pk, int $id): void
 {
-    $allowed = ['itemtyps', 'suppliers', 'movetyps', 'items'];
+    $allowed = ['m_itemtyps', 'm_suppliers', 'm_movetyps', 'm_items'];
     if (!in_array($table, $allowed, true)) {
         throw new InvalidArgumentException('Invalid table');
     }
@@ -79,24 +79,24 @@ function soft_delete_table(string $table, string $pk, int $id): void
 
 function get_itemtyps(): array
 {
-    return db()->query('SELECT itemtyp_id, itemtyp_nm FROM itemtyps WHERE deleted_at IS NULL ORDER BY itemtyp_id')->fetchAll();
+    return db()->query('SELECT itemtyp_id, itemtyp_nm FROM m_itemtyps WHERE deleted_at IS NULL ORDER BY itemtyp_id')->fetchAll();
 }
 
 function get_suppliers(): array
 {
-    return db()->query('SELECT suppliers_id, suppliers_nm FROM suppliers WHERE deleted_at IS NULL ORDER BY suppliers_id')->fetchAll();
+    return db()->query('SELECT suppliers_id, suppliers_nm FROM m_suppliers WHERE deleted_at IS NULL ORDER BY suppliers_id')->fetchAll();
 }
 
 function get_movetyps(): array
 {
-    return db()->query('SELECT movetyps_id, movetyps_nm FROM movetyps WHERE deleted_at IS NULL ORDER BY movetyps_id')->fetchAll();
+    return db()->query('SELECT movetyps_id, movetyps_nm FROM m_movetyps WHERE deleted_at IS NULL ORDER BY movetyps_id')->fetchAll();
 }
 
 function get_items(): array
 {
     $sql = 'SELECT i.item_id, i.item_nm, t.itemtyp_nm
-            FROM items i
-            JOIN itemtyps t ON t.itemtyp_id = i.itemtyp_id AND t.deleted_at IS NULL
+            FROM m_items i
+            JOIN m_itemtyps t ON t.itemtyp_id = i.itemtyp_id AND t.deleted_at IS NULL
             WHERE i.deleted_at IS NULL
             ORDER BY i.item_id';
     return db()->query($sql)->fetchAll();
@@ -114,7 +114,7 @@ function supplier_options(array $suppliers, ?int $selected): string
 
 function get_item(int $item_id): ?array
 {
-    $stmt = db()->prepare('SELECT * FROM items WHERE item_id = ? AND deleted_at IS NULL');
+    $stmt = db()->prepare('SELECT * FROM m_items WHERE item_id = ? AND deleted_at IS NULL');
     $stmt->execute([$item_id]);
     $row = $stmt->fetch();
     return $row ?: null;
@@ -125,7 +125,7 @@ function process_grgi(int $item_id, string $lot, float $move_qty, int $movetyps_
     $pdo = db();
     $pdo->beginTransaction();
     try {
-        $movetyp = $pdo->prepare('SELECT movetyps_nm FROM movetyps WHERE movetyps_id = ? AND deleted_at IS NULL');
+        $movetyp = $pdo->prepare('SELECT movetyps_nm FROM m_movetyps WHERE movetyps_id = ? AND deleted_at IS NULL');
         $movetyp->execute([$movetyps_id]);
         $movetyp_nm = $movetyp->fetchColumn();
         if (!$movetyp_nm) {

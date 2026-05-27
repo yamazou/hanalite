@@ -31,8 +31,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $history = db()->query(
     'SELECT g.inv_grgi_id, g.lot, g.move_qty, g.qty, g.actual_at, m.movetyps_nm, i.item_nm
      FROM inv_grgi g
-     JOIN items i ON i.item_id = g.item_id
-     JOIN movetyps m ON m.movetyps_id = g.movetyps_id
+     JOIN m_items i ON i.item_id = g.item_id
+     JOIN m_movetyps m ON m.movetyps_id = g.movetyps_id
      WHERE g.deleted_at IS NULL
      ORDER BY g.actual_at DESC, g.inv_grgi_id DESC
      LIMIT 50'

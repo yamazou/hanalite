@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.inventory import InvBalance, InvCurrent, InvGrgi, MoveTyp
-from app.models.masters import Item, ItemTyp
+from app.models.masters import Item, ItemTyp, Location
 from app.schemas.inventory import (
     BalanceItem,
     CurrentStockItem,
@@ -31,12 +31,14 @@ def list_current_stock(
     *,
     lot: str | None = None,
     item_id: int | None = None,
+    location_id: int | None = None,
     include_zero: bool = False,
 ) -> list[CurrentStockItem]:
     stmt = (
-        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm)
+        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
+        .join(Location, Location.location_id == InvCurrent.location_id)
         .where(InvCurrent.deleted_at.is_(None), Item.deleted_at.is_(None))
     )
     if not include_zero:
@@ -45,37 +47,49 @@ def list_current_stock(
         stmt = stmt.where(InvCurrent.lot.like(f"%{lot}%"))
     if item_id:
         stmt = stmt.where(InvCurrent.item_id == item_id)
-    stmt = stmt.order_by(InvCurrent.lot, InvCurrent.item_id)
+    if location_id:
+        stmt = stmt.where(InvCurrent.location_id == location_id)
+    stmt = stmt.order_by(InvCurrent.location_id, InvCurrent.lot, InvCurrent.item_id)
 
     rows = db.execute(stmt).all()
     return [
         CurrentStockItem(
             inv_current_id=c.inv_current_id,
             item_id=c.item_id,
+            location_id=c.location_id,
+            location_cd=location_cd,
+            location_nm=location_nm,
             item_nm=item_nm,
             itemtyp_nm=itemtyp_nm,
             lot=c.lot,
             qty=c.qty,
             updated_at=c.updated_at,
         )
-        for c, item_nm, itemtyp_nm in rows
+        for c, item_nm, itemtyp_nm, location_cd, location_nm in rows
     ]
 
 
-def list_grgi_history(db: Session, limit: int = 50) -> list[GrgiHistoryItem]:
+def list_grgi_history(
+    db: Session, limit: int = 50, location_id: int | None = None
+) -> list[GrgiHistoryItem]:
     stmt = (
-        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm)
+        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
+        .join(Location, Location.location_id == InvGrgi.location_id)
         .where(InvGrgi.deleted_at.is_(None))
-        .order_by(InvGrgi.actual_at.desc(), InvGrgi.inv_grgi_id.desc())
-        .limit(limit)
     )
+    if location_id:
+        stmt = stmt.where(InvGrgi.location_id == location_id)
+    stmt = stmt.order_by(InvGrgi.actual_at.desc(), InvGrgi.inv_grgi_id.desc()).limit(limit)
     rows = db.execute(stmt).all()
     return [
         GrgiHistoryItem(
             inv_grgi_id=g.inv_grgi_id,
             item_id=g.item_id,
+            location_id=g.location_id,
+            location_cd=location_cd,
+            location_nm=location_nm,
             item_nm=item_nm,
             lot=g.lot,
             move_qty=g.move_qty,
@@ -84,54 +98,67 @@ def list_grgi_history(db: Session, limit: int = 50) -> list[GrgiHistoryItem]:
             actual_at=g.actual_at,
             created_at=g.created_at,
         )
-        for g, item_nm, movetyp_nm in rows
+        for g, item_nm, movetyp_nm, location_cd, location_nm in rows
     ]
 
 
-def trace_lot(db: Session, lot: str) -> LotTraceResult:
+def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTraceResult:
     lot = lot.strip()
     if not lot:
         raise InventoryQueryError("Lot number is required.")
 
     current_rows = db.execute(
-        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm)
+        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
+        .join(Location, Location.location_id == InvCurrent.location_id)
         .where(InvCurrent.deleted_at.is_(None), InvCurrent.lot == lot)
-        .order_by(InvCurrent.item_id)
+        .order_by(InvCurrent.location_id, InvCurrent.item_id)
     ).all()
 
     history_rows = db.execute(
-        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm)
+        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
+        .join(Location, Location.location_id == InvGrgi.location_id)
         .where(InvGrgi.deleted_at.is_(None), InvGrgi.lot == lot)
         .order_by(InvGrgi.actual_at.asc(), InvGrgi.inv_grgi_id.asc())
     ).all()
 
     balance_rows = db.execute(
-        select(InvBalance, Item.item_nm)
+        select(InvBalance, Item.item_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvBalance.item_id)
+        .join(Location, Location.location_id == InvBalance.location_id)
         .where(InvBalance.deleted_at.is_(None), InvBalance.lot == lot)
         .order_by(InvBalance.period_year_month.desc())
     ).all()
+    if location_id:
+        current_rows = [row for row in current_rows if row[0].location_id == location_id]
+        history_rows = [row for row in history_rows if row[0].location_id == location_id]
+        balance_rows = [row for row in balance_rows if row[0].location_id == location_id]
 
     return LotTraceResult(
         lot=lot,
         current=[
             LotTraceCurrent(
                 item_id=c.item_id,
+                location_id=c.location_id,
+                location_cd=location_cd,
+                location_nm=location_nm,
                 item_nm=item_nm,
                 itemtyp_nm=itemtyp_nm,
                 lot=c.lot,
                 qty=c.qty,
                 updated_at=c.updated_at,
             )
-            for c, item_nm, itemtyp_nm in current_rows
+            for c, item_nm, itemtyp_nm, location_cd, location_nm in current_rows
         ],
         history=[
             LotTraceHistory(
                 inv_grgi_id=g.inv_grgi_id,
+                location_id=g.location_id,
+                location_cd=location_cd,
+                location_nm=location_nm,
                 item_nm=item_nm,
                 movetyps_nm=movetyp_nm,
                 move_qty=g.move_qty,
@@ -139,48 +166,61 @@ def trace_lot(db: Session, lot: str) -> LotTraceResult:
                 actual_at=g.actual_at,
                 created_at=g.created_at,
             )
-            for g, item_nm, movetyp_nm in history_rows
+            for g, item_nm, movetyp_nm, location_cd, location_nm in history_rows
         ],
         balances=[
             LotTraceBalance(
                 period_year_month=b.period_year_month,
+                location_id=b.location_id,
+                location_cd=location_cd,
+                location_nm=location_nm,
                 item_nm=item_nm,
                 lot=b.lot,
                 beg_at=b.beg_at,
                 beg_qty=b.beg_qty,
                 qty=b.qty,
             )
-            for b, item_nm in balance_rows
+            for b, item_nm, location_cd, location_nm in balance_rows
         ],
     )
 
 
-def list_balances(db: Session, period: str | None = None) -> list[BalanceItem]:
+def list_balances(
+    db: Session, period: str | None = None, location_id: int | None = None
+) -> list[BalanceItem]:
     stmt = (
-        select(InvBalance, Item.item_nm)
+        select(InvBalance, Item.item_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvBalance.item_id)
+        .join(Location, Location.location_id == InvBalance.location_id)
         .where(InvBalance.deleted_at.is_(None))
     )
     if period:
         stmt = stmt.where(InvBalance.period_year_month == period)
-    stmt = stmt.order_by(InvBalance.period_year_month.desc(), InvBalance.lot, InvBalance.item_id)
+    if location_id:
+        stmt = stmt.where(InvBalance.location_id == location_id)
+    stmt = stmt.order_by(
+        InvBalance.period_year_month.desc(), InvBalance.location_id, InvBalance.lot, InvBalance.item_id
+    )
     rows = db.execute(stmt).all()
     return [
         BalanceItem(
             inv_balance_id=b.inv_balance_id,
             period_year_month=b.period_year_month,
             item_id=b.item_id,
+            location_id=b.location_id,
+            location_cd=location_cd,
+            location_nm=location_nm,
             item_nm=item_nm,
             lot=b.lot,
             beg_at=b.beg_at,
             beg_qty=b.beg_qty,
             qty=b.qty,
         )
-        for b, item_nm in rows
+        for b, item_nm, location_cd, location_nm in rows
     ]
 
 
-def create_period_balance(db: Session, period: str) -> int:
+def create_period_balance(db: Session, period: str, location_id: int | None = None) -> int:
     if not re.match(r"^\d{6}$", period):
         raise InventoryQueryError("Period must be YYYYMM format.")
 
@@ -188,9 +228,10 @@ def create_period_balance(db: Session, period: str) -> int:
     month = int(period[4:6])
     beg_at = datetime(year, month, 1)
 
-    currents = db.scalars(
-        select(InvCurrent).where(InvCurrent.deleted_at.is_(None), InvCurrent.qty > 0)
-    ).all()
+    currents_stmt = select(InvCurrent).where(InvCurrent.deleted_at.is_(None), InvCurrent.qty > 0)
+    if location_id:
+        currents_stmt = currents_stmt.where(InvCurrent.location_id == location_id)
+    currents = db.scalars(currents_stmt).all()
 
     now = datetime.now()
     count = 0
@@ -199,6 +240,7 @@ def create_period_balance(db: Session, period: str) -> int:
             select(InvBalance).where(
                 InvBalance.period_year_month == period,
                 InvBalance.item_id == c.item_id,
+                InvBalance.location_id == c.location_id,
                 InvBalance.lot == c.lot,
             )
         )
@@ -213,6 +255,7 @@ def create_period_balance(db: Session, period: str) -> int:
                 InvBalance(
                     period_year_month=period,
                     item_id=c.item_id,
+                    location_id=c.location_id,
                     qty=c.qty,
                     lot=c.lot,
                     beg_at=beg_at,
@@ -230,7 +273,7 @@ def list_movetyps_for_manual(db: Session) -> list[MoveTyp]:
     return list(
         db.scalars(
             select(MoveTyp)
-            .where(MoveTyp.deleted_at.is_(None), MoveTyp.movetyps_nm.in_(["GR", "GI"]))
+            .where(MoveTyp.deleted_at.is_(None), MoveTyp.movetyps_nm.in_(["GR", "GI", "MV"]))
             .order_by(MoveTyp.movetyps_id)
         ).all()
     )

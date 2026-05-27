@@ -36,6 +36,19 @@ class MoveTypCreate(BaseModel):
     movetyps_nm: str = Field(min_length=1, max_length=50)
 
 
+class LocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    location_id: int
+    location_cd: str
+    location_nm: str
+    created_at: datetime | None = None
+
+
+class LocationCreate(BaseModel):
+    location_cd: str = Field(min_length=1, max_length=50)
+    location_nm: str = Field(min_length=1, max_length=200)
+
+
 class ItemListOut(BaseModel):
     item_id: int
     item_cd: str

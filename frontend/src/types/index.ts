@@ -5,6 +5,9 @@ export interface DraftLine {
   inv_receipt_draft_line_id: number
   line_no: number
   item_id: number
+  location_id?: number
+  location_cd?: string | null
+  location_nm?: string | null
   item_nm: string | null
   lot: string
   qty: string | number
@@ -17,8 +20,13 @@ export interface DraftListItem {
   receipt_at: string
   reference_no: string | null
   supplier_nm: string | null
+  notes: string | null
   line_count: number
+  approved_at: string | null
+  cancelled_at: string | null
   created_at: string
+  has_attachment?: boolean
+  parse_message?: string | null
 }
 
 export interface DraftDetail {
@@ -41,9 +49,11 @@ export interface DraftDetail {
 
 export interface DraftLineInput {
   item_id: number
+  location_id?: number
   lot: string
   qty: number
   line_no: number
+  inv_receipt_draft_line_id?: number
 }
 
 export interface DraftCreatePayload {

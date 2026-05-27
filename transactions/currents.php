@@ -10,8 +10,8 @@ $item_filter = (int) ($_GET['item_id'] ?? 0);
 
 $sql = 'SELECT c.inv_current_id, c.lot, c.qty, c.updated_at, i.item_id, i.item_nm, t.itemtyp_nm
         FROM inv_currents c
-        JOIN items i ON i.item_id = c.item_id
-        JOIN itemtyps t ON t.itemtyp_id = i.itemtyp_id
+        JOIN m_items i ON i.item_id = c.item_id
+        JOIN m_itemtyps t ON t.itemtyp_id = i.itemtyp_id
         WHERE c.deleted_at IS NULL AND c.qty > 0';
 $params = [];
 

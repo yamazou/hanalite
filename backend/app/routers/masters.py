@@ -11,6 +11,8 @@ from app.schemas.masters import (
     ItemSearchOut,
     ItemTypCreate,
     ItemTypOut,
+    LocationCreate,
+    LocationOut,
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
@@ -21,15 +23,18 @@ from app.services.masters import (
     MasterError,
     create_item,
     create_itemtyp,
+    create_location,
     create_movetyp,
     create_supplier,
     delete_item,
     delete_itemtyp,
+    delete_location,
     delete_movetyp,
     delete_supplier,
     get_item,
     list_items,
     list_itemtyps,
+    list_locations,
     list_movetyps,
     list_suppliers,
     search_items,
@@ -115,6 +120,32 @@ def api_create_movetyp(payload: MoveTypCreate, db: Annotated[Session, Depends(ge
 def api_delete_movetyp(movetyps_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         delete_movetyp(db, movetyps_id)
+        db.commit()
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/locations", response_model=list[LocationOut])
+def api_list_locations(db: Annotated[Session, Depends(get_db)]):
+    return list_locations(db)
+
+
+@router.post("/locations", response_model=LocationOut, status_code=201)
+def api_create_location(payload: LocationCreate, db: Annotated[Session, Depends(get_db)]):
+    try:
+        row = create_location(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.delete("/locations/{location_id}", status_code=204, response_class=Response)
+def api_delete_location(location_id: int, db: Annotated[Session, Depends(get_db)]):
+    try:
+        delete_location(db, location_id)
         db.commit()
     except MasterError as e:
         db.rollback()

@@ -6,7 +6,7 @@ require_once __DIR__ . '/includes/header.php';
 $pdo = db();
 
 $stats = [
-    'items' => (int) $pdo->query('SELECT COUNT(*) FROM items WHERE deleted_at IS NULL')->fetchColumn(),
+    'items' => (int) $pdo->query('SELECT COUNT(*) FROM m_items WHERE deleted_at IS NULL')->fetchColumn(),
     'current_lots' => (int) $pdo->query('SELECT COUNT(*) FROM inv_currents WHERE deleted_at IS NULL AND qty > 0')->fetchColumn(),
     'movements' => (int) $pdo->query('SELECT COUNT(*) FROM inv_grgi WHERE deleted_at IS NULL')->fetchColumn(),
 ];
@@ -14,8 +14,8 @@ $stats = [
 $recent = $pdo->query(
     'SELECT g.inv_grgi_id, g.lot, g.move_qty, g.qty, g.actual_at, m.movetyps_nm, i.item_nm
      FROM inv_grgi g
-     JOIN items i ON i.item_id = g.item_id
-     JOIN movetyps m ON m.movetyps_id = g.movetyps_id
+     JOIN m_items i ON i.item_id = g.item_id
+     JOIN m_movetyps m ON m.movetyps_id = g.movetyps_id
      WHERE g.deleted_at IS NULL
      ORDER BY g.actual_at DESC, g.inv_grgi_id DESC
      LIMIT 10'

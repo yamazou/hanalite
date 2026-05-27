@@ -1,0 +1,339 @@
+export type DraftVariant = 'receipt' | 'delivery'
+
+export type DraftPageCopy = {
+  listPath: string
+  newPath: string
+  importPath: string
+  pdfImportPath?: string
+  detailPath: (id: number) => string
+  listTitle: string
+  listDesc: string
+  newBtn: string
+  excelBtn: string
+  pdfBtn?: string
+  detailLink: string
+  detailPanelHint: string
+  listPathWithId: (id: number) => string
+  documentTitle: string
+  entryNewTitle: string
+  entryEditTitle: (id: number) => string
+  entryReadOnlyMsg: string
+  saveSuccessMsg: string
+  searchPanelTitle: string
+  headerGridTitle: string
+  dateColumn: string
+  createTitle: string
+  createDesc: string
+  backToList: string
+  dateTimeLabel: string
+  referenceLabel: string
+  referencePlaceholder: string
+  supplierLabel: string
+  notesLabel: string
+  linesTitle: string
+  itemLabel: string
+  locationLabel: string
+  lotLabel: string
+  lotPlaceholder: string
+  qtyLabel: string
+  addLineBtn: string
+  addRowBtn: string
+  saveRowBtn: string
+  removeRowBtn: string
+  removeLineBtn: string
+  submitCreate: string
+  submittingCreate: string
+  cancelBtn: string
+  excelTitle: string
+  excelDesc: string
+  templateBtn: string
+  excelFormatTitle: string
+  uploadTitle: string
+  excelFileLabel: string
+  submitImport: string
+  submittingImport: string
+  detailTitle: (id: number) => string
+  approveConfirm: string
+  cancelApprovedConfirm: string
+  cancelDraftConfirm: string
+  approveBtn: string
+  cancelActionBtn: string
+  approvedMsg: string
+  cancelledMsg: string
+  revertedToRegisteredMsg: string
+  parseMsgLabel: string
+  attachmentTitle?: string
+  openPdfBtn?: string
+  headerTitle: string
+  linesReviewTitle: string
+  noLinesMsg: string
+  nextStepHint: string
+  approveFail: string
+  cancelFail: string
+  loadFail: string
+  masterLoadFail: string
+  createFail: string
+  importFail: string
+  selectExcel: string
+  lineValidation: string
+  showPdfImport: boolean
+  filterAll: string
+  filterPending: string
+  filterApproved: string
+  filterCancelled: string
+  filterDateFrom: string
+  filterDateTo: string
+  filterDateFromPh: string
+  filterDateToPh: string
+  filterApply: string
+  filterClear: string
+  filterDateRangeError: string
+  exportExcelLabel: string
+  exportHeaderSheet: string
+  exportLinesSheet: string
+  refreshBtn: string
+  loadingText: string
+  noDataText: string
+  sourceCol: string
+  statusCol: string
+  referenceCol: string
+  supplierCol: string
+  linesCol: string
+  createdCol: string
+  idCol: string
+  noneOption: string
+  selectOption: string
+  loadingMasterText: string
+  approvedAtLabel: string
+  cancelledAtLabel: string
+  addLineFormTitle: string
+  addLineSubmitBtn: string
+  addLineValidation: string
+  addLineFail: string
+}
+
+const receiptCopy: DraftPageCopy = {
+  listPath: '/',
+  newPath: '/drafts/new',
+  importPath: '/drafts/import',
+  pdfImportPath: '/drafts/import-pdf',
+  detailPath: (id) => `/drafts/${id}`,
+  listTitle: 'Receipt Drafts',
+  listDesc: 'Review and approve receipts to post inventory movements.',
+  newBtn: 'Receipt Entry',
+  excelBtn: 'Excel Import',
+  pdfBtn: 'PDF Import',
+  detailLink: 'Detail',
+  detailPanelHint: 'Select a row above to view header and line details.',
+  listPathWithId: (id) => `/?id=${id}`,
+  documentTitle: 'Receipt Draft',
+  entryNewTitle: 'Receipt Entry',
+  entryEditTitle: (id) => `Receipt Entry #${id}`,
+  entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
+  saveSuccessMsg: 'Saved.',
+  searchPanelTitle: 'Search Conditions',
+  headerGridTitle: 'Header',
+  dateColumn: 'Receipt Date',
+  createTitle: 'Receipt Entry',
+  createDesc: 'Enter header and rows, then save as Registered.',
+  backToList: '← Back to list',
+  dateTimeLabel: 'Receipt Date/Time',
+  referenceLabel: 'Reference No. (PO / delivery note)',
+  referencePlaceholder: 'PO-2026-001',
+  supplierLabel: 'Supplier',
+  notesLabel: 'Notes',
+  linesTitle: 'Rows',
+  itemLabel: 'Item',
+  locationLabel: 'Location',
+  lotLabel: 'Lot',
+  lotPlaceholder: 'LOT-001',
+  qtyLabel: 'Qty',
+  addLineBtn: 'Add line',
+  addRowBtn: 'Add row',
+  saveRowBtn: 'Save',
+  removeRowBtn: 'Remove',
+  removeLineBtn: 'Remove',
+  submitCreate: 'Save',
+  submittingCreate: 'Saving…',
+  cancelBtn: 'Cancel',
+  excelTitle: 'Excel Receipt Import',
+  excelDesc: 'Upload a filled template. A pending receipt draft will be created.',
+  templateBtn: 'Download template',
+  excelFormatTitle: 'Excel format',
+  uploadTitle: 'Upload',
+  excelFileLabel: 'Excel file (.xlsx)',
+  submitImport: 'Import and create draft',
+  submittingImport: 'Importing…',
+  detailTitle: (id) => `Receipt Draft #${id}`,
+  approveConfirm: 'Approve this receipt and post to inventory?',
+  cancelApprovedConfirm:
+    'Revert this approved receipt to Registered? Inventory movements will be reversed.',
+  cancelDraftConfirm: 'Cancel this receipt draft? It will move to Cancelled.',
+  approveBtn: 'Approve',
+  cancelActionBtn: 'Cancel',
+  approvedMsg: 'Approved and posted to inventory.',
+  cancelledMsg: 'Cancelled.',
+  revertedToRegisteredMsg: 'Reverted to Registered. Inventory reversal posted.',
+  parseMsgLabel: 'Import message:',
+  attachmentTitle: 'Attached PDF',
+  openPdfBtn: 'Open PDF',
+  headerTitle: 'Header',
+  linesReviewTitle: 'Rows (review)',
+  noLinesMsg: 'No lines yet. Click Add row to enter a line.',
+  nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
+  approveFail: 'Approval failed',
+  cancelFail: 'Cancel failed',
+  loadFail: 'Failed to load',
+  masterLoadFail: 'Failed to load master data',
+  createFail: 'Save failed',
+  importFail: 'Import failed',
+  selectExcel: 'Please select an .xlsx file.',
+  lineValidation: 'Enter at least one line with item, location, lot, and quantity.',
+  showPdfImport: true,
+  filterAll: 'All',
+  filterPending: 'Registered',
+  filterApproved: 'Approved',
+  filterCancelled: 'Cancelled',
+  filterDateFrom: 'Receipt Date From',
+  filterDateTo: 'Receipt Date To',
+  filterDateFromPh: 'From',
+  filterDateToPh: 'To',
+  filterApply: 'Apply',
+  filterClear: 'Clear',
+  filterDateRangeError: 'Receipt Date From must be on or before Receipt Date To.',
+  exportExcelLabel: 'Excel',
+  exportHeaderSheet: 'Receipt Drafts',
+  exportLinesSheet: 'Rows',
+  refreshBtn: 'Refresh',
+  loadingText: 'Loading…',
+  noDataText: 'No data',
+  sourceCol: 'Source',
+  statusCol: 'Status',
+  referenceCol: 'Reference',
+  supplierCol: 'Supplier',
+  linesCol: 'Rows',
+  createdCol: 'Created',
+  idCol: 'ID',
+  noneOption: '(none)',
+  selectOption: 'Select',
+  loadingMasterText: 'Loading master data…',
+  approvedAtLabel: 'Approved at',
+  cancelledAtLabel: 'Cancelled at',
+  addLineFormTitle: 'Add line',
+  addLineSubmitBtn: 'Add',
+  addLineValidation: 'Enter item, location, lot, and quantity.',
+  addLineFail: 'Failed to add line',
+}
+
+const deliveryCopy: DraftPageCopy = {
+  listPath: '/delivery',
+  newPath: '/delivery/new',
+  importPath: '/delivery/import',
+  detailPath: (id) => `/delivery/${id}`,
+  listTitle: 'Delivery Drafts',
+  listDesc: 'Review and approve deliveries to post inventory movements.',
+  newBtn: 'Delivery Entry',
+  excelBtn: 'Excel Import',
+  detailLink: 'Detail',
+  detailPanelHint: 'Select a row above to view header and line details.',
+  listPathWithId: (id) => `/delivery?id=${id}`,
+  documentTitle: 'Delivery Draft',
+  entryNewTitle: 'Delivery Entry',
+  entryEditTitle: (id) => `Delivery Entry #${id}`,
+  entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
+  saveSuccessMsg: 'Saved.',
+  searchPanelTitle: 'Search Conditions',
+  headerGridTitle: 'Header',
+  dateColumn: 'Delivery Date',
+  createTitle: 'Delivery Entry',
+  createDesc: 'Enter header and rows, then save as Registered.',
+  backToList: '← Back to list',
+  dateTimeLabel: 'Delivery Date/Time',
+  referenceLabel: 'Reference No. (PO / delivery note)',
+  referencePlaceholder: 'DN-2026-001',
+  supplierLabel: 'Supplier',
+  notesLabel: 'Notes',
+  linesTitle: 'Rows',
+  itemLabel: 'Item',
+  locationLabel: 'Location',
+  lotLabel: 'Lot',
+  lotPlaceholder: 'LOT-001',
+  qtyLabel: 'Qty',
+  addLineBtn: 'Add line',
+  addRowBtn: 'Add row',
+  saveRowBtn: 'Save',
+  removeRowBtn: 'Remove',
+  removeLineBtn: 'Remove',
+  submitCreate: 'Save',
+  submittingCreate: 'Saving…',
+  cancelBtn: 'Cancel',
+  excelTitle: 'Excel Delivery Import',
+  excelDesc: 'Upload a filled template. A pending delivery draft will be created.',
+  templateBtn: 'Download template',
+  excelFormatTitle: 'Excel format',
+  uploadTitle: 'Upload',
+  excelFileLabel: 'Excel file (.xlsx)',
+  submitImport: 'Import and create draft',
+  submittingImport: 'Importing…',
+  detailTitle: (id) => `Delivery Draft #${id}`,
+  approveConfirm: 'Approve this delivery and post to inventory?',
+  cancelApprovedConfirm:
+    'Revert this approved delivery to Registered? Inventory movements will be reversed.',
+  cancelDraftConfirm: 'Cancel this delivery draft? It will move to Cancelled.',
+  approveBtn: 'Approve',
+  cancelActionBtn: 'Cancel',
+  approvedMsg: 'Approved and posted to inventory.',
+  cancelledMsg: 'Cancelled.',
+  revertedToRegisteredMsg: 'Reverted to Registered. Inventory reversal posted.',
+  parseMsgLabel: 'Import message:',
+  headerTitle: 'Header',
+  linesReviewTitle: 'Rows (review)',
+  noLinesMsg: 'No lines yet. Click Add row to enter a line.',
+  nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
+  approveFail: 'Approval failed',
+  cancelFail: 'Cancel failed',
+  loadFail: 'Failed to load',
+  masterLoadFail: 'Failed to load master data',
+  createFail: 'Save failed',
+  importFail: 'Import failed',
+  selectExcel: 'Please select an .xlsx file.',
+  lineValidation: 'Enter at least one line with item, location, lot, and quantity.',
+  showPdfImport: false,
+  filterAll: 'All',
+  filterPending: 'Pending',
+  filterApproved: 'Approved',
+  filterCancelled: 'Cancelled',
+  filterDateFrom: 'Delivery Date From',
+  filterDateTo: 'Delivery Date To',
+  filterDateFromPh: 'From',
+  filterDateToPh: 'To',
+  filterApply: 'Apply',
+  filterClear: 'Clear',
+  filterDateRangeError: 'Delivery Date From must be on or before Delivery Date To.',
+  exportExcelLabel: 'Excel',
+  exportHeaderSheet: 'Delivery Drafts',
+  exportLinesSheet: 'Rows',
+  refreshBtn: 'Refresh',
+  loadingText: 'Loading…',
+  noDataText: 'No data',
+  sourceCol: 'Source',
+  statusCol: 'Status',
+  referenceCol: 'Reference',
+  supplierCol: 'Supplier',
+  linesCol: 'Rows',
+  createdCol: 'Created',
+  idCol: 'ID',
+  noneOption: '(none)',
+  selectOption: 'Select',
+  loadingMasterText: 'Loading master data…',
+  approvedAtLabel: 'Approved at',
+  cancelledAtLabel: 'Cancelled at',
+  addLineFormTitle: 'Add line',
+  addLineSubmitBtn: 'Add',
+  addLineValidation: 'Enter item, location, lot, and quantity.',
+  addLineFail: 'Failed to add line',
+}
+
+export function getDraftPageCopy(variant: DraftVariant): DraftPageCopy {
+  return variant === 'delivery' ? deliveryCopy : receiptCopy
+}

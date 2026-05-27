@@ -13,11 +13,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($name === '') {
                 throw new RuntimeException('Name is required.');
             }
-            $stmt = db()->prepare('INSERT INTO itemtyps (itemtyp_nm) VALUES (?)');
+            $stmt = db()->prepare('INSERT INTO m_itemtyps (itemtyp_nm) VALUES (?)');
             $stmt->execute([$name]);
             flash('success', 'Item type created.');
         } elseif ($action === 'delete') {
-            soft_delete_table('itemtyps', 'itemtyp_id', (int) ($_POST['itemtyp_id'] ?? 0));
+            soft_delete_table('m_itemtyps', 'itemtyp_id', (int) ($_POST['itemtyp_id'] ?? 0));
             flash('success', 'Item type deleted.');
         }
     } catch (Throwable $e) {
@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('/masters/itemtyps.php');
 }
 
-$rows = db()->query('SELECT itemtyp_id, itemtyp_nm, created_at FROM itemtyps WHERE deleted_at IS NULL ORDER BY itemtyp_id')->fetchAll();
+$rows = db()->query('SELECT itemtyp_id, itemtyp_nm, created_at FROM m_itemtyps WHERE deleted_at IS NULL ORDER BY itemtyp_id')->fetchAll();
 ?>
 <div class="page-header"><h1>Item Types</h1></div>
 

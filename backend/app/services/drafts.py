@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime, time
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.drafts import InvReceiptDraft, InvReceiptDraftLine
@@ -9,12 +9,15 @@ from app.schemas.drafts import (
     DraftCreate,
     DraftLineCreate,
     DraftLineRead,
+    DraftLineUpsert,
     DraftListItem,
     DraftRead,
     DraftStatus,
+    DraftUpdate,
     SourceType,
 )
 from app.services.inventory import InventoryError, apply_cancel_reversal, apply_gr
+from app.services.masters import MasterError, resolve_location_id
 
 
 class DraftServiceError(Exception):
@@ -27,6 +30,9 @@ def _draft_to_read(draft: InvReceiptDraft) -> DraftRead:
             inv_receipt_draft_line_id=ln.inv_receipt_draft_line_id,
             line_no=ln.line_no,
             item_id=ln.item_id,
+            location_id=ln.location_id,
+            location_cd=ln.location.location_cd if ln.location else None,
+            location_nm=ln.location.location_nm if ln.location else None,
             item_nm=ln.item.item_nm if ln.item else None,
             lot=ln.lot,
             qty=ln.qty,
@@ -101,10 +107,15 @@ def _add_line_entity(
     item = db.get(Item, line.item_id)
     if not item or item.deleted_at is not None:
         raise DraftServiceError(f"Item {line.item_id} not found.")
+    try:
+        location_id = resolve_location_id(db, line.location_id)
+    except MasterError as e:
+        raise DraftServiceError(str(e)) from e
     entity = InvReceiptDraftLine(
         inv_receipt_draft_id=draft_id,
         line_no=line.line_no or default_line_no,
         item_id=line.item_id,
+        location_id=location_id,
         lot=line.lot.strip(),
         qty=line.qty,
         created_at=now,
@@ -136,7 +147,89 @@ def add_draft_line(db: Session, draft_id: int, line: DraftLineCreate) -> DraftRe
     return get_draft(db, draft_id)
 
 
-def list_drafts(db: Session, status: DraftStatus | None = None) -> list[DraftListItem]:
+def _load_registered_draft_for_update(db: Session, draft_id: int) -> InvReceiptDraft:
+    draft = db.scalar(
+        select(InvReceiptDraft)
+        .options(selectinload(InvReceiptDraft.lines))
+        .where(
+            InvReceiptDraft.inv_receipt_draft_id == draft_id,
+            InvReceiptDraft.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if not draft:
+        raise DraftServiceError(f"Draft {draft_id} not found.")
+    if draft.status != "registered":
+        raise DraftServiceError("Only registered drafts can be edited.")
+    return draft
+
+
+def _apply_line_upsert(
+    db: Session,
+    draft_id: int,
+    draft: InvReceiptDraft,
+    lines: list[DraftLineUpsert],
+    now: datetime,
+) -> None:
+    active = {
+        ln.inv_receipt_draft_line_id: ln
+        for ln in draft.lines
+        if ln.deleted_at is None
+    }
+    kept_ids: set[int] = set()
+
+    for idx, line_in in enumerate(lines, start=1):
+        line_no = line_in.line_no or idx
+        if line_in.inv_receipt_draft_line_id:
+            entity = active.get(line_in.inv_receipt_draft_line_id)
+            if not entity:
+                raise DraftServiceError(f"Line {line_in.inv_receipt_draft_line_id} not found.")
+            item = db.get(Item, line_in.item_id)
+            if not item or item.deleted_at is not None:
+                raise DraftServiceError(f"Item {line_in.item_id} not found.")
+            try:
+                location_id = resolve_location_id(db, line_in.location_id)
+            except MasterError as e:
+                raise DraftServiceError(str(e)) from e
+            entity.item_id = line_in.item_id
+            entity.location_id = location_id
+            entity.lot = line_in.lot.strip()
+            entity.qty = line_in.qty
+            entity.line_no = line_no
+            entity.updated_at = now
+            kept_ids.add(entity.inv_receipt_draft_line_id)
+        else:
+            _add_line_entity(db, draft_id, line_in, line_no, now)
+
+    for line_id, entity in active.items():
+        if line_id not in kept_ids:
+            entity.deleted_at = now
+            entity.updated_at = now
+
+
+def update_draft(db: Session, draft_id: int, payload: DraftUpdate) -> DraftRead:
+    draft = _load_registered_draft_for_update(db, draft_id)
+    now = datetime.now()
+    draft.receipt_at = payload.receipt_at
+    draft.suppliers_id = payload.suppliers_id
+    draft.reference_no = payload.reference_no
+    draft.notes = payload.notes
+    draft.updated_at = now
+    _apply_line_upsert(db, draft_id, draft, payload.lines, now)
+    db.commit()
+    return get_draft(db, draft_id)
+
+
+def list_drafts(
+    db: Session,
+    status: DraftStatus | None = None,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    suppliers_id: int | None = None,
+    item_id: int | None = None,
+    lot: str | None = None,
+) -> list[DraftListItem]:
     stmt = (
         select(
             InvReceiptDraft.inv_receipt_draft_id,
@@ -144,7 +237,12 @@ def list_drafts(db: Session, status: DraftStatus | None = None) -> list[DraftLis
             InvReceiptDraft.source_type,
             InvReceiptDraft.receipt_at,
             InvReceiptDraft.reference_no,
+            InvReceiptDraft.notes,
+            InvReceiptDraft.approved_at,
+            InvReceiptDraft.cancelled_at,
             InvReceiptDraft.created_at,
+            InvReceiptDraft.attachment_path,
+            InvReceiptDraft.parse_message,
             Supplier.suppliers_nm,
             func.count(InvReceiptDraftLine.inv_receipt_draft_line_id).label("line_count"),
         )
@@ -160,6 +258,33 @@ def list_drafts(db: Session, status: DraftStatus | None = None) -> list[DraftLis
     )
     if status:
         stmt = stmt.where(InvReceiptDraft.status == status.value)
+    if date_from:
+        stmt = stmt.where(InvReceiptDraft.receipt_at >= datetime.combine(date_from, time.min))
+    if date_to:
+        stmt = stmt.where(InvReceiptDraft.receipt_at <= datetime.combine(date_to, time.max))
+    if suppliers_id is not None:
+        stmt = stmt.where(InvReceiptDraft.suppliers_id == suppliers_id)
+    if item_id is not None:
+        stmt = stmt.where(
+            exists(
+                select(1).where(
+                    InvReceiptDraftLine.inv_receipt_draft_id == InvReceiptDraft.inv_receipt_draft_id,
+                    InvReceiptDraftLine.item_id == item_id,
+                    InvReceiptDraftLine.deleted_at.is_(None),
+                )
+            )
+        )
+    lot_value = (lot or "").strip()
+    if lot_value:
+        stmt = stmt.where(
+            exists(
+                select(1).where(
+                    InvReceiptDraftLine.inv_receipt_draft_id == InvReceiptDraft.inv_receipt_draft_id,
+                    InvReceiptDraftLine.lot == lot_value,
+                    InvReceiptDraftLine.deleted_at.is_(None),
+                )
+            )
+        )
 
     rows = db.execute(stmt).all()
     return [
@@ -170,8 +295,13 @@ def list_drafts(db: Session, status: DraftStatus | None = None) -> list[DraftLis
             receipt_at=r.receipt_at,
             reference_no=r.reference_no,
             supplier_nm=r.suppliers_nm,
+            notes=r.notes,
             line_count=int(r.line_count),
+            approved_at=r.approved_at,
+            cancelled_at=r.cancelled_at,
             created_at=r.created_at,
+            has_attachment=bool(r.attachment_path),
+            parse_message=r.parse_message,
         )
         for r in rows
     ]
@@ -182,6 +312,7 @@ def get_draft(db: Session, draft_id: int) -> DraftRead:
         select(InvReceiptDraft)
         .options(
             selectinload(InvReceiptDraft.lines).selectinload(InvReceiptDraftLine.item),
+            selectinload(InvReceiptDraft.lines).selectinload(InvReceiptDraftLine.location),
             selectinload(InvReceiptDraft.supplier),
         )
         .where(
@@ -219,6 +350,7 @@ def approve_draft(db: Session, draft_id: int) -> DraftRead:
             apply_gr(
                 db,
                 item_id=line.item_id,
+                location_id=line.location_id,
                 lot=line.lot,
                 qty=line.qty,
                 actual_at=actual_at,
@@ -258,13 +390,19 @@ def cancel_draft(db: Session, draft_id: int) -> DraftRead:
                 apply_cancel_reversal(
                     db,
                     item_id=line.item_id,
+                    location_id=line.location_id,
                     lot=line.lot,
                     qty=line.qty,
                     actual_at=actual_at,
                     inv_receipt_draft_id=draft.inv_receipt_draft_id,
                 )
-        draft.status = "cancelled"
-        draft.cancelled_at = datetime.now()
+            draft.status = "registered"
+            draft.approved_at = None
+        elif draft.status == "registered":
+            draft.status = "cancelled"
+            draft.cancelled_at = datetime.now()
+        else:
+            raise DraftServiceError(f"Draft cannot be cancelled (current: {draft.status}).")
         db.commit()
     except InventoryError as e:
         db.rollback()

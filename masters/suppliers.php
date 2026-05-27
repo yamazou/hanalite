@@ -13,11 +13,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($name === '') {
                 throw new RuntimeException('Name is required.');
             }
-            $stmt = db()->prepare('INSERT INTO suppliers (suppliers_nm) VALUES (?)');
+            $stmt = db()->prepare('INSERT INTO m_suppliers (suppliers_nm) VALUES (?)');
             $stmt->execute([$name]);
             flash('success', 'Supplier created.');
         } elseif ($action === 'delete') {
-            soft_delete_table('suppliers', 'suppliers_id', (int) ($_POST['suppliers_id'] ?? 0));
+            soft_delete_table('m_suppliers', 'suppliers_id', (int) ($_POST['suppliers_id'] ?? 0));
             flash('success', 'Supplier deleted.');
         }
     } catch (Throwable $e) {
@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('/masters/suppliers.php');
 }
 
-$rows = db()->query('SELECT suppliers_id, suppliers_nm, created_at FROM suppliers WHERE deleted_at IS NULL ORDER BY suppliers_id')->fetchAll();
+$rows = db()->query('SELECT suppliers_id, suppliers_nm, created_at FROM m_suppliers WHERE deleted_at IS NULL ORDER BY suppliers_id')->fetchAll();
 ?>
 <div class="page-header"><h1>Suppliers</h1></div>
 

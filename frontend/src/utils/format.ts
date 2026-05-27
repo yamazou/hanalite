@@ -2,7 +2,7 @@ export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '-'
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('ja-JP', {
+  return d.toLocaleString('en-US', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -14,7 +14,7 @@ export function formatDateTime(iso: string | null | undefined): string {
 export function formatQty(qty: string | number): string {
   const n = typeof qty === 'string' ? parseFloat(qty) : qty
   if (Number.isNaN(n)) return String(qty)
-  return n.toLocaleString('ja-JP', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+  return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 }
 
 export function formatItemLabel(item: { item_cd?: string; item_nm: string; item_id?: number }): string {
@@ -33,7 +33,7 @@ export function datetimeLocalToIso(local: string): string {
 }
 
 export const statusLabel: Record<string, string> = {
-  registered: '登録済（未承認）',
-  approved: '承認済',
-  cancelled: 'キャンセル',
+  registered: 'Registered',
+  approved: 'Approved',
+  cancelled: 'Cancelled',
 }

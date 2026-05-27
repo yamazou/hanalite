@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($action === 'create') {
                 $stmt = db()->prepare(
-                    'INSERT INTO items (item_nm, itemtyp_id, supplier1_id, supplier2_id, supplier3_id, supplier4_id, supplier5_id)
+                    'INSERT INTO m_items (item_nm, itemtyp_id, supplier1_id, supplier2_id, supplier3_id, supplier4_id, supplier5_id)
                      VALUES (?, ?, ?, ?, ?, ?, ?)'
                 );
                 $stmt->execute([
@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $item_id = (int) ($_POST['item_id'] ?? 0);
                 $stmt = db()->prepare(
-                    'UPDATE items SET item_nm = ?, itemtyp_id = ?, supplier1_id = ?, supplier2_id = ?,
+                    'UPDATE m_items SET item_nm = ?, itemtyp_id = ?, supplier1_id = ?, supplier2_id = ?,
                      supplier3_id = ?, supplier4_id = ?, supplier5_id = ?, updated_at = NOW()
                      WHERE item_id = ? AND deleted_at IS NULL'
                 );
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('success', 'Item updated.');
             }
         } elseif ($action === 'delete') {
-            soft_delete_table('items', 'item_id', (int) ($_POST['item_id'] ?? 0));
+            soft_delete_table('m_items', 'item_id', (int) ($_POST['item_id'] ?? 0));
             flash('success', 'Item deleted.');
         }
     } catch (Throwable $e) {
@@ -62,9 +62,9 @@ $edit = $edit_id > 0 ? get_item($edit_id) : null;
 $rows = db()->query(
     'SELECT i.item_id, i.item_nm, t.itemtyp_nm,
             s1.suppliers_nm AS supplier1_nm
-     FROM items i
-     JOIN itemtyps t ON t.itemtyp_id = i.itemtyp_id
-     LEFT JOIN suppliers s1 ON s1.suppliers_id = i.supplier1_id
+     FROM m_items i
+     JOIN m_itemtyps t ON t.itemtyp_id = i.itemtyp_id
+     LEFT JOIN m_suppliers s1 ON s1.suppliers_id = i.supplier1_id
      WHERE i.deleted_at IS NULL
      ORDER BY i.item_id'
 )->fetchAll();

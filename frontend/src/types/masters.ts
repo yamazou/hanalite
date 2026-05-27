@@ -56,3 +56,10 @@ export interface SupplierMaster {
   suppliers_nm: string
   created_at?: string | null
 }
+
+export interface LocationMaster {
+  location_id: number
+  location_cd: string
+  location_nm: string
+  created_at?: string | null
+}

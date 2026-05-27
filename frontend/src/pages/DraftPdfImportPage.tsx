@@ -2,10 +2,12 @@ import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
+import { getDraftPageCopy } from '../config/draftPages'
 import type { Supplier } from '../types'
 import { datetimeLocalToIso, toDatetimeLocalValue } from '../utils/format'
 
 export function DraftPdfImportPage() {
+  const copy = getDraftPageCopy('receipt')
   const navigate = useNavigate()
   const [file, setFile] = useState<File | null>(null)
   const [receiptAt, setReceiptAt] = useState(toDatetimeLocalValue())
@@ -40,7 +42,7 @@ export function DraftPdfImportPage() {
         reference_no: referenceNo.trim() || undefined,
         notes: notes.trim() || undefined,
       })
-      navigate(`/drafts/${draft.inv_receipt_draft_id}`)
+      navigate(copy.listPathWithId(draft.inv_receipt_draft_id))
     } catch (err) {
       setError(err instanceof Error ? err.message : '取込に失敗しました')
     } finally {

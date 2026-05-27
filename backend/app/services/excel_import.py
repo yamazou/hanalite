@@ -120,9 +120,11 @@ def build_template_workbook() -> bytes:
 
     ws_lines = wb.active
     ws_lines.title = "lines"
-    ws_lines.append(["item_id", "item_cd", "item_nm", "lot", "qty", "line_no"])
-    ws_lines.append([1, "", "", "LOT-EXAMPLE-001", 100, 1])
-    ws_lines.append(["", "RM-001", "Test Material A", "LOT-EXAMPLE-002", 50, 2])
+    ws_lines.append(
+        ["item_id", "item_cd", "item_nm", "location_id", "location_cd", "location_nm", "lot", "qty", "line_no"]
+    )
+    ws_lines.append([1, "", "", 1, "", "", "LOT-EXAMPLE-001", 100, 1])
+    ws_lines.append(["", "", "Test Material A", "", "MAIN", "", "LOT-EXAMPLE-002", 50, 2])
 
     ws_header = wb.create_sheet("header")
     ws_header.append(["field", "value"])
@@ -136,6 +138,7 @@ def build_template_workbook() -> bytes:
     ws_help.append([])
     ws_help.append(["lines シート: 明細（1行目=ヘッダ）"])
     ws_help.append(["  item_id / item_cd / item_nm のいずれか1つ必須"])
+    ws_help.append(["  location_id / location_cd / location_nm のいずれか1つ（省略時は先頭ロケーション）"])
     ws_help.append(["  lot, qty 必須"])
     ws_help.append(["header シート: 任意（入荷日・参照番号など）"])
     ws_help.append(["アップロード画面の入荷日時は header より優先されます"])
