@@ -1,0 +1,1 @@
+"""hanalite FastAPI application."""

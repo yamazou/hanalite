@@ -1,0 +1,74 @@
+export interface CurrentStock {
+  inv_current_id: number
+  item_id: number
+  item_nm: string
+  itemtyp_nm: string
+  lot: string
+  qty: string | number
+  updated_at: string
+}
+
+export interface GrgiHistory {
+  inv_grgi_id: number
+  item_id: number
+  item_nm: string
+  lot: string
+  move_qty: string | number
+  qty: string | number
+  movetyps_nm: string
+  actual_at: string
+  created_at?: string | null
+}
+
+export interface MoveTyp {
+  movetyps_id: number
+  movetyps_nm: string
+}
+
+export interface GrgiCreatePayload {
+  item_id: number
+  lot: string
+  move_qty: number
+  movetyps_id: number
+  actual_at: string
+}
+
+export interface LotTraceResult {
+  lot: string
+  current: {
+    item_id: number
+    item_nm: string
+    itemtyp_nm: string
+    lot: string
+    qty: string | number
+    updated_at: string
+  }[]
+  history: {
+    inv_grgi_id: number
+    item_nm: string
+    movetyps_nm: string
+    move_qty: string | number
+    qty: string | number
+    actual_at: string
+    created_at: string | null
+  }[]
+  balances: {
+    period_year_month: string
+    item_nm: string
+    lot: string
+    beg_at: string
+    beg_qty: string | number
+    qty: string | number
+  }[]
+}
+
+export interface BalanceItem {
+  inv_balance_id: number
+  period_year_month: string
+  item_id: number
+  item_nm: string
+  lot: string
+  beg_at: string
+  beg_qty: string | number
+  qty: string | number
+}
