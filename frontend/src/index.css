@@ -56,25 +56,35 @@ body,
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  min-height: 0;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar-nav {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .brand {
-  font-size: 0.85rem;
-  font-weight: 700;
-  padding: 8px 12px;
-  background: linear-gradient(180deg, var(--erp-title) 0%, var(--erp-title-dark) 100%);
-  color: #fff;
-  letter-spacing: 0.02em;
+  padding: 10px 12px;
+  background: var(--erp-bg);
+  border-bottom: 1px solid var(--erp-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.brand-sub {
-  font-size: 0.68rem;
-  color: var(--erp-text);
-  opacity: 0.8;
-  padding: 4px 12px 8px;
-  margin: 0;
-  border-bottom: 1px solid var(--erp-border);
-  background: var(--erp-toolbar);
+.brand-logo {
+  display: block;
+  width: 100%;
+  max-width: 196px;
+  height: auto;
+  object-fit: contain;
 }
 
 .nav-section {
@@ -197,6 +207,7 @@ body,
   font-size: 0.72rem;
   border-top: 1px solid var(--erp-border);
   background: var(--erp-toolbar);
+  flex-shrink: 0;
 }
 
 .sidebar-footer a {
@@ -207,6 +218,11 @@ body,
 .sidebar-footer a:hover {
   color: var(--erp-title-dark);
   text-decoration: underline;
+}
+
+.sidebar-footer a.active {
+  color: var(--erp-title-dark);
+  font-weight: 600;
 }
 
 .main {
@@ -228,6 +244,11 @@ body,
 .app:has(.erp-screen) {
   height: 100vh;
   overflow: hidden;
+}
+
+.app:has(.erp-screen) .sidebar {
+  height: 100vh;
+  max-height: 100vh;
 }
 
 .app:has(.erp-screen) .main {
@@ -811,15 +832,115 @@ input[type='file'] {
   padding: 4px 6px;
 }
 
-.erp-search-row {
+.erp-search-row,
+.erp-search-form {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px 14px;
   border: 1px solid var(--erp-border);
   background: var(--erp-surface);
   padding: 3px 8px;
   overflow-x: auto;
+}
+
+.erp-search-form {
+  width: 100%;
+  margin: 0;
+}
+
+.erp-search-field-grow {
+  flex: 1 1 140px;
+  min-width: 100px;
+  max-width: 280px;
+}
+
+.erp-screen .erp-col-actions .btn {
+  margin-right: 4px;
+  padding: 0 6px;
+  min-height: 20px;
+  font-size: 0.65rem;
+}
+
+.erp-screen-stacked .erp-panel-grow {
+  flex: 1 1 0;
+  min-height: 100px;
+}
+
+.erp-panel-grow-main {
+  flex: 1 1 auto;
+  min-height: 160px;
+}
+
+.erp-search-section-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--erp-title-dark);
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.erp-search-field-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  flex-shrink: 0;
+}
+
+.erp-search-field-qty .erp-input {
+  width: 88px;
+  min-width: 72px;
+}
+
+.erp-link {
+  color: var(--erp-link);
+  font-size: 0.68rem;
+  text-decoration: none;
+}
+
+.erp-link:hover {
+  text-decoration: underline;
+}
+
+.erp-panel-hint {
+  flex-shrink: 0;
+}
+
+.erp-panel-hint .erp-panel-body {
+  padding: 6px 10px;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.erp-panel-hint .help-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.erp-search-form-bom .item-search-picker {
+  flex: 1 1 180px;
+  min-width: 160px;
+  max-width: 280px;
+  margin: 0;
+  font-size: 0.68rem;
+}
+
+.erp-search-form-bom .item-search-picker input {
+  width: 100%;
+  min-height: 22px;
+  padding: 0 5px;
+  border: 1px solid var(--erp-border);
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+
+.erp-search-form .item-search-picker.full {
+  flex: 1 1 200px;
+  min-width: 160px;
+  max-width: 320px;
+  margin: 0;
+  font-size: 0.68rem;
 }
 
 .erp-search-field {
@@ -854,6 +975,17 @@ input[type='file'] {
 }
 
 .erp-search-field-supplier .erp-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.erp-search-field-reference {
+  flex: 1 1 120px;
+  min-width: 100px;
+  max-width: 180px;
+}
+
+.erp-search-field-reference .erp-input {
   width: 100%;
   min-width: 0;
 }
@@ -1490,6 +1622,28 @@ a.erp-link-cell:hover {
   font-weight: 600;
 }
 
+.erp-item-cell {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.erp-item-cell .erp-grid-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.erp-item-pick {
+  flex: 0 0 2.2rem;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.erp-detail-hint {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+}
+
 .erp-grid-empty {
   margin: 0;
   padding: 8px;
@@ -1595,4 +1749,185 @@ a.erp-link-cell:hover {
 
 .alert-inline.error {
   color: var(--danger);
+}
+
+/* API Docs (in-app OpenAPI browser) */
+.erp-api-docs {
+  gap: 4px;
+}
+
+.erp-api-search-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 14px;
+}
+
+.erp-api-info {
+  flex: 1 1 200px;
+  min-width: 160px;
+  line-height: 1.35;
+}
+
+.erp-api-info strong {
+  font-size: 0.8rem;
+  color: var(--erp-title-dark);
+}
+
+.erp-api-version {
+  margin-left: 6px;
+  font-size: 0.68rem;
+  color: var(--erp-muted, #5a665a);
+}
+
+.erp-api-desc {
+  margin: 2px 0 0;
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.erp-api-list-panel {
+  flex: 1 1 40%;
+  min-height: 120px;
+}
+
+.erp-api-detail-panel {
+  flex: 1 1 45%;
+  min-height: 140px;
+}
+
+.erp-api-detail-panel .erp-panel-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.erp-api-op-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.erp-api-path {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.68rem;
+  color: var(--erp-title-dark);
+}
+
+.erp-api-endpoints-grid td,
+.erp-api-params-grid td,
+.erp-api-responses-grid td {
+  padding: 0 6px;
+  height: 22px;
+  line-height: 22px;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-api-endpoints-grid th,
+.erp-api-params-grid th,
+.erp-api-responses-grid th {
+  padding: 0 6px;
+  height: 22px;
+  line-height: 22px;
+}
+
+.erp-api-detail-content {
+  padding: 4px 6px 6px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.erp-api-summary {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.erp-api-description,
+.erp-api-operation-id,
+.erp-api-request-body {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.erp-api-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.erp-api-section .erp-panel-title {
+  font-size: 0.68rem;
+}
+
+.erp-api-section-label {
+  font-weight: 600;
+  color: var(--erp-title-dark);
+}
+
+.api-method {
+  display: inline-block;
+  min-width: 3.4rem;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  letter-spacing: 0.03em;
+}
+
+.api-method-get {
+  background: #e3f2fd;
+  color: #1565c0;
+  border-color: #90caf9;
+}
+
+.api-method-post {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border-color: #a5d6a7;
+}
+
+.api-method-put,
+.api-method-patch {
+  background: #fff3e0;
+  color: #e65100;
+  border-color: #ffcc80;
+}
+
+.api-method-delete {
+  background: #ffebee;
+  color: #c62828;
+  border-color: #ef9a9a;
+}
+
+.api-method-head,
+.api-method-options {
+  background: #f3e5f5;
+  color: #6a1b9a;
+  border-color: #ce93d8;
+}
+
+.api-status {
+  font-weight: 600;
+  font-size: 0.68rem;
+}
+
+.api-status-2 {
+  color: #2e7d32;
+}
+
+.api-status-4,
+.api-status-5 {
+  color: #c62828;
 }

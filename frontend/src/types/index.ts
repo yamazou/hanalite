@@ -4,11 +4,12 @@ export type SourceType = 'manual' | 'excel' | 'pdf'
 export interface DraftLine {
   inv_receipt_draft_line_id: number
   line_no: number
-  item_id: number
+  item_id: number | null
+  item_cd?: string | null
+  item_nm: string | null
   location_id?: number
   location_cd?: string | null
   location_nm?: string | null
-  item_nm: string | null
   lot: string
   qty: string | number
 }
@@ -48,7 +49,9 @@ export interface DraftDetail {
 }
 
 export interface DraftLineInput {
-  item_id: number
+  item_id?: number | null
+  item_cd?: string | null
+  item_nm?: string | null
   location_id?: number
   lot: string
   qty: number

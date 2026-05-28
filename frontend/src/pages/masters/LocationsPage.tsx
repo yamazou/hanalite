@@ -1,6 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Alert } from '../../components/Alert'
+import { ErpGridPanel, erpRowClass } from '../../components/erp/ErpGridPanel'
+import { ErpScreen } from '../../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../../components/erp/ErpSearchPanel'
+import { masterLocationColumns } from '../../components/erp/masterGridColumns'
 import type { LocationMaster } from '../../types/masters'
 
 export function LocationsPage() {
@@ -63,91 +66,82 @@ export function LocationsPage() {
   }
 
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>Locations</h1>
-        </div>
-      </header>
-
-      {error && <Alert type="error" message={error} />}
-      {success && <Alert type="success" message={success} />}
-
-      <div className="grid-2">
-        <div className="card">
-          <h2>Add Location</h2>
-          <form className="form-grid" onSubmit={onSubmit}>
-            <label className="full">
-              Location Code
-              <input
-                value={locationCd}
-                onChange={(e) => setLocationCd(e.target.value)}
-                placeholder="WH-001"
-                required
-              />
-            </label>
-            <label className="full">
-              Location Name
-              <input
-                value={locationNm}
-                onChange={(e) => setLocationNm(e.target.value)}
-                placeholder="Main Warehouse"
-                required
-              />
-            </label>
-            <div className="form-actions full">
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        <div className="card">
-          <div className="card-header-row">
-            <h2>List</h2>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
-              Refresh
+    <ErpScreen error={error} success={success}>
+      <ErpSearchPanel>
+        <form onSubmit={onSubmit} className="erp-search-form">
+          <label className="erp-search-field erp-search-field-grow">
+            <input
+              className="erp-input"
+              value={locationCd}
+              onChange={(e) => setLocationCd(e.target.value)}
+              placeholder="Location Code"
+              aria-label="Location Code"
+              required
+            />
+          </label>
+          <label className="erp-search-field erp-search-field-grow">
+            <input
+              className="erp-input"
+              value={locationNm}
+              onChange={(e) => setLocationNm(e.target.value)}
+              placeholder="Location Name"
+              aria-label="Location Name"
+              required
+            />
+          </label>
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save'}
             </button>
           </div>
-          {loading ? (
-            <p className="muted">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="muted">No data</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.location_id}>
-                    <td>{row.location_id}</td>
-                    <td>
-                      <code>{row.location_cd}</code>
-                    </td>
-                    <td>{row.location_nm}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(row.location_id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </>
+        </form>
+      </ErpSearchPanel>
+
+      <ErpGridPanel
+        gridId="masters-locations-v1"
+        title="Locations"
+        columns={masterLocationColumns}
+        loading={loading}
+        isEmpty={!loading && rows.length === 0}
+        onRefresh={load}
+      >
+        {(layout) => (
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.location_id} className={erpRowClass(index)}>
+                {layout.orderedColumns.map((col) => {
+                  switch (col.key) {
+                    case 'id':
+                      return <td key={col.key}>{row.location_id}</td>
+                    case 'code':
+                      return (
+                        <td key={col.key}>
+                          <code>{row.location_cd}</code>
+                        </td>
+                      )
+                    case 'name':
+                      return <td key={col.key}>{row.location_nm}</td>
+                    case 'actions':
+                      return (
+                        <td key={col.key} className="erp-col-actions">
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-cancel"
+                            onClick={() => handleDelete(row.location_id)}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      )
+                    default:
+                      return <td key={col.key} />
+                  }
+                })}
+              </tr>
+            ))}
+          </tbody>
+        )}
+      </ErpGridPanel>
+    </ErpScreen>
   )
 }

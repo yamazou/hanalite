@@ -34,6 +34,7 @@ export type DraftListFilters = {
   date_from?: string
   date_to?: string
   suppliers_id?: number
+  reference_no?: string
   item_id?: number
   lot?: string
 }
@@ -137,6 +138,7 @@ export const api = {
     if (filters.date_from) params.set('date_from', filters.date_from)
     if (filters.date_to) params.set('date_to', filters.date_to)
     if (filters.suppliers_id != null) params.set('suppliers_id', String(filters.suppliers_id))
+    if (filters.reference_no?.trim()) params.set('reference_no', filters.reference_no.trim())
     if (filters.item_id != null) params.set('item_id', String(filters.item_id))
     if (filters.lot?.trim()) params.set('lot', filters.lot.trim())
     const q = params.toString()
@@ -188,6 +190,11 @@ export const api = {
 
   cancelDraft: async (id: number, kind: DraftKind = 'receipt') => {
     const row = await request<any>(`${draftBase(kind)}/${id}/cancel`, { method: 'POST' })
+    return normalizeDetail(kind, row)
+  },
+
+  restoreDraft: async (id: number, kind: DraftKind = 'receipt') => {
+    const row = await request<any>(`${draftBase(kind)}/${id}/restore`, { method: 'POST' })
     return normalizeDetail(kind, row)
   },
 

@@ -1,6 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Alert } from '../../components/Alert'
+import { ErpGridPanel, erpRowClass } from '../../components/erp/ErpGridPanel'
+import { ErpScreen } from '../../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../../components/erp/ErpSearchPanel'
+import { masterItemColumns } from '../../components/erp/masterGridColumns'
 import type { ItemDetail, ItemListRow, ItemPayload, ItemTyp, SupplierMaster } from '../../types/masters'
 
 const emptySuppliers = () => ['', '', '', '', '']
@@ -127,127 +130,139 @@ export function ItemsPage() {
   }
 
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>Items</h1>
-        </div>
-      </header>
-
-      {error && <Alert type="error" message={error} />}
-      {success && <Alert type="success" message={success} />}
-
-      <div className="grid-2">
-        <div className="card">
-          <h2>{editId ? 'Edit' : 'Add'} Item</h2>
-          <form className="form-grid" onSubmit={onSubmit}>
-            <label className="full">
-              Item Code
-              <input
-                value={itemCd}
-                onChange={(e) => setItemCd(e.target.value)}
-                placeholder="RM-001"
-                required
-              />
-            </label>
-            <label className="full">
-              Item Name
-              <input value={itemNm} onChange={(e) => setItemNm(e.target.value)} required />
-            </label>
-            <label className="full">
-              Item Type
-              <select value={itemtypId} onChange={(e) => setItemtypId(e.target.value)} required>
-                <option value="">Select</option>
-                {itemtyps.map((t) => (
-                  <option key={t.itemtyp_id} value={t.itemtyp_id}>
-                    {t.itemtyp_nm}
+    <ErpScreen error={error} success={success}>
+      <ErpSearchPanel className="erp-panel-master-form">
+        <form onSubmit={onSubmit} className="erp-search-form">
+          <label className="erp-search-field erp-search-field-grow">
+            <input
+              className="erp-input"
+              value={itemCd}
+              onChange={(e) => setItemCd(e.target.value)}
+              placeholder="Item Code"
+              aria-label="Item Code"
+              required
+            />
+          </label>
+          <label className="erp-search-field erp-search-field-grow">
+            <input
+              className="erp-input"
+              value={itemNm}
+              onChange={(e) => setItemNm(e.target.value)}
+              placeholder="Item Name"
+              aria-label="Item Name"
+              required
+            />
+          </label>
+          <label className="erp-search-field erp-search-field-supplier">
+            <select
+              className={`erp-input${itemtypId === '' ? ' erp-input-empty' : ''}`}
+              value={itemtypId}
+              aria-label="Item Type"
+              onChange={(e) => setItemtypId(e.target.value)}
+              required
+            >
+              <option value="">Item Type</option>
+              {itemtyps.map((t) => (
+                <option key={t.itemtyp_id} value={t.itemtyp_id}>
+                  {t.itemtyp_nm}
+                </option>
+              ))}
+            </select>
+          </label>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <label key={n} className="erp-search-field erp-search-field-supplier">
+              <select
+                className={`erp-input${supplierIds[n - 1] === '' ? ' erp-input-empty' : ''}`}
+                value={supplierIds[n - 1]}
+                aria-label={n === 1 ? 'Main Supplier' : `Supplier ${n}`}
+                onChange={(e) => setSupplier(n - 1, e.target.value)}
+              >
+                <option value="">{n === 1 ? 'Main Supplier' : `Supplier ${n}`}</option>
+                {suppliers.map((s) => (
+                  <option key={s.suppliers_id} value={s.suppliers_id}>
+                    {s.suppliers_nm}
                   </option>
                 ))}
               </select>
             </label>
-            {[1, 2, 3, 4, 5].map((n) => (
-              <label key={n} className="full">
-                Supplier {n}
-                {n === 1 ? ' (Main)' : ' (Sub)'}
-                <select value={supplierIds[n - 1]} onChange={(e) => setSupplier(n - 1, e.target.value)}>
-                  <option value="">—</option>
-                  {suppliers.map((s) => (
-                    <option key={s.suppliers_id} value={s.suppliers_id}>
-                      {s.suppliers_nm}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-            <div className="form-actions full">
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save'}
-              </button>
-              {editId && (
-                <button type="button" className="btn btn-secondary" onClick={resetForm}>
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-
-        <div className="card">
-          <div className="card-header-row">
-            <h2>List</h2>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
-              Refresh
+          ))}
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+              {submitting ? 'Saving…' : editId ? 'Update' : 'Save'}
             </button>
+            {editId && (
+              <button type="button" className="btn erp-btn erp-btn-clear" onClick={resetForm}>
+                Cancel
+              </button>
+            )}
           </div>
-          {loading ? (
-            <p className="muted">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="muted">No data</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Main Supplier</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.item_id}>
-                    <td>{row.item_id}</td>
-                    <td>
-                      <code>{row.item_cd}</code>
-                    </td>
-                    <td>{row.item_nm}</td>
-                    <td>{row.itemtyp_nm}</td>
-                    <td>{row.supplier1_nm ?? '—'}</td>
-                    <td className="action-cell">
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => startEdit(row.item_id)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(row.item_id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </>
+        </form>
+      </ErpSearchPanel>
+
+      <ErpGridPanel
+        gridId="masters-items-v1"
+        title="Items"
+        columns={masterItemColumns}
+        loading={loading}
+        isEmpty={!loading && rows.length === 0}
+        onRefresh={load}
+      >
+        {(layout) => (
+          <tbody>
+            {rows.map((row, index) => (
+              <tr
+                key={row.item_id}
+                className={erpRowClass(index, editId === row.item_id)}
+                onClick={() => void startEdit(row.item_id)}
+              >
+                {layout.orderedColumns.map((col) => {
+                  switch (col.key) {
+                    case 'id':
+                      return <td key={col.key}>{row.item_id}</td>
+                    case 'code':
+                      return (
+                        <td key={col.key}>
+                          <code>{row.item_cd}</code>
+                        </td>
+                      )
+                    case 'name':
+                      return <td key={col.key}>{row.item_nm}</td>
+                    case 'type':
+                      return <td key={col.key}>{row.itemtyp_nm}</td>
+                    case 'supplier':
+                      return <td key={col.key}>{row.supplier1_nm ?? '—'}</td>
+                    case 'actions':
+                      return (
+                        <td
+                          key={col.key}
+                          className="erp-col-actions"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-search"
+                            onClick={() => void startEdit(row.item_id)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-cancel"
+                            onClick={() => void handleDelete(row.item_id)}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      )
+                    default:
+                      return <td key={col.key} />
+                  }
+                })}
+              </tr>
+            ))}
+          </tbody>
+        )}
+      </ErpGridPanel>
+    </ErpScreen>
   )
 }

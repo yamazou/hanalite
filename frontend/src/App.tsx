@@ -15,6 +15,7 @@ import { ItemsPage } from './pages/masters/ItemsPage'
 import { MoveTypesPage } from './pages/masters/MoveTypesPage'
 import { LocationsPage } from './pages/masters/LocationsPage'
 import { SuppliersPage } from './pages/masters/SuppliersPage'
+import { ApiDocsPage } from './pages/ApiDocsPage'
 
 function DraftDetailRedirect({ variant }: { variant: DraftVariant }) {
   const { id } = useParams()
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="masters/locations" element={<LocationsPage />} />
           <Route path="masters/items" element={<ItemsPage />} />
           <Route path="masters/boms" element={<BomsPage />} />
+          <Route path="api-docs" element={<ApiDocsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

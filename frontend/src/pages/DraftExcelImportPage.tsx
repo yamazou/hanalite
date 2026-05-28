@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { Alert } from '../components/Alert'
+import { ErpScreen } from '../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { Supplier } from '../types'
 import { datetimeLocalToIso, toDatetimeLocalValue } from '../utils/format'
@@ -55,84 +56,92 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
   }
 
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <Link to={copy.listPath} className="back-link">
+    <ErpScreen error={error}>
+      <ErpSearchPanel>
+        <div className="erp-search-form">
+          <Link to={copy.listPath} className="erp-link">
             {copy.backToList}
           </Link>
-          <h1>{copy.excelTitle}</h1>
-          <p className="page-desc">{copy.excelDesc}</p>
+          <span className="erp-search-section-label">{copy.excelTitle}</span>
+          <div className="erp-search-actions">
+            <button
+              type="button"
+              className="btn erp-btn erp-btn-clear"
+              onClick={() => api.downloadTemplate(variant)}
+            >
+              {copy.templateBtn}
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => api.downloadTemplate(variant)}
-        >
-          {copy.templateBtn}
-        </button>
-      </header>
+      </ErpSearchPanel>
 
-      {error && <Alert type="error" message={error} />}
-
-      <div className="card hint">
-        <strong>{copy.excelFormatTitle}</strong>
-        <ul className="help-list">
-          <li>
-            <code>lines</code> sheet (or first sheet), row 1: headers
-          </li>
-          <li>
-            Required: <code>lot</code>, <code>qty</code>
-          </li>
-          <li>
-            Item: one of <code>item_id</code>, <code>item_cd</code>, <code>item_nm</code>
-          </li>
-          <li>
-            Location: one of <code>location_id</code>, <code>location_cd</code>, <code>location_nm</code>
-          </li>
-          <li>
-            Optional: <code>header</code> sheet for date/reference (form values take priority)
-          </li>
-        </ul>
+      <div className="erp-panel erp-panel-hint">
+        <div className="erp-panel-title">{copy.excelFormatTitle}</div>
+        <div className="erp-panel-body">
+          <ul className="help-list">
+            <li>
+              <code>lines</code> sheet (or first sheet), row 1: headers
+            </li>
+            <li>
+              Required: <code>lot</code>, <code>qty</code>
+            </li>
+            <li>
+              Item: one of <code>item_id</code>, <code>item_cd</code>, <code>item_nm</code>
+            </li>
+            <li>
+              Location: one of <code>location_id</code>, <code>location_cd</code>, <code>location_nm</code>
+            </li>
+            <li>
+              Optional: <code>header</code> sheet for date/reference (form values take priority)
+            </li>
+          </ul>
+        </div>
       </div>
 
       {loading ? (
-        <p className="muted">{copy.loadingText}</p>
+        <p className="muted erp-grid-empty">{copy.loadingText}</p>
       ) : (
-        <form className="card" onSubmit={handleSubmit}>
-          <h2>{copy.uploadTitle}</h2>
-          <div className="form-grid">
-            <label className="full">
-              {copy.excelFileLabel}
+        <ErpSearchPanel>
+          <form onSubmit={handleSubmit} className="erp-search-form">
+            <label className="erp-search-field erp-search-field-grow">
               <input
                 type="file"
+                className="erp-input"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                aria-label={copy.excelFileLabel}
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 required
               />
             </label>
-            <label>
-              {copy.dateTimeLabel}
+            <label className="erp-search-field erp-search-field-date">
               <input
                 type="datetime-local"
+                className="erp-input erp-input-date"
                 value={receiptAt}
+                aria-label={copy.dateTimeLabel}
                 onChange={(e) => setReceiptAt(e.target.value)}
                 required
               />
             </label>
-            <label>
-              {copy.referenceCol}
-              <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} />
+            <label className="erp-search-field erp-search-field-reference">
+              <input
+                className="erp-input"
+                value={referenceNo}
+                placeholder={copy.referenceCol}
+                aria-label={copy.referenceCol}
+                onChange={(e) => setReferenceNo(e.target.value)}
+              />
             </label>
-            <label>
-              {copy.supplierLabel}
+            <label className="erp-search-field erp-search-field-supplier">
               <select
+                className={`erp-input${suppliersId === '' ? ' erp-input-empty' : ''}`}
                 value={suppliersId}
+                aria-label={copy.supplierLabel}
                 onChange={(e) =>
                   setSuppliersId(e.target.value === '' ? '' : Number(e.target.value))
                 }
               >
-                <option value="">{copy.noneOption}</option>
+                <option value="">{copy.supplierLabel}</option>
                 {suppliers.map((s) => (
                   <option key={s.suppliers_id} value={s.suppliers_id}>
                     {s.suppliers_nm}
@@ -140,22 +149,26 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
                 ))}
               </select>
             </label>
-            <label className="full">
-              {copy.notesLabel}
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            <label className="erp-search-field erp-search-field-grow">
+              <input
+                className="erp-input"
+                value={notes}
+                placeholder={copy.notesLabel}
+                aria-label={copy.notesLabel}
+                onChange={(e) => setNotes(e.target.value)}
+              />
             </label>
-          </div>
-
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? copy.submittingImport : copy.submitImport}
-            </button>
-            <Link to={copy.listPath} className="btn btn-secondary">
-              {copy.cancelBtn}
-            </Link>
-          </div>
-        </form>
+            <div className="erp-search-actions">
+              <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+                {submitting ? copy.submittingImport : copy.submitImport}
+              </button>
+              <Link to={copy.listPath} className="btn erp-btn erp-btn-clear">
+                {copy.cancelBtn}
+              </Link>
+            </div>
+          </form>
+        </ErpSearchPanel>
       )}
-    </>
+    </ErpScreen>
   )
 }

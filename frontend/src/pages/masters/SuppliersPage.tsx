@@ -18,6 +18,7 @@ export function SuppliersPage() {
   return (
     <SimpleMasterPage
       title="Suppliers"
+      gridId="masters-suppliers-v1"
       nameLabel="Name"
       loadRows={loadRows}
       onCreate={(name) => api.createSupplier(name).then(() => undefined)}

@@ -18,6 +18,7 @@ export function ItemTypesPage() {
   return (
     <SimpleMasterPage
       title="Item Types"
+      gridId="masters-itemtyps-v1"
       nameLabel="Name"
       placeholder="RM, WIP, FG..."
       loadRows={loadRows}

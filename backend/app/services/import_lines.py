@@ -8,12 +8,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.schemas.drafts import DraftLineCreate
-from app.services.masters import MasterError, resolve_item_by_ref, resolve_location_by_ref
+from app.models.masters import Item
+from app.services.masters import MasterError, resolve_location_by_ref
 
 HEADER_ALIASES: dict[str, list[str]] = {
     "item_id": ["item_id", "品目id", "品目ID", "itemid", "id"],
-    "item_cd": ["item_cd", "品目コード", "品目cd", "itemcode", "code", "コード"],
-    "item_nm": ["item_nm", "品目名", "item_name", "品目", "item"],
+    "item_cd": ["item_cd", "品目コード", "品目cd", "itemcode", "code", "コード", "item code"],
+    "item_nm": ["item_nm", "品目名", "item_name", "itemname", "itenname", "iten name", "品目", "item"],
     "lot": ["lot", "ロット", "lot_no", "lotno", "ロット番号", "ロットno"],
     "qty": ["qty", "数量", "quantity", "入荷数量", "入数"],
     "line_no": ["line_no", "行", "行番号", "lineno", "line", "#", "no"],
@@ -63,28 +64,32 @@ def _cell_value(row: tuple, col: int | None) -> Any:
     return row[col]
 
 
-def _resolve_item_id(
+def _resolve_item_for_import(
     db: Session,
     item_id_raw: Any,
     item_cd_raw: Any,
     item_nm_raw: Any,
     row_num: int,
-) -> int:
-    item_id: int | None = None
+) -> tuple[int | None, str | None, str | None]:
+    parsed_item_id: int | None = None
     if item_id_raw is not None and str(item_id_raw).strip() != "":
         try:
-            item_id = int(float(str(item_id_raw)))
+            parsed_item_id = int(float(str(item_id_raw)))
         except (ValueError, TypeError) as e:
             raise ExcelImportError(f"Invalid item_id: {item_id_raw}", row_num) from e
 
     item_cd = str(item_cd_raw).strip() if item_cd_raw is not None and str(item_cd_raw).strip() else None
     item_nm = str(item_nm_raw).strip() if item_nm_raw is not None and str(item_nm_raw).strip() else None
 
-    try:
-        item = resolve_item_by_ref(db, item_id=item_id, item_cd=item_cd, item_nm=item_nm)
-        return item.item_id
-    except MasterError as e:
-        raise ExcelImportError(str(e), row_num) from e
+    if parsed_item_id is not None:
+        item = db.get(Item, parsed_item_id)
+        if not item or item.deleted_at is not None:
+            raise ExcelImportError(f"Item id {parsed_item_id} not found.", row_num)
+        return item.item_id, item_cd or item.item_cd, item_nm or item.item_nm
+
+    if not item_cd and not item_nm:
+        raise ExcelImportError("Need item_cd or item_nm.", row_num)
+    return None, item_cd, item_nm
 
 
 def parse_data_rows(
@@ -124,7 +129,7 @@ def parse_data_rows(
         if qty <= 0:
             raise ExcelImportError(f"qty must be > 0 (got {qty})", row_num)
 
-        item_id = _resolve_item_id(
+        item_id, item_cd, item_nm = _resolve_item_for_import(
             db,
             _cell_value(row_tuple, col_map.get("item_id")),
             _cell_value(row_tuple, col_map.get("item_cd")),
@@ -152,7 +157,10 @@ def parse_data_rows(
         )
         try:
             location = resolve_location_by_ref(
-                db, location_id=parsed_location_id, location_cd=location_cd, location_nm=location_nm
+                db,
+                location_id=parsed_location_id,
+                location_cd=location_cd,
+                location_nm=location_nm,
             )
         except MasterError as e:
             raise ExcelImportError(str(e), row_num) from e
@@ -167,6 +175,8 @@ def parse_data_rows(
         lines.append(
             DraftLineCreate(
                 item_id=item_id,
+                item_cd=item_cd,
+                item_nm=item_nm,
                 location_id=location.location_id,
                 lot=str(lot_val).strip(),
                 qty=qty,

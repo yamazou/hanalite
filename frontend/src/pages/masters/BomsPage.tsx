@@ -1,6 +1,9 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Alert } from '../../components/Alert'
+import { ErpGridPanel, erpRowClass } from '../../components/erp/ErpGridPanel'
+import { ErpScreen } from '../../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../../components/erp/ErpSearchPanel'
+import { masterBomColumns } from '../../components/erp/masterGridColumns'
 import { ItemSearchPicker } from '../../components/ItemSearchPicker'
 import type { BomCreatePayload, BomRow } from '../../types/boms'
 import { itemRefFromSearch } from '../../types/boms'
@@ -116,126 +119,116 @@ export function BomsPage() {
   }
 
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>BOM</h1>
-          <p className="page-desc">Parent item (FG) → child item (RM) required quantity</p>
-        </div>
-      </header>
-
-      {error && <Alert type="error" message={error} />}
-      {success && <Alert type="success" message={success} />}
-
-      <div className="card">
-        <h2>Filter by parent</h2>
-        <div className="form-grid">
-          <ItemSearchPicker label="Parent item" value={parentFilter} onChange={setParentFilter} />
-          <div className="form-actions">
-            <button type="button" className="btn btn-secondary" onClick={load}>
+    <ErpScreen error={error} success={success}>
+      <ErpSearchPanel>
+        <div className="erp-search-form">
+          <ItemSearchPicker label="Filter parent" value={parentFilter} onChange={setParentFilter} />
+          <div className="erp-search-actions">
+            <button type="button" className="btn erp-btn erp-btn-search" onClick={load}>
               Apply filter
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={() => {
-                setParentFilter(null)
-              }}
-            >
-              Clear filter
+            <button type="button" className="btn erp-btn erp-btn-clear" onClick={() => setParentFilter(null)}>
+              Clear
             </button>
           </div>
         </div>
-      </div>
+      </ErpSearchPanel>
 
-      <div className="grid-2">
-        <div className="card">
-          <h2>{editId ? 'Edit' : 'Add'} BOM line</h2>
-          <form className="form-grid" onSubmit={onSubmit}>
-            <ItemSearchPicker label="Parent item (FG)" value={parent} onChange={setParent} required />
-            <ItemSearchPicker label="Child item (RM)" value={child} onChange={setChild} required />
-            <label className="full">
-              Child required qty
-              <input
-                type="number"
-                step="0.001"
-                min="0.001"
-                value={reqQty}
-                onChange={(e) => setReqQty(e.target.value)}
-                required
-              />
-            </label>
-            <div className="form-actions full">
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Saving…' : 'Save'}
+      <ErpSearchPanel className="erp-panel-master-form">
+        <form onSubmit={onSubmit} className="erp-search-form erp-search-form-bom">
+          <ItemSearchPicker label="Parent (FG)" value={parent} onChange={setParent} required />
+          <ItemSearchPicker label="Child (RM)" value={child} onChange={setChild} required />
+          <label className="erp-search-field erp-search-field-qty">
+            <input
+              type="number"
+              className="erp-input"
+              step="0.001"
+              min="0.001"
+              value={reqQty}
+              onChange={(e) => setReqQty(e.target.value)}
+              placeholder="Req Qty"
+              aria-label="Child required qty"
+              required
+            />
+          </label>
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+              {submitting ? 'Saving…' : editId ? 'Update' : 'Save'}
+            </button>
+            {editId && (
+              <button type="button" className="btn erp-btn erp-btn-clear" onClick={resetForm}>
+                Cancel
               </button>
-              {editId && (
-                <button type="button" className="btn btn-secondary" onClick={resetForm}>
-                  Cancel
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-
-        <div className="card">
-          <div className="card-header-row">
-            <h2>List</h2>
-            <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
-              Refresh
-            </button>
+            )}
           </div>
-          {loading ? (
-            <p className="muted">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="muted">No BOM lines</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Parent</th>
-                  <th>Child</th>
-                  <th className="num">Req Qty</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.bom_id}>
-                    <td>
-                      <code>{row.p_item_cd}</code>
-                      <br />
-                      <span className="muted small">{row.p_item_nm}</span>
-                    </td>
-                    <td>
-                      <code>{row.c_item_cd}</code>
-                      <br />
-                      <span className="muted small">{row.c_item_nm}</span>
-                    </td>
-                    <td className="num">{formatQty(row.c_req_qty)}</td>
-                    <td className="action-cell">
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => startEdit(row)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(row.bom_id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </>
+        </form>
+      </ErpSearchPanel>
+
+      <ErpGridPanel
+        gridId="masters-boms-v1"
+        title="BOM"
+        columns={masterBomColumns}
+        loading={loading}
+        isEmpty={!loading && rows.length === 0}
+        emptyText="No BOM lines"
+        onRefresh={load}
+      >
+        {(layout) => (
+          <tbody>
+            {rows.map((row, index) => (
+              <tr
+                key={row.bom_id}
+                className={erpRowClass(index, editId === row.bom_id)}
+                onClick={() => startEdit(row)}
+              >
+                {layout.orderedColumns.map((col) => {
+                  switch (col.key) {
+                    case 'parent':
+                      return (
+                        <td key={col.key}>
+                          <code>{row.p_item_cd}</code> {row.p_item_nm}
+                        </td>
+                      )
+                    case 'child':
+                      return (
+                        <td key={col.key}>
+                          <code>{row.c_item_cd}</code> {row.c_item_nm}
+                        </td>
+                      )
+                    case 'qty':
+                      return <td key={col.key}>{formatQty(row.c_req_qty)}</td>
+                    case 'actions':
+                      return (
+                        <td
+                          key={col.key}
+                          className="erp-col-actions"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-search"
+                            onClick={() => startEdit(row)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-cancel"
+                            onClick={() => void handleDelete(row.bom_id)}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      )
+                    default:
+                      return <td key={col.key} />
+                  }
+                })}
+              </tr>
+            ))}
+          </tbody>
+        )}
+      </ErpGridPanel>
+    </ErpScreen>
   )
 }

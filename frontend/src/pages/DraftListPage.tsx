@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
-import { DraftDetailPanel } from '../components/DraftDetailPanel'
+import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
+import { DraftHeaderEditCell } from '../components/DraftHeaderEditCells'
+import { useDraftEdit } from '../hooks/useDraftEdit'
 import { ResizableGridTable, type GridColumnDef } from '../components/ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
 import { useGridSort } from '../hooks/useGridSort'
@@ -12,6 +14,11 @@ import { downloadExcelSheet, exportFilename } from '../utils/exportExcel'
 import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
 import { applyColumnFilters, collectUniqueFilterValues } from '../utils/gridColumnFilter'
 import { compareDraftListItems, getDraftListFilterValue } from '../utils/draftGridSort'
+import {
+  APPROVE_ITEM_CD_REQUIRED_MSG,
+  findDraftLineMissingItemCd,
+  findLineMissingItemCd,
+} from '../utils/draftEdit'
 import { StatusBadge } from '../components/StatusBadge'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { DraftListItem, DraftStatus, Item, Supplier } from '../types'
@@ -26,6 +33,7 @@ type SearchFilters = {
   dateFrom: string
   dateTo: string
   supplierId: number | ''
+  referenceNo: string
   itemId: number | ''
   lot: string
 }
@@ -38,6 +46,7 @@ const emptySearchFilters: SearchFilters = {
   dateFrom: '',
   dateTo: '',
   supplierId: '',
+  referenceNo: '',
   itemId: '',
   lot: '',
 }
@@ -89,6 +98,10 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   const [acting, setActing] = useState(false)
   const [detailRefresh, setDetailRefresh] = useState(0)
   const [headerGridMenu, setHeaderGridMenu] = useState<GridContextMenuState>(null)
+  const [, setGridLayoutTick] = useState(0)
+  const [lineGridLayoutApi, setLineGridLayoutApi] = useState<LineGridLayoutApi | null>(null)
+
+  const bumpGridLayout = useCallback(() => setGridLayoutTick((n) => n + 1), [])
 
   const selectedId = useMemo(() => {
     const raw = searchParams.get('id')
@@ -101,6 +114,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     () => drafts.find((d) => d.inv_receipt_draft_id === selectedId) ?? null,
     [drafts, selectedId]
   )
+
+  const draftEdit = useDraftEdit(selectedId, variant, detailRefresh)
 
   const filters: { value: '' | DraftStatus; label: string }[] = [
     { value: '', label: copy.filterAll },
@@ -138,6 +153,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           date_from: appliedSearch.dateFrom || undefined,
           date_to: appliedSearch.dateTo || undefined,
           suppliers_id: appliedSearch.supplierId === '' ? undefined : appliedSearch.supplierId,
+          reference_no: appliedSearch.referenceNo.trim() || undefined,
           item_id: appliedSearch.itemId === '' ? undefined : appliedSearch.itemId,
           lot: appliedSearch.lot.trim() || undefined,
         },
@@ -182,11 +198,24 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
 
   async function handleApprove() {
     if (!selectedId || !selectedDraft) return
+    if (draftEdit.canEdit) {
+      if (findLineMissingItemCd(draftEdit.editLines)) {
+        window.alert(APPROVE_ITEM_CD_REQUIRED_MSG)
+        return
+      }
+    } else if (findDraftLineMissingItemCd(draftEdit.draft?.lines ?? [])) {
+      window.alert(APPROVE_ITEM_CD_REQUIRED_MSG)
+      return
+    }
     if (!confirm(copy.approveConfirm)) return
     setActing(true)
     setError(null)
     setMessage(null)
     try {
+      if (draftEdit.canEdit) {
+        const saved = await draftEdit.save()
+        if (!saved) return
+      }
       await api.approveDraft(selectedId, variant)
       setMessage(copy.approvedMsg)
       refreshDetail()
@@ -216,18 +245,36 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     }
   }
 
+  async function handleRestore() {
+    if (!selectedId || selectedDraft?.status !== 'cancelled') return
+    if (!confirm(copy.restoreConfirm)) return
+    setActing(true)
+    setError(null)
+    setMessage(null)
+    try {
+      await api.restoreDraft(selectedId, variant)
+      setMessage(copy.restoredMsg)
+      refreshDetail()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : copy.restoreFail)
+    } finally {
+      setActing(false)
+    }
+  }
+
   const canApprove =
     selectedDraft?.status === 'registered' && (selectedDraft?.line_count ?? 0) > 0
   const canCancel =
     selectedDraft?.status === 'registered' || selectedDraft?.status === 'approved'
+  const canRestore = selectedDraft?.status === 'cancelled'
 
   const headerColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
+      { key: 'date', label: copy.dateColumn, defaultWidth: 128 },
+      { key: 'supplier', label: copy.supplierCol, defaultWidth: 96 },
+      { key: 'reference', label: copy.referenceCol, defaultWidth: 96 },
       { key: 'source', label: copy.sourceCol, defaultWidth: 72 },
       { key: 'status', label: copy.statusCol, defaultWidth: 88 },
-      { key: 'date', label: copy.dateColumn, defaultWidth: 128 },
-      { key: 'reference', label: copy.referenceCol, defaultWidth: 96 },
-      { key: 'supplier', label: copy.supplierCol, defaultWidth: 96 },
       { key: 'notes', label: copy.notesLabel, defaultWidth: 120 },
       { key: 'lines', label: copy.linesCol, defaultWidth: 52, className: 'erp-col-num' },
       { key: 'created', label: copy.createdCol, defaultWidth: 128 },
@@ -240,8 +287,31 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     return cols
   }, [copy])
 
-  const headerGridId = `${variant}-header${copy.showPdfImport ? '-pdf' : ''}`
-  const headerLayout = useGridColumnLayout(headerGridId, headerColumns)
+  const headerGridId = `${variant}-header-v3`
+  const headerLayout = useGridColumnLayout(headerGridId, headerColumns, {
+    onLayoutChange: bumpGridLayout,
+  })
+
+  const gridLayoutDirty = headerLayout.isDirty || (lineGridLayoutApi?.isDirty ?? false)
+
+  const handleSaveGrid = () => {
+    headerLayout.saveLayout()
+    lineGridLayoutApi?.saveLayout()
+    setMessage(copy.saveGridSuccessMsg)
+    setGridLayoutTick((n) => n + 1)
+  }
+
+  const handleSaveDraft = async () => {
+    setError(null)
+    setMessage(null)
+    const ok = await draftEdit.save()
+    if (ok) {
+      setMessage(copy.saveSuccessMsg)
+      refreshDetail()
+    } else if (draftEdit.error) {
+      setError(draftEdit.error)
+    }
+  }
   const headerSort = useGridSort()
   const headerFilters = useGridColumnFilters()
   const [headerFilterMenu, setHeaderFilterMenu] = useState<{
@@ -291,7 +361,35 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     )
   }
 
+  const isListHeaderEditable = (draftId: number, d: DraftListItem) =>
+    selectedId === draftId &&
+    d.status === 'registered' &&
+    draftEdit.canEdit &&
+    draftEdit.headerEdit != null
+
   const renderHeaderCell = (colKey: string, d: DraftListItem, draftId: number) => {
+    const editable = isListHeaderEditable(draftId, d)
+    const header = draftEdit.headerEdit
+
+    if (editable && header && (colKey === 'date' || colKey === 'reference' || colKey === 'supplier' || colKey === 'notes')) {
+      return (
+        <td
+          key={colKey}
+          className="erp-grid-cell-edit"
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          <DraftHeaderEditCell
+            colKey={colKey}
+            header={header}
+            onPatch={draftEdit.patchHeader}
+            suppliers={draftEdit.suppliers}
+            copy={copy}
+          />
+        </td>
+      )
+    }
+
     switch (colKey) {
       case 'source':
         return <td key={colKey}>{sourceLabel[d.source_type] ?? d.source_type}</td>
@@ -413,6 +511,18 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 ))}
               </select>
             </label>
+            <label className="erp-search-field erp-search-field-reference">
+              <input
+                type="text"
+                className="erp-input"
+                value={searchInput.referenceNo}
+                placeholder={copy.filterReferencePh}
+                aria-label={copy.filterReferencePh}
+                onChange={(e) =>
+                  setSearchInput((prev) => ({ ...prev, referenceNo: e.target.value }))
+                }
+              />
+            </label>
             <label className="erp-search-field erp-search-field-item">
               <select
                 className={`erp-input${searchInput.itemId === '' ? ' erp-input-empty' : ''}`}
@@ -438,8 +548,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 type="text"
                 className="erp-input erp-input-lot"
                 value={searchInput.lot}
-                placeholder={copy.lotPlaceholder}
-                aria-label={copy.lotLabel}
+                placeholder={copy.filterLotPh}
+                aria-label={copy.filterLotPh}
                 onChange={(e) => setSearchInput((prev) => ({ ...prev, lot: e.target.value }))}
               />
             </label>
@@ -485,12 +595,41 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
               <button
                 type="button"
                 className="btn erp-btn erp-btn-cancel"
-                disabled={acting}
+                disabled={acting || draftEdit.saving}
                 onClick={handleCancel}
               >
                 {copy.cancelActionBtn}
               </button>
             )}
+            {selectedId && draftEdit.canEdit && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-search"
+                disabled={acting || draftEdit.saving}
+                onClick={() => void handleSaveDraft()}
+              >
+                {draftEdit.saving ? copy.submittingCreate : copy.detailSaveBtn}
+              </button>
+            )}
+            {selectedId && canRestore && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-new"
+                disabled={acting}
+                onClick={() => void handleRestore()}
+              >
+                {copy.restoreBtn}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn erp-btn erp-btn-search"
+              disabled={!gridLayoutDirty}
+              title={copy.saveGridBtn}
+              onClick={handleSaveGrid}
+            >
+              {copy.saveGridBtn}
+            </button>
             <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
               {copy.refreshBtn}
             </button>
@@ -528,10 +667,17 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 {sortedDrafts.map((d, index) => {
                   const id = d.inv_receipt_draft_id
                   const isSelected = selectedId === id
+                  const isEditingHeader = isListHeaderEditable(id, d)
                   return (
                     <tr
                       key={id}
-                      className={isSelected ? 'selected' : index % 2 === 1 ? 'row-alt' : undefined}
+                      className={
+                        isSelected
+                          ? `selected${isEditingHeader ? ' erp-grid-row-editing' : ''}`
+                          : index % 2 === 1
+                            ? 'row-alt'
+                            : undefined
+                      }
                       onClick={() => selectDraft(id)}
                       onDoubleClick={(event) => {
                         event.stopPropagation()
@@ -560,8 +706,10 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           <DraftDetailPanel
             draftId={selectedId}
             variant={variant}
-            refreshToken={detailRefresh}
-            onUpdated={refreshDetail}
+            edit={draftEdit}
+            onSaved={refreshDetail}
+            onLineGridLayout={setLineGridLayoutApi}
+            onLineGridLayoutChange={bumpGridLayout}
           />
         </div>
       </div>

@@ -18,6 +18,7 @@ export function MoveTypesPage() {
   return (
     <SimpleMasterPage
       title="Move Types"
+      gridId="masters-movetyps-v1"
       nameLabel="Name"
       placeholder="GR, GI..."
       loadRows={loadRows}

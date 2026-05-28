@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { Alert } from '../components/Alert'
+import { ErpScreen } from '../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { getDraftPageCopy } from '../config/draftPages'
 import type { Supplier } from '../types'
 import { datetimeLocalToIso, toDatetimeLocalValue } from '../utils/format'
@@ -51,67 +52,71 @@ export function DraftPdfImportPage() {
   }
 
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <Link to="/" className="back-link">
+    <ErpScreen error={error}>
+      <ErpSearchPanel>
+        <div className="erp-search-form">
+          <Link to="/" className="erp-link">
             ← 一覧
           </Link>
-          <h1>PDF 入荷リスト取込</h1>
-          <p className="page-desc">
-            PDFを保存し、表形式の明細があれば自動抽出します。抽出できない場合は詳細画面で明細を追加してください。
-          </p>
+          <span className="erp-search-section-label">PDF 入荷リスト取込</span>
         </div>
-      </header>
+      </ErpSearchPanel>
 
-      {error && <Alert type="error" message={error} />}
-
-      <div className="card hint">
-        <strong>PDF 取込について</strong>
-        <ul className="help-list">
-          <li>取引先ごとにレイアウトが異なる場合、自動抽出できないことがあります</li>
-          <li>その場合も PDF はドラフトに添付され、目検後に明細を手入力できます</li>
-          <li>表形式（品目・ロット・数量の列）がある PDF で精度が上がります</li>
-        </ul>
+      <div className="erp-panel erp-panel-hint">
+        <div className="erp-panel-title">PDF 取込について</div>
+        <div className="erp-panel-body">
+          <ul className="help-list">
+            <li>取引先ごとにレイアウトが異なる場合、自動抽出できないことがあります</li>
+            <li>その場合も PDF はドラフトに添付され、目検後に明細を手入力できます</li>
+            <li>表形式（品目・ロット・数量の列）がある PDF で精度が上がります</li>
+          </ul>
+        </div>
       </div>
 
       {loading ? (
-        <p className="muted">読み込み中…</p>
+        <p className="muted erp-grid-empty">読み込み中…</p>
       ) : (
-        <form className="card" onSubmit={handleSubmit}>
-          <h2>アップロード</h2>
-          <div className="form-grid">
-            <label className="full">
-              PDF ファイル
+        <ErpSearchPanel>
+          <form onSubmit={handleSubmit} className="erp-search-form">
+            <label className="erp-search-field erp-search-field-grow">
               <input
                 type="file"
+                className="erp-input"
                 accept=".pdf,application/pdf"
+                aria-label="PDF ファイル"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 required
               />
             </label>
-            <label>
-              入荷日時
+            <label className="erp-search-field erp-search-field-date">
               <input
                 type="datetime-local"
+                className="erp-input erp-input-date"
                 value={receiptAt}
+                aria-label="入荷日時"
                 onChange={(e) => setReceiptAt(e.target.value)}
                 required
               />
             </label>
-            <label>
-              参照番号
-              <input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} />
+            <label className="erp-search-field erp-search-field-reference">
+              <input
+                className="erp-input"
+                value={referenceNo}
+                placeholder="参照番号"
+                aria-label="参照番号"
+                onChange={(e) => setReferenceNo(e.target.value)}
+              />
             </label>
-            <label>
-              仕入先
+            <label className="erp-search-field erp-search-field-supplier">
               <select
+                className={`erp-input${suppliersId === '' ? ' erp-input-empty' : ''}`}
                 value={suppliersId}
+                aria-label="仕入先"
                 onChange={(e) =>
                   setSuppliersId(e.target.value === '' ? '' : Number(e.target.value))
                 }
               >
-                <option value="">（未選択）</option>
+                <option value="">仕入先</option>
                 {suppliers.map((s) => (
                   <option key={s.suppliers_id} value={s.suppliers_id}>
                     {s.suppliers_nm}
@@ -119,21 +124,26 @@ export function DraftPdfImportPage() {
                 ))}
               </select>
             </label>
-            <label className="full">
-              備考
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+            <label className="erp-search-field erp-search-field-grow">
+              <input
+                className="erp-input"
+                value={notes}
+                placeholder="備考"
+                aria-label="備考"
+                onChange={(e) => setNotes(e.target.value)}
+              />
             </label>
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? '取込中…' : '取込してドラフト作成'}
-            </button>
-            <Link to="/" className="btn btn-secondary">
-              キャンセル
-            </Link>
-          </div>
-        </form>
+            <div className="erp-search-actions">
+              <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+                {submitting ? '取込中…' : '取込してドラフト作成'}
+              </button>
+              <Link to="/" className="btn erp-btn erp-btn-clear">
+                キャンセル
+              </Link>
+            </div>
+          </form>
+        </ErpSearchPanel>
       )}
-    </>
+    </ErpScreen>
   )
 }

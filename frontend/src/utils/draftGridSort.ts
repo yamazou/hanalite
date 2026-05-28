@@ -78,8 +78,12 @@ export function getDraftListFilterValue(
 export function compareDraftLines(a: DraftLine, b: DraftLine, key: string, dir: SortDir): number {
   const value = (row: DraftLine): unknown => {
     switch (key) {
-      case 'item':
+      case 'item_cd':
+        return row.item_cd ?? ''
+      case 'item_nm':
         return row.item_nm ?? ''
+      case 'item':
+        return `${row.item_cd ?? ''} ${row.item_nm ?? ''}`.trim()
       case 'location':
         return `${row.location_cd ?? ''} ${row.location_nm ?? ''}`.trim()
       case 'lot':
@@ -95,9 +99,15 @@ export function compareDraftLines(a: DraftLine, b: DraftLine, key: string, dir: 
 
 export function getDraftLineFilterValue(row: DraftLine, key: string): string {
   switch (key) {
+    case 'item_cd':
+      return toFilterCellValue(row.item_cd)
+    case 'item_nm':
+      return toFilterCellValue(row.item_nm)
     case 'item': {
+      const code = row.item_cd ?? ''
       const name = row.item_nm ?? '-'
-      return toFilterCellValue(`${name} (ID:${row.item_id})`)
+      const idPart = row.item_id != null ? ` (ID:${row.item_id})` : ''
+      return toFilterCellValue(`${code} ${name}${idPart}`.trim())
     }
     case 'location': {
       const text = `${row.location_cd ?? '-'} ${row.location_nm ?? ''}`.trim()

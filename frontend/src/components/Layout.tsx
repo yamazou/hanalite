@@ -30,7 +30,7 @@ const navGroups: NavGroup[] = [
         id: 'Receipt',
         label: 'Receipt',
         items: [
-          { to: '/', label: 'Receipt Drafts' },
+          { to: '/', label: 'Receipt List' },
           { to: '/drafts/new', label: 'Receipt Entry' },
           { to: '/drafts/import', label: 'Excel Import' },
           { to: '/drafts/import-pdf', label: 'PDF Import' },
@@ -126,8 +126,15 @@ export function Layout() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand">hanalite</div>
-        <p className="brand-sub">Lot Traceability</p>
+        <div className="brand">
+          <img
+            src="/hanalite-logo.png"
+            alt="hanalite - Visual Management"
+            className="brand-logo"
+            width={196}
+            height={64}
+          />
+        </div>
         <nav className="sidebar-nav">
           {navGroups.map((group) => {
             const groupKey = group.id
@@ -217,9 +224,12 @@ export function Layout() {
           })}
         </nav>
         <div className="sidebar-footer">
-          <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
+          <Link to="/api-docs" className={pathname === '/api-docs' ? 'active' : ''}>
             API Docs
-          </a>
+          </Link>
+          <div aria-hidden="true">&nbsp;</div>
+          <div>hanalite v1.0 powered by</div>
+          <div>PT.BAHTERA HISISTEM INDONESIA</div>
         </div>
       </aside>
       <main className="main">

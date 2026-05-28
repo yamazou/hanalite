@@ -1,6 +1,9 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+﻿import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import { Alert } from '../components/Alert'
+import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
+import { ErpScreen } from '../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
+import { grgiHistoryColumns } from '../components/erp/masterGridColumns'
 import type { Item } from '../types'
 import type { LocationMaster } from '../types/masters'
 import type { GrgiHistory, MoveTyp } from '../types/inventory'
@@ -109,36 +112,53 @@ export function GrgiPage() {
     }
   }
 
+  const renderItemSelect = (form: 'grgi' | 'mv') => (
+    <label className="erp-search-field erp-search-field-item" key={form}>
+      <select
+        className={`erp-input${itemId === '' ? ' erp-input-empty' : ''}`}
+        value={itemId}
+        aria-label="Item"
+        onChange={(e) => setItemId(e.target.value)}
+        required
+      >
+        <option value="">Item</option>
+        {items.map((i) => (
+          <option key={i.item_id} value={i.item_id}>
+            {formatItemLabel(i)}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+
+  const renderActualAtInput = (form: 'grgi' | 'mv') => (
+    <label className="erp-search-field erp-search-field-date" key={form}>
+      <input
+        type="datetime-local"
+        className="erp-input erp-input-date"
+        value={actualAt}
+        aria-label="Actual Date/Time"
+        onChange={(e) => setActualAt(e.target.value)}
+        required
+      />
+    </label>
+  )
+
   return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>GR/GI Movements</h1>
-          <p className="page-desc">Post manual receipts and issues</p>
-        </div>
-      </header>
-
-      {error && <Alert type="error" message={error} />}
-      {success && <Alert type="success" message={success} />}
-
-      <div className="card">
-        <h2>New GR/GI Entry</h2>
-        <form className="form-grid" onSubmit={onSubmit}>
-          <label>
-            Item *
-            <select value={itemId} onChange={(e) => setItemId(e.target.value)} required>
-              <option value="">Select</option>
-              {items.map((i) => (
-                <option key={i.item_id} value={i.item_id}>
-                  {formatItemLabel(i)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Location *
-            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} required>
-              <option value="">Select</option>
+    <ErpScreen error={error} success={success} className="erp-screen-stacked">
+      <ErpSearchPanel>
+        <form onSubmit={onSubmit} className="erp-search-form">
+          <span className="erp-search-section-label">GR/GI</span>
+          {renderItemSelect('grgi')}
+          <label className="erp-search-field erp-search-field-supplier">
+            <select
+              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
+              value={locationId}
+              aria-label="Location"
+              onChange={(e) => setLocationId(e.target.value)}
+              required
+            >
+              <option value="">Location</option>
               {locations.map((l) => (
                 <option key={l.location_id} value={l.location_id}>
                   {l.location_cd} / {l.location_nm}
@@ -146,13 +166,24 @@ export function GrgiPage() {
               ))}
             </select>
           </label>
-          <label>
-            Lot *
-            <input value={lot} onChange={(e) => setLot(e.target.value)} required />
+          <label className="erp-search-field erp-search-field-reference">
+            <input
+              className="erp-input"
+              value={lot}
+              onChange={(e) => setLot(e.target.value)}
+              placeholder="Lot"
+              aria-label="Lot"
+              required
+            />
           </label>
-          <label>
-            Move Type *
-            <select value={movetypsId} onChange={(e) => setMovetypsId(e.target.value)} required>
+          <label className="erp-search-field">
+            <select
+              className="erp-input"
+              value={movetypsId}
+              aria-label="Move Type"
+              onChange={(e) => setMovetypsId(e.target.value)}
+              required
+            >
               {grgiMovetyps.map((m) => (
                 <option key={m.movetyps_id} value={m.movetyps_id}>
                   {m.movetyps_nm}
@@ -160,52 +191,41 @@ export function GrgiPage() {
               ))}
             </select>
           </label>
-          <label>
-            Qty *
+          <label className="erp-search-field erp-search-field-qty">
             <input
               type="number"
+              className="erp-input"
               step="0.001"
               min="0.001"
               value={moveQty}
               onChange={(e) => setMoveQty(e.target.value)}
+              placeholder="Qty"
+              aria-label="Qty"
               required
             />
           </label>
-          <label>
-            Actual Date/Time *
-            <input
-              type="datetime-local"
-              value={actualAt}
-              onChange={(e) => setActualAt(e.target.value)}
-              required
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save'}
+          {renderActualAtInput('grgi')}
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Post GR/GI'}
             </button>
           </div>
         </form>
-      </div>
+      </ErpSearchPanel>
 
-      <div className="card">
-        <h2>Location Transfer (MV)</h2>
-        <form className="form-grid" onSubmit={onMove}>
-          <label>
-            Item *
-            <select value={itemId} onChange={(e) => setItemId(e.target.value)} required>
-              <option value="">Select</option>
-              {items.map((i) => (
-                <option key={i.item_id} value={i.item_id}>
-                  {formatItemLabel(i)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            From Location *
-            <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
-              <option value="">Select</option>
+      <ErpSearchPanel>
+        <form onSubmit={onMove} className="erp-search-form">
+          <span className="erp-search-section-label">MV</span>
+          {renderItemSelect('mv')}
+          <label className="erp-search-field erp-search-field-supplier">
+            <select
+              className={`erp-input${fromLocationId === '' ? ' erp-input-empty' : ''}`}
+              value={fromLocationId}
+              aria-label="From Location"
+              onChange={(e) => setFromLocationId(e.target.value)}
+              required
+            >
+              <option value="">From</option>
               {locations.map((l) => (
                 <option key={l.location_id} value={l.location_id}>
                   {l.location_cd} / {l.location_nm}
@@ -213,10 +233,15 @@ export function GrgiPage() {
               ))}
             </select>
           </label>
-          <label>
-            To Location *
-            <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
-              <option value="">Select</option>
+          <label className="erp-search-field erp-search-field-supplier">
+            <select
+              className={`erp-input${toLocationId === '' ? ' erp-input-empty' : ''}`}
+              value={toLocationId}
+              aria-label="To Location"
+              onChange={(e) => setToLocationId(e.target.value)}
+              required
+            >
+              <option value="">To</option>
               {locations.map((l) => (
                 <option key={l.location_id} value={l.location_id}>
                   {l.location_cd} / {l.location_nm}
@@ -224,84 +249,87 @@ export function GrgiPage() {
               ))}
             </select>
           </label>
-          <label>
-            Lot *
-            <input value={moveLot} onChange={(e) => setMoveLot(e.target.value)} required />
+          <label className="erp-search-field erp-search-field-reference">
+            <input
+              className="erp-input"
+              value={moveLot}
+              onChange={(e) => setMoveLot(e.target.value)}
+              placeholder="Lot"
+              aria-label="Lot"
+              required
+            />
           </label>
-          <label>
-            Qty *
+          <label className="erp-search-field erp-search-field-qty">
             <input
               type="number"
+              className="erp-input"
               step="0.001"
               min="0.001"
               value={moveQtyMv}
               onChange={(e) => setMoveQtyMv(e.target.value)}
+              placeholder="Qty"
+              aria-label="Qty"
               required
             />
           </label>
-          <label>
-            Actual Date/Time *
-            <input
-              type="datetime-local"
-              value={actualAt}
-              onChange={(e) => setActualAt(e.target.value)}
-              required
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
+          {renderActualAtInput('mv')}
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
               {submitting ? 'Saving…' : 'Post Transfer'}
             </button>
           </div>
         </form>
-      </div>
+      </ErpSearchPanel>
 
-      <div className="card">
-        <div className="card-header-row">
-          <h2>History</h2>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
-            Refresh
-          </button>
-        </div>
-        {loading ? (
-          <p className="muted">Loading…</p>
-        ) : history.length === 0 ? (
-          <p className="muted">No history</p>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Item</th>
-                <th>Location</th>
-                <th>Lot</th>
-                <th>Type</th>
-                <th className="num">Move Qty</th>
-                <th className="num">Balance Qty</th>
-                <th>Actual Date/Time</th>
+      <ErpGridPanel
+        gridId="inventory-grgi-history-v1"
+        title="History"
+        columns={grgiHistoryColumns}
+        loading={loading}
+        isEmpty={!loading && history.length === 0}
+        emptyText="No history"
+        onRefresh={load}
+        panelClassName="erp-panel-grow-main"
+      >
+        {(layout) => (
+          <tbody>
+            {history.map((h, index) => (
+              <tr key={h.inv_grgi_id} className={erpRowClass(index)}>
+                {layout.orderedColumns.map((col) => {
+                  switch (col.key) {
+                    case 'id':
+                      return <td key={col.key}>{h.inv_grgi_id}</td>
+                    case 'item':
+                      return <td key={col.key}>{h.item_nm}</td>
+                    case 'location':
+                      return (
+                        <td key={col.key}>
+                          <code>{h.location_cd}</code> {h.location_nm}
+                        </td>
+                      )
+                    case 'lot':
+                      return (
+                        <td key={col.key}>
+                          <code>{h.lot}</code>
+                        </td>
+                      )
+                    case 'type':
+                      return <td key={col.key}>{h.movetyps_nm}</td>
+                    case 'move_qty':
+                      return <td key={col.key}>{formatQty(h.move_qty)}</td>
+                    case 'qty':
+                      return <td key={col.key}>{formatQty(h.qty)}</td>
+                    case 'actual_at':
+                      return <td key={col.key}>{formatDateTime(h.actual_at)}</td>
+                    default:
+                      return <td key={col.key} />
+                  }
+                })}
               </tr>
-            </thead>
-            <tbody>
-              {history.map((h) => (
-                <tr key={h.inv_grgi_id}>
-                  <td>{h.inv_grgi_id}</td>
-                  <td>{h.item_nm}</td>
-                  <td>
-                    <code>{h.location_cd}</code> {h.location_nm}
-                  </td>
-                  <td>
-                    <code>{h.lot}</code>
-                  </td>
-                  <td>{h.movetyps_nm}</td>
-                  <td className="num">{formatQty(h.move_qty)}</td>
-                  <td className="num">{formatQty(h.qty)}</td>
-                  <td>{formatDateTime(h.actual_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </tbody>
         )}
-      </div>
-    </>
+      </ErpGridPanel>
+    </ErpScreen>
   )
 }

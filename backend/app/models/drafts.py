@@ -43,7 +43,9 @@ class InvReceiptDraftLine(Base):
     inv_receipt_draft_line_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     inv_receipt_draft_id: Mapped[int] = mapped_column(ForeignKey("pch_receipt_draft.inv_receipt_draft_id"))
     line_no: Mapped[int] = mapped_column(Integer, default=1)
-    item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("m_items.item_id"), nullable=True)
+    item_cd: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    item_nm: Mapped[str | None] = mapped_column(String(200), nullable=True)
     location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     lot: Mapped[str] = mapped_column(String(50))
     qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
@@ -52,7 +54,7 @@ class InvReceiptDraftLine(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     draft: Mapped["InvReceiptDraft"] = relationship(back_populates="lines")
-    item: Mapped["Item"] = relationship()
+    item: Mapped["Item | None"] = relationship()
     location: Mapped["Location"] = relationship()
 
 
@@ -84,7 +86,9 @@ class SlsDeliveryDraftLine(Base):
         ForeignKey("sls_delivery_draft.sls_delivery_draft_id")
     )
     line_no: Mapped[int] = mapped_column(Integer, default=1)
-    item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
+    item_id: Mapped[int | None] = mapped_column(ForeignKey("m_items.item_id"), nullable=True)
+    item_cd: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    item_nm: Mapped[str | None] = mapped_column(String(200), nullable=True)
     location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     lot: Mapped[str] = mapped_column(String(50))
     qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
@@ -93,5 +97,5 @@ class SlsDeliveryDraftLine(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     draft: Mapped["SlsDeliveryDraft"] = relationship(back_populates="lines")
-    item: Mapped["Item"] = relationship()
+    item: Mapped["Item | None"] = relationship()
     location: Mapped["Location"] = relationship()

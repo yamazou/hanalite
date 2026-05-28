@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class DraftStatus(str, Enum):
@@ -19,11 +19,21 @@ class SourceType(str, Enum):
 
 
 class DraftLineCreate(BaseModel):
-    item_id: int = Field(gt=0)
+    item_id: int | None = Field(default=None, gt=0)
+    item_cd: str | None = Field(default=None, max_length=50)
+    item_nm: str | None = Field(default=None, max_length=200)
     location_id: int | None = Field(default=None, gt=0)
     lot: Annotated[str, Field(min_length=1, max_length=50)]
     qty: Decimal = Field(gt=0)
     line_no: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def require_item_reference(self) -> "DraftLineCreate":
+        if self.item_id is None and not (self.item_cd and str(self.item_cd).strip()) and not (
+            self.item_nm and str(self.item_nm).strip()
+        ):
+            raise ValueError("item_id or item_cd/item_nm is required.")
+        return self
 
 
 class DraftLineRead(BaseModel):
@@ -31,11 +41,12 @@ class DraftLineRead(BaseModel):
 
     inv_receipt_draft_line_id: int
     line_no: int
-    item_id: int
+    item_id: int | None = None
+    item_cd: str | None = None
+    item_nm: str | None = None
     location_id: int
     location_cd: str | None = None
     location_nm: str | None = None
-    item_nm: str | None = None
     lot: str
     qty: Decimal
 

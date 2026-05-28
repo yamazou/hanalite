@@ -8,16 +8,15 @@ import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
 import type { DraftDetail, DraftStatus, Item, Supplier } from '../types'
 import type { LocationMaster } from '../types/masters'
-import {
-  datetimeLocalToIso,
-  formatItemLabel,
-  toDatetimeLocalValue,
-} from '../utils/format'
+import { itemCdFieldPatch, itemNmFieldPatch } from '../utils/draftEdit'
+import { datetimeLocalToIso, formatItemLabel, toDatetimeLocalValue } from '../utils/format'
 
 type EntryLineRow = {
   key: string
   inv_receipt_draft_line_id?: number
   item_id: number | ''
+  item_cd: string
+  item_nm: string
   location_id: number | ''
   lot: string
   qty: string
@@ -32,6 +31,8 @@ function emptyLineRow(lineNo: number): EntryLineRow {
   return {
     key: crypto.randomUUID(),
     item_id: '',
+    item_cd: '',
+    item_nm: '',
     location_id: '',
     lot: '',
     qty: '',
@@ -43,7 +44,9 @@ function lineFromDraft(ln: DraftDetail['lines'][number]): EntryLineRow {
   return {
     key: `line-${ln.inv_receipt_draft_line_id}`,
     inv_receipt_draft_line_id: ln.inv_receipt_draft_line_id,
-    item_id: ln.item_id,
+    item_id: ln.item_id ?? '',
+    item_cd: ln.item_cd ?? '',
+    item_nm: ln.item_nm ?? '',
     location_id: ln.location_id ?? '',
     lot: ln.lot,
     qty: String(ln.qty),
@@ -81,18 +84,19 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
 
   const lineColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
-      { key: 'item', label: copy.itemLabel, defaultWidth: 220 },
-      { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
+      { key: 'item_cd', label: copy.itemCdLabel, defaultWidth: 110 },
+      { key: 'item_nm', label: copy.itemNmLabel, defaultWidth: 160 },
       { key: 'lot', label: copy.lotLabel, defaultWidth: 100 },
+      { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
       { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' },
     ]
     if (canEdit) {
       cols.push({ key: 'actions', label: '', defaultWidth: 72, className: 'erp-col-actions' })
     }
     return cols
-  }, [canEdit, copy.itemLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
+  }, [canEdit, copy.itemCdLabel, copy.itemNmLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
 
-  const lineGridId = `${variant}-entry-lines`
+  const lineGridId = `${variant}-entry-lines-v3`
   const lineLayout = useGridColumnLayout(lineGridId, lineColumns)
 
   const loadDraft = useCallback(async () => {
@@ -151,10 +155,16 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
 
   const buildPayloadLines = () => {
     const valid = lines.filter(
-      (row) => row.item_id !== '' && row.location_id !== '' && row.lot.trim() && row.qty
+      (row) =>
+        (row.item_id !== '' || row.item_cd.trim() || row.item_nm.trim()) &&
+        row.location_id !== '' &&
+        row.lot.trim() &&
+        row.qty
     )
     return valid.map((row, index) => ({
-      item_id: Number(row.item_id),
+      ...(row.item_id !== '' ? { item_id: Number(row.item_id) } : { item_id: null }),
+      item_cd: row.item_cd.trim() || null,
+      item_nm: row.item_nm.trim() || null,
       location_id: Number(row.location_id),
       lot: row.lot.trim(),
       qty: Number(row.qty),
@@ -203,12 +213,22 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
   const renderLineCell = (colKey: string, row: EntryLineRow) => {
     if (!canEdit) {
       switch (colKey) {
-        case 'item':
+        case 'item_cd':
           return (
             <td key={colKey}>
-              {items.find((i) => i.item_id === row.item_id)
-                ? formatItemLabel(items.find((i) => i.item_id === row.item_id)!)
-                : row.item_id}
+              <code>{row.item_cd || '-'}</code>
+            </td>
+          )
+        case 'item_nm':
+          return (
+            <td key={colKey}>
+              {row.item_nm ||
+                (row.item_id !== ''
+                  ? (() => {
+                      const item = items.find((i) => i.item_id === row.item_id)
+                      return item ? formatItemLabel(item) : String(row.item_id)
+                    })()
+                  : '-')}
             </td>
           )
         case 'location': {
@@ -233,25 +253,42 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     }
 
     switch (colKey) {
-      case 'item':
+      case 'item_cd':
         return (
           <td key={colKey} className="erp-grid-cell-edit">
-            <select
+            <input
               className="erp-grid-input"
-              value={row.item_id}
-              onChange={(e) =>
-                updateLine(row.key, {
-                  item_id: e.target.value === '' ? '' : Number(e.target.value),
-                })
-              }
-            >
-              <option value="">{copy.selectOption}</option>
+              value={row.item_cd}
+              list={`master-item-cd-${row.key}`}
+              placeholder={copy.itemCdLabel}
+              onChange={(e) => updateLine(row.key, itemCdFieldPatch(items, e.target.value))}
+            />
+            <datalist id={`master-item-cd-${row.key}`}>
               {items.map((item) => (
-                <option key={item.item_id} value={item.item_id}>
-                  {formatItemLabel(item)}
+                <option key={item.item_id} value={item.item_cd}>
+                  {item.item_nm}
                 </option>
               ))}
-            </select>
+            </datalist>
+          </td>
+        )
+      case 'item_nm':
+        return (
+          <td key={colKey} className="erp-grid-cell-edit">
+            <input
+              className="erp-grid-input"
+              value={row.item_nm}
+              list={`master-item-nm-${row.key}`}
+              placeholder={copy.itemNmLabel}
+              onChange={(e) => updateLine(row.key, itemNmFieldPatch(items, e.target.value))}
+            />
+            <datalist id={`master-item-nm-${row.key}`}>
+              {items.map((item) => (
+                <option key={item.item_id} value={item.item_nm}>
+                  {item.item_cd}
+                </option>
+              ))}
+            </datalist>
           </td>
         )
       case 'location':
@@ -329,7 +366,10 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
           <div className="erp-entry-toolbar">
-            <Link to={copy.listPath} className="erp-entry-back">
+            <Link
+              to={draftId != null ? copy.listPathWithId(draftId) : copy.listPath}
+              className="erp-entry-back"
+            >
               {copy.backToList}
             </Link>
             {status && <StatusBadge status={status} />}

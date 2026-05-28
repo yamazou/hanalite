@@ -19,6 +19,7 @@ export type DraftPageCopy = {
   entryEditTitle: (id: number) => string
   entryReadOnlyMsg: string
   saveSuccessMsg: string
+  detailSaveBtn: string
   searchPanelTitle: string
   headerGridTitle: string
   dateColumn: string
@@ -32,6 +33,8 @@ export type DraftPageCopy = {
   notesLabel: string
   linesTitle: string
   itemLabel: string
+  itemCdLabel: string
+  itemNmLabel: string
   locationLabel: string
   lotLabel: string
   lotPlaceholder: string
@@ -70,6 +73,10 @@ export type DraftPageCopy = {
   nextStepHint: string
   approveFail: string
   cancelFail: string
+  restoreBtn: string
+  restoreConfirm: string
+  restoredMsg: string
+  restoreFail: string
   loadFail: string
   masterLoadFail: string
   createFail: string
@@ -85,6 +92,8 @@ export type DraftPageCopy = {
   filterDateTo: string
   filterDateFromPh: string
   filterDateToPh: string
+  filterReferencePh: string
+  filterLotPh: string
   filterApply: string
   filterClear: string
   filterDateRangeError: string
@@ -92,6 +101,8 @@ export type DraftPageCopy = {
   exportHeaderSheet: string
   exportLinesSheet: string
   refreshBtn: string
+  saveGridBtn: string
+  saveGridSuccessMsg: string
   loadingText: string
   noDataText: string
   sourceCol: string
@@ -118,7 +129,7 @@ const receiptCopy: DraftPageCopy = {
   importPath: '/drafts/import',
   pdfImportPath: '/drafts/import-pdf',
   detailPath: (id) => `/drafts/${id}`,
-  listTitle: 'Receipt Drafts',
+  listTitle: 'Receipt List',
   listDesc: 'Review and approve receipts to post inventory movements.',
   newBtn: 'Receipt Entry',
   excelBtn: 'Excel Import',
@@ -131,6 +142,7 @@ const receiptCopy: DraftPageCopy = {
   entryEditTitle: (id) => `Receipt Entry #${id}`,
   entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
   saveSuccessMsg: 'Saved.',
+  detailSaveBtn: 'Save Data',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Receipt Date',
@@ -144,6 +156,8 @@ const receiptCopy: DraftPageCopy = {
   notesLabel: 'Notes',
   linesTitle: 'Rows',
   itemLabel: 'Item',
+  itemCdLabel: 'Item Code',
+  itemNmLabel: 'Item Name',
   locationLabel: 'Location',
   lotLabel: 'Lot',
   lotPlaceholder: 'LOT-001',
@@ -183,12 +197,16 @@ const receiptCopy: DraftPageCopy = {
   nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
   approveFail: 'Approval failed',
   cancelFail: 'Cancel failed',
+  restoreBtn: 'Restore',
+  restoreConfirm: 'Restore this cancelled receipt to Registered?',
+  restoredMsg: 'Restored to Registered.',
+  restoreFail: 'Restore failed',
   loadFail: 'Failed to load',
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
   importFail: 'Import failed',
   selectExcel: 'Please select an .xlsx file.',
-  lineValidation: 'Enter at least one line with item, location, lot, and quantity.',
+  lineValidation: 'Enter at least one line with item code or name, location, lot, and quantity.',
   showPdfImport: true,
   filterAll: 'All',
   filterPending: 'Registered',
@@ -198,13 +216,17 @@ const receiptCopy: DraftPageCopy = {
   filterDateTo: 'Receipt Date To',
   filterDateFromPh: 'From',
   filterDateToPh: 'To',
+  filterReferencePh: 'Reference No',
+  filterLotPh: 'Lot',
   filterApply: 'Apply',
   filterClear: 'Clear',
   filterDateRangeError: 'Receipt Date From must be on or before Receipt Date To.',
   exportExcelLabel: 'Excel',
-  exportHeaderSheet: 'Receipt Drafts',
+  exportHeaderSheet: 'Receipt List',
   exportLinesSheet: 'Rows',
   refreshBtn: 'Refresh',
+  saveGridBtn: 'Save Grid',
+  saveGridSuccessMsg: 'Grid layout saved.',
   loadingText: 'Loading…',
   noDataText: 'No data',
   sourceCol: 'Source',
@@ -221,7 +243,7 @@ const receiptCopy: DraftPageCopy = {
   cancelledAtLabel: 'Cancelled at',
   addLineFormTitle: 'Add line',
   addLineSubmitBtn: 'Add',
-  addLineValidation: 'Enter item, location, lot, and quantity.',
+  addLineValidation: 'Enter item code or name, location, lot, and quantity.',
   addLineFail: 'Failed to add line',
 }
 
@@ -242,6 +264,7 @@ const deliveryCopy: DraftPageCopy = {
   entryEditTitle: (id) => `Delivery Entry #${id}`,
   entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
   saveSuccessMsg: 'Saved.',
+  detailSaveBtn: 'Save Data',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Delivery Date',
@@ -255,6 +278,8 @@ const deliveryCopy: DraftPageCopy = {
   notesLabel: 'Notes',
   linesTitle: 'Rows',
   itemLabel: 'Item',
+  itemCdLabel: 'Item Code',
+  itemNmLabel: 'Item Name',
   locationLabel: 'Location',
   lotLabel: 'Lot',
   lotPlaceholder: 'LOT-001',
@@ -292,12 +317,16 @@ const deliveryCopy: DraftPageCopy = {
   nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
   approveFail: 'Approval failed',
   cancelFail: 'Cancel failed',
+  restoreBtn: 'Restore',
+  restoreConfirm: 'Restore this cancelled delivery to Registered?',
+  restoredMsg: 'Restored to Registered.',
+  restoreFail: 'Restore failed',
   loadFail: 'Failed to load',
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
   importFail: 'Import failed',
   selectExcel: 'Please select an .xlsx file.',
-  lineValidation: 'Enter at least one line with item, location, lot, and quantity.',
+  lineValidation: 'Enter at least one line with item code or name, location, lot, and quantity.',
   showPdfImport: false,
   filterAll: 'All',
   filterPending: 'Pending',
@@ -307,6 +336,8 @@ const deliveryCopy: DraftPageCopy = {
   filterDateTo: 'Delivery Date To',
   filterDateFromPh: 'From',
   filterDateToPh: 'To',
+  filterReferencePh: 'Reference No',
+  filterLotPh: 'Lot',
   filterApply: 'Apply',
   filterClear: 'Clear',
   filterDateRangeError: 'Delivery Date From must be on or before Delivery Date To.',
@@ -314,6 +345,8 @@ const deliveryCopy: DraftPageCopy = {
   exportHeaderSheet: 'Delivery Drafts',
   exportLinesSheet: 'Rows',
   refreshBtn: 'Refresh',
+  saveGridBtn: 'Save Grid',
+  saveGridSuccessMsg: 'Grid layout saved.',
   loadingText: 'Loading…',
   noDataText: 'No data',
   sourceCol: 'Source',
@@ -330,7 +363,7 @@ const deliveryCopy: DraftPageCopy = {
   cancelledAtLabel: 'Cancelled at',
   addLineFormTitle: 'Add line',
   addLineSubmitBtn: 'Add',
-  addLineValidation: 'Enter item, location, lot, and quantity.',
+  addLineValidation: 'Enter item code or name, location, lot, and quantity.',
   addLineFail: 'Failed to add line',
 }
 

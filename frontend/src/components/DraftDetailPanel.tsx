@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../api/client'
+import { useEffect, useMemo, useState } from 'react'
 import { Alert } from './Alert'
 import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
-import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
+import { useGridColumnLayout, type GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { useGridSort } from '../hooks/useGridSort'
 import { GridColumnFilterMenu } from './GridColumnFilterMenu'
 import { GridContextMenu, type GridContextMenuState } from './GridContextMenu'
@@ -10,73 +9,81 @@ import { downloadExcelSheet, exportFilename } from '../utils/exportExcel'
 import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
 import { applyColumnFilters, collectUniqueFilterValues } from '../utils/gridColumnFilter'
 import { compareDraftLines, getDraftLineFilterValue } from '../utils/draftGridSort'
-import type { DraftLine } from '../types'
+import type { useDraftEdit } from '../hooks/useDraftEdit'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
-import type { DraftDetail } from '../types'
-import type { Item } from '../types'
-import type { LocationMaster } from '../types/masters'
-import { formatItemLabel, formatQty } from '../utils/format'
+import type { DraftLine } from '../types'
+import {
+  editRowToDraftLine,
+  itemCdFieldPatch,
+  itemNmFieldPatch,
+  type EditLineRow,
+} from '../utils/draftEdit'
+import { formatQty } from '../utils/format'
+
+type DraftEdit = ReturnType<typeof useDraftEdit>
+
+export type LineGridLayoutApi = Pick<GridColumnLayout, 'saveLayout' | 'isDirty'>
 
 type Props = {
   draftId: number | null
   variant?: DraftVariant
-  refreshToken?: number
-  onUpdated?: () => void
-}
-
-type PendingLineRow = {
-  key: string
-  item_id: number | ''
-  location_id: number | ''
-  lot: string
-  qty: string
-  saving: boolean
-}
-
-function emptyPendingRow(): PendingLineRow {
-  return {
-    key: crypto.randomUUID(),
-    item_id: '',
-    location_id: '',
-    lot: '',
-    qty: '',
-    saving: false,
-  }
+  edit: DraftEdit
+  onSaved?: () => void
+  onLineGridLayout?: (api: LineGridLayoutApi) => void
+  onLineGridLayoutChange?: () => void
 }
 
 export function DraftDetailPanel({
   draftId,
   variant = 'receipt',
-  refreshToken = 0,
-  onUpdated,
+  edit,
+  onSaved,
+  onLineGridLayout,
+  onLineGridLayoutChange,
 }: Props) {
   const copy = getDraftPageCopy(variant)
-  const [draft, setDraft] = useState<DraftDetail | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
-  const [items, setItems] = useState<Item[]>([])
-  const [locations, setLocations] = useState<LocationMaster[]>([])
-  const [pendingRows, setPendingRows] = useState<PendingLineRow[]>([])
-  const [lineGridMenu, setLineGridMenu] = useState<GridContextMenuState>(null)
+  const {
+    draft,
+    loading,
+    error,
+    rowError,
+    message,
+    canEdit,
+    editLines,
+    updateLine,
+    addRow,
+    removeRow,
+    items,
+    locations,
+  } = edit
 
-  const canEdit = draft?.status === 'registered'
+  const [lineGridMenu, setLineGridMenu] = useState<GridContextMenuState>(null)
 
   const lineColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
-      { key: 'item', label: copy.itemLabel, defaultWidth: 220 },
-      { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
+      { key: 'item_cd', label: copy.itemCdLabel, defaultWidth: 110 },
+      { key: 'item_nm', label: copy.itemNmLabel, defaultWidth: 160 },
       { key: 'lot', label: copy.lotLabel, defaultWidth: 100 },
+      { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
       { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' },
     ]
     if (canEdit) {
-      cols.push({ key: 'actions', label: '', defaultWidth: 88, className: 'erp-col-actions' })
+      cols.push({ key: 'actions', label: '', defaultWidth: 72, className: 'erp-col-actions' })
     }
     return cols
-  }, [canEdit, copy.itemLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
+  }, [canEdit, copy.itemCdLabel, copy.itemNmLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
 
-  const lineGridId = `${variant}-lines${canEdit ? '-edit' : ''}`
-  const lineLayout = useGridColumnLayout(lineGridId, lineColumns)
+  const lineGridId = `${variant}-lines-v3`
+  const lineLayout = useGridColumnLayout(lineGridId, lineColumns, {
+    onLayoutChange: onLineGridLayoutChange,
+  })
+
+  useEffect(() => {
+    onLineGridLayout?.({
+      saveLayout: lineLayout.saveLayout,
+      isDirty: lineLayout.isDirty,
+    })
+  }, [lineLayout.saveLayout, lineLayout.isDirty, onLineGridLayout])
   const lineSort = useGridSort()
   const lineFilters = useGridColumnFilters()
   const [lineFilterMenu, setLineFilterMenu] = useState<{
@@ -85,15 +92,19 @@ export function DraftDetailPanel({
     rect: DOMRect
   } | null>(null)
 
+  const displayLines: DraftLine[] = useMemo(() => {
+    if (canEdit) return editLines.map(editRowToDraftLine)
+    return draft?.lines ?? []
+  }, [canEdit, editLines, draft?.lines])
+
   const lineFilterOptions = useMemo(() => {
-    if (!lineFilterMenu || !draft?.lines) return []
-    return collectUniqueFilterValues(draft.lines, lineFilterMenu.key, getDraftLineFilterValue)
-  }, [lineFilterMenu, draft?.lines])
+    if (!lineFilterMenu || displayLines.length === 0) return []
+    return collectUniqueFilterValues(displayLines, lineFilterMenu.key, getDraftLineFilterValue)
+  }, [lineFilterMenu, displayLines])
 
   const filteredLines = useMemo(() => {
-    if (!draft?.lines) return []
-    return applyColumnFilters(draft.lines, lineFilters.filters, getDraftLineFilterValue)
-  }, [draft?.lines, lineFilters.filters])
+    return applyColumnFilters(displayLines, lineFilters.filters, getDraftLineFilterValue)
+  }, [displayLines, lineFilters.filters])
 
   const sortedLines = useMemo(() => {
     if (!lineSort.sort) return filteredLines
@@ -101,7 +112,12 @@ export function DraftDetailPanel({
     return [...filteredLines].sort((a, b) => compareDraftLines(a, b, key, dir))
   }, [filteredLines, lineSort.sort])
 
-  const isLineColumnSortable = (key: string) => key !== 'actions'
+  const editLinesSorted = useMemo(
+    () => [...editLines].sort((a, b) => a.line_no - b.line_no),
+    [editLines]
+  )
+
+  const isLineColumnSortable = (key: string) => key !== 'actions' && !canEdit
   const isLineColumnFilterable = isLineColumnSortable
 
   const lineFilterColumnLabel =
@@ -120,16 +136,21 @@ export function DraftDetailPanel({
     downloadExcelSheet(copy.exportLinesSheet, headers, rows, exportFilename(prefix))
   }
 
-  const renderLineCell = (colKey: string, line: DraftLine) => {
+  const renderReadOnlyLineCell = (colKey: string, line: DraftLine) => {
     switch (colKey) {
-      case 'item':
+      case 'item_cd':
         return (
-          <td
-            key={colKey}
-            title={`${line.item_nm ?? '-'} (ID:${line.item_id})`}
-          >
+          <td key={colKey} title={line.item_cd ?? ''}>
+            <code>{line.item_cd ?? '-'}</code>
+          </td>
+        )
+      case 'item_nm':
+        return (
+          <td key={colKey} title={line.item_nm ?? ''}>
             <span className="erp-item-name">{line.item_nm ?? '-'}</span>
-            <span className="muted small"> (ID:{line.item_id})</span>
+            {line.item_id != null && (
+              <span className="muted small"> (ID:{line.item_id})</span>
+            )}
           </td>
         )
       case 'location':
@@ -154,34 +175,49 @@ export function DraftDetailPanel({
             {formatQty(line.qty)}
           </td>
         )
-      case 'actions':
-        return <td key={colKey}></td>
       default:
         return null
     }
   }
 
-  const renderPendingCell = (colKey: string, row: PendingLineRow) => {
+  const renderEditLineCell = (colKey: string, row: EditLineRow) => {
     switch (colKey) {
-      case 'item':
+      case 'item_cd':
         return (
           <td key={colKey} className="erp-grid-cell-edit">
-            <select
+            <input
               className="erp-grid-input"
-              value={row.item_id}
-              onChange={(e) =>
-                updatePendingRow(row.key, {
-                  item_id: e.target.value === '' ? '' : Number(e.target.value),
-                })
-              }
-            >
-              <option value="">{copy.selectOption}</option>
+              value={row.item_cd}
+              list={`draft-item-cd-${row.key}`}
+              placeholder={copy.itemCdLabel}
+              onChange={(e) => updateLine(row.key, itemCdFieldPatch(items, e.target.value))}
+            />
+            <datalist id={`draft-item-cd-${row.key}`}>
               {items.map((item) => (
-                <option key={item.item_id} value={item.item_id}>
-                  {formatItemLabel(item)}
+                <option key={item.item_id} value={item.item_cd}>
+                  {item.item_nm}
                 </option>
               ))}
-            </select>
+            </datalist>
+          </td>
+        )
+      case 'item_nm':
+        return (
+          <td key={colKey} className="erp-grid-cell-edit">
+            <input
+              className="erp-grid-input"
+              value={row.item_nm}
+              list={`draft-item-nm-${row.key}`}
+              placeholder={copy.itemNmLabel}
+              onChange={(e) => updateLine(row.key, itemNmFieldPatch(items, e.target.value))}
+            />
+            <datalist id={`draft-item-nm-${row.key}`}>
+              {items.map((item) => (
+                <option key={item.item_id} value={item.item_nm}>
+                  {item.item_cd}
+                </option>
+              ))}
+            </datalist>
           </td>
         )
       case 'location':
@@ -191,7 +227,7 @@ export function DraftDetailPanel({
               className="erp-grid-input"
               value={row.location_id}
               onChange={(e) =>
-                updatePendingRow(row.key, {
+                updateLine(row.key, {
                   location_id: e.target.value === '' ? '' : Number(e.target.value),
                 })
               }
@@ -212,7 +248,7 @@ export function DraftDetailPanel({
               className="erp-grid-input"
               value={row.lot}
               placeholder={copy.lotPlaceholder}
-              onChange={(e) => updatePendingRow(row.key, { lot: e.target.value })}
+              onChange={(e) => updateLine(row.key, { lot: e.target.value })}
             />
           </td>
         )
@@ -225,116 +261,24 @@ export function DraftDetailPanel({
               min="0.001"
               step="0.001"
               value={row.qty}
-              onChange={(e) => updatePendingRow(row.key, { qty: e.target.value })}
+              onChange={(e) => updateLine(row.key, { qty: e.target.value })}
             />
           </td>
         )
       case 'actions':
         return (
           <td key={colKey} className="erp-col-actions">
-            <div className="erp-row-actions">
-              <button
-                type="button"
-                className="btn erp-btn erp-btn-new btn-sm"
-                disabled={row.saving}
-                onClick={() => void savePendingRow(row)}
-              >
-                {row.saving ? copy.submittingCreate : copy.saveRowBtn}
-              </button>
-              <button
-                type="button"
-                className="btn erp-btn erp-btn-clear btn-sm"
-                disabled={row.saving}
-                onClick={() => removePendingRow(row.key)}
-              >
-                {copy.removeRowBtn}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn erp-btn erp-btn-clear btn-sm"
+              onClick={() => removeRow(row.key)}
+            >
+              {copy.removeRowBtn}
+            </button>
           </td>
         )
       default:
         return null
-    }
-  }
-
-  const load = useCallback(async () => {
-    if (!draftId) {
-      setDraft(null)
-      setError(null)
-      setPendingRows([])
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await api.getDraft(draftId, variant)
-      setDraft(data)
-      setPendingRows([])
-      setRowError(null)
-    } catch (e) {
-      setDraft(null)
-      setError(e instanceof Error ? e.message : copy.loadFail)
-    } finally {
-      setLoading(false)
-    }
-  }, [draftId, copy.loadFail, variant])
-
-  useEffect(() => {
-    void load()
-  }, [load, refreshToken])
-
-  useEffect(() => {
-    if (!canEdit) return
-    api.listItems().then(setItems).catch(() => setItems([]))
-    api.listLocationsMaster().then(setLocations).catch(() => setLocations([]))
-  }, [canEdit])
-
-  const addRow = () => {
-    setRowError(null)
-    setPendingRows((prev) => [...prev, emptyPendingRow()])
-  }
-
-  const updatePendingRow = (key: string, patch: Partial<PendingLineRow>) => {
-    setPendingRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  }
-
-  const removePendingRow = (key: string) => {
-    setPendingRows((prev) => prev.filter((row) => row.key !== key))
-    setRowError(null)
-  }
-
-  const savePendingRow = async (row: PendingLineRow) => {
-    if (!draft) return
-    if (!row.item_id || !row.location_id || !row.lot.trim() || !row.qty) {
-      setRowError(copy.addLineValidation)
-      return
-    }
-    const qty = Number(row.qty)
-    if (!qty || qty <= 0) {
-      setRowError(copy.addLineValidation)
-      return
-    }
-
-    const nextLineNo = Math.max(0, ...draft.lines.map((line) => line.line_no)) + 1
-    setRowError(null)
-    updatePendingRow(row.key, { saving: true })
-    try {
-      await api.addDraftLine(
-        draft.inv_receipt_draft_id,
-        {
-          item_id: Number(row.item_id),
-          location_id: Number(row.location_id),
-          lot: row.lot.trim(),
-          qty,
-          line_no: nextLineNo,
-        },
-        variant
-      )
-      await load()
-      onUpdated?.()
-    } catch (e) {
-      updatePendingRow(row.key, { saving: false })
-      setRowError(e instanceof Error ? e.message : copy.addLineFail)
     }
   }
 
@@ -355,7 +299,7 @@ export function DraftDetailPanel({
     )
   }
 
-  const showEmptyHint = draft.lines.length === 0 && pendingRows.length === 0
+  const showEmptyHint = canEdit && editLines.length === 0
 
   return (
     <div className="erp-detail-content">
@@ -379,16 +323,24 @@ export function DraftDetailPanel({
         />
       )}
       {error && <Alert type="error" message={error} />}
+      {message && <Alert type="success" message={message} />}
+
       {canEdit && (
         <div className="erp-detail-toolbar">
           <button type="button" className="btn erp-btn erp-btn-new btn-sm" onClick={addRow}>
             {copy.addRowBtn}
           </button>
-          {rowError && <span className="alert-inline error">{rowError}</span>}
+          {rowError && (
+            <span className="alert-inline error">
+              {rowError === 'line_validation' ? copy.addLineValidation : rowError}
+            </span>
+          )}
         </div>
       )}
+
       {showEmptyHint && <p className="muted erp-grid-empty">{copy.noLinesMsg}</p>}
-      {(draft.lines.length > 0 || pendingRows.length > 0 || canEdit) && (
+
+      {(displayLines.length > 0 || canEdit) && (
         <div
           className="erp-grid-wrap erp-grid-wrap-detail"
           onContextMenu={(event) => {
@@ -413,22 +365,32 @@ export function DraftDetailPanel({
             }}
           >
             <tbody>
-              {sortedLines.map((line, index) => (
-                <tr key={line.inv_receipt_draft_line_id} className={index % 2 === 1 ? 'row-alt' : undefined}>
-                  {lineLayout.orderedColumns.map((col) => renderLineCell(col.key, line))}
-                </tr>
-              ))}
-              {pendingRows.map((row, index) => (
-                <tr
-                  key={row.key}
-                  className={`erp-grid-row-editing ${(sortedLines.length + index) % 2 === 1 ? 'row-alt' : ''}`}
-                >
-                  {lineLayout.orderedColumns.map((col) => renderPendingCell(col.key, row))}
-                </tr>
-              ))}
+              {canEdit
+                ? editLinesSorted.map((row, index) => (
+                    <tr
+                      key={row.key}
+                      className={`erp-grid-row-editing ${index % 2 === 1 ? 'row-alt' : ''}`}
+                    >
+                      {lineLayout.orderedColumns.map((col) => renderEditLineCell(col.key, row))}
+                    </tr>
+                  ))
+                : sortedLines.map((line, index) => (
+                    <tr
+                      key={line.inv_receipt_draft_line_id}
+                      className={index % 2 === 1 ? 'row-alt' : undefined}
+                    >
+                      {lineLayout.orderedColumns.map((col) =>
+                        renderReadOnlyLineCell(col.key, line)
+                      )}
+                    </tr>
+                  ))}
             </tbody>
           </ResizableGridTable>
         </div>
+      )}
+
+      {canEdit && draft.lines.length > 0 && (
+        <p className="muted erp-detail-hint">{copy.nextStepHint}</p>
       )}
     </div>
   )

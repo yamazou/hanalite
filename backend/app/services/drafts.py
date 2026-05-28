@@ -16,6 +16,10 @@ from app.schemas.drafts import (
     DraftUpdate,
     SourceType,
 )
+from app.services.draft_item_resolve import (
+    resolve_draft_line_item_id,
+    validate_lines_item_cd_for_approve,
+)
 from app.services.inventory import InventoryError, apply_cancel_reversal, apply_gr
 from app.services.masters import MasterError, resolve_location_id
 
@@ -24,16 +28,24 @@ class DraftServiceError(Exception):
     pass
 
 
+def _item_ref_from_line(line: DraftLineCreate | DraftLineUpsert) -> tuple[int | None, str | None, str | None]:
+    item_id = line.item_id
+    item_cd = (line.item_cd or "").strip() or None
+    item_nm = (line.item_nm or "").strip() or None
+    return item_id, item_cd, item_nm
+
+
 def _draft_to_read(draft: InvReceiptDraft) -> DraftRead:
     lines = [
         DraftLineRead(
             inv_receipt_draft_line_id=ln.inv_receipt_draft_line_id,
             line_no=ln.line_no,
             item_id=ln.item_id,
+            item_cd=ln.item_cd or (ln.item.item_cd if ln.item else None),
+            item_nm=ln.item_nm or (ln.item.item_nm if ln.item else None),
             location_id=ln.location_id,
             location_cd=ln.location.location_cd if ln.location else None,
             location_nm=ln.location.location_nm if ln.location else None,
-            item_nm=ln.item.item_nm if ln.item else None,
             lot=ln.lot,
             qty=ln.qty,
         )
@@ -104,9 +116,15 @@ def _add_line_entity(
     default_line_no: int,
     now: datetime,
 ) -> InvReceiptDraftLine:
-    item = db.get(Item, line.item_id)
-    if not item or item.deleted_at is not None:
-        raise DraftServiceError(f"Item {line.item_id} not found.")
+    item_id, item_cd, item_nm = _item_ref_from_line(line)
+    if item_id is not None:
+        item = db.get(Item, item_id)
+        if not item or item.deleted_at is not None:
+            raise DraftServiceError(f"Item {item_id} not found.")
+        item_cd = item_cd or item.item_cd
+        item_nm = item_nm or item.item_nm
+    elif not item_cd and not item_nm:
+        raise DraftServiceError("item_id or item_cd/item_nm is required.")
     try:
         location_id = resolve_location_id(db, line.location_id)
     except MasterError as e:
@@ -114,7 +132,9 @@ def _add_line_entity(
     entity = InvReceiptDraftLine(
         inv_receipt_draft_id=draft_id,
         line_no=line.line_no or default_line_no,
-        item_id=line.item_id,
+        item_id=item_id,
+        item_cd=item_cd,
+        item_nm=item_nm,
         location_id=location_id,
         lot=line.lot.strip(),
         qty=line.qty,
@@ -184,14 +204,22 @@ def _apply_line_upsert(
             entity = active.get(line_in.inv_receipt_draft_line_id)
             if not entity:
                 raise DraftServiceError(f"Line {line_in.inv_receipt_draft_line_id} not found.")
-            item = db.get(Item, line_in.item_id)
-            if not item or item.deleted_at is not None:
-                raise DraftServiceError(f"Item {line_in.item_id} not found.")
+            item_id, item_cd, item_nm = _item_ref_from_line(line_in)
+            if item_id is not None:
+                item = db.get(Item, item_id)
+                if not item or item.deleted_at is not None:
+                    raise DraftServiceError(f"Item {item_id} not found.")
+                item_cd = item_cd or item.item_cd
+                item_nm = item_nm or item.item_nm
+            elif not item_cd and not item_nm:
+                raise DraftServiceError("item_id or item_cd/item_nm is required.")
             try:
                 location_id = resolve_location_id(db, line_in.location_id)
             except MasterError as e:
                 raise DraftServiceError(str(e)) from e
-            entity.item_id = line_in.item_id
+            entity.item_id = item_id
+            entity.item_cd = item_cd
+            entity.item_nm = item_nm
             entity.location_id = location_id
             entity.lot = line_in.lot.strip()
             entity.qty = line_in.qty
@@ -227,6 +255,7 @@ def list_drafts(
     date_from: date | None = None,
     date_to: date | None = None,
     suppliers_id: int | None = None,
+    reference_no: str | None = None,
     item_id: int | None = None,
     lot: str | None = None,
 ) -> list[DraftListItem]:
@@ -264,6 +293,9 @@ def list_drafts(
         stmt = stmt.where(InvReceiptDraft.receipt_at <= datetime.combine(date_to, time.max))
     if suppliers_id is not None:
         stmt = stmt.where(InvReceiptDraft.suppliers_id == suppliers_id)
+    reference_value = (reference_no or "").strip()
+    if reference_value:
+        stmt = stmt.where(InvReceiptDraft.reference_no.like(f"%{reference_value}%"))
     if item_id is not None:
         stmt = stmt.where(
             exists(
@@ -344,12 +376,21 @@ def approve_draft(db: Session, draft_id: int) -> DraftRead:
     if not active_lines:
         raise DraftServiceError("Cannot approve: no lines on draft. Add lines first.")
 
+    try:
+        validate_lines_item_cd_for_approve(active_lines)
+    except MasterError as e:
+        raise DraftServiceError(str(e)) from e
+
     actual_at = draft.receipt_at
     try:
         for line in active_lines:
+            try:
+                item_id = resolve_draft_line_item_id(db, line)
+            except MasterError as e:
+                raise DraftServiceError(str(e)) from e
             apply_gr(
                 db,
-                item_id=line.item_id,
+                item_id=item_id,
                 location_id=line.location_id,
                 lot=line.lot,
                 qty=line.qty,
@@ -408,4 +449,26 @@ def cancel_draft(db: Session, draft_id: int) -> DraftRead:
         db.rollback()
         raise DraftServiceError(str(e)) from e
 
+    return get_draft(db, draft_id)
+
+
+def restore_draft(db: Session, draft_id: int) -> DraftRead:
+    draft = db.scalar(
+        select(InvReceiptDraft)
+        .where(
+            InvReceiptDraft.inv_receipt_draft_id == draft_id,
+            InvReceiptDraft.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if not draft:
+        raise DraftServiceError(f"Draft {draft_id} not found.")
+    if draft.status != "cancelled":
+        raise DraftServiceError("Only cancelled drafts can be restored to registered.")
+
+    now = datetime.now()
+    draft.status = "registered"
+    draft.cancelled_at = None
+    draft.updated_at = now
+    db.commit()
     return get_draft(db, draft_id)

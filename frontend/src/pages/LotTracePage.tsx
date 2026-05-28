@@ -1,7 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { Alert } from '../components/Alert'
+import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
+import { ErpScreen } from '../components/erp/ErpScreen'
+import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
+import {
+  traceBalanceColumns,
+  traceCurrentColumns,
+  traceHistoryColumns,
+} from '../components/erp/masterGridColumns'
 import type { LotTraceResult } from '../types/inventory'
 import type { LocationMaster } from '../types/masters'
 import { formatDateTime, formatQty } from '../utils/format'
@@ -54,30 +61,30 @@ export function LotTracePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial URL lot only
   }, [])
 
-  return (
-    <>
-      <header className="page-header">
-        <div>
-          <h1>Lot Trace</h1>
-          <p className="page-desc">Current stock, movement history, and monthly balances by lot</p>
-        </div>
-      </header>
+  const lotTitle = result?.lot ?? lot
 
-      <div className="card">
-        <form className="filter-form" onSubmit={onSubmit}>
-          <label>
-            Lot Number
+  return (
+    <ErpScreen error={error} className="erp-screen-stacked">
+      <ErpSearchPanel>
+        <form onSubmit={onSubmit} className="erp-search-form">
+          <label className="erp-search-field erp-search-field-reference">
             <input
+              className="erp-input"
               value={lot}
               onChange={(e) => setLot(e.target.value)}
-              placeholder="e.g. LOT-2024-001"
+              placeholder="Lot Number"
+              aria-label="Lot Number"
               required
             />
           </label>
-          <label>
-            Location
-            <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-              <option value="">All</option>
+          <label className="erp-search-field erp-search-field-supplier">
+            <select
+              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
+              value={locationId}
+              aria-label="Location"
+              onChange={(e) => setLocationId(e.target.value)}
+            >
+              <option value="">Location</option>
               {locations.map((l) => (
                 <option key={l.location_id} value={l.location_id}>
                   {l.location_cd} / {l.location_nm}
@@ -85,119 +92,134 @@ export function LotTracePage() {
               ))}
             </select>
           </label>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Searching…' : 'Trace'}
-          </button>
+          <div className="erp-search-actions">
+            <button type="submit" className="btn erp-btn erp-btn-search" disabled={loading}>
+              {loading ? 'Searching…' : 'Trace'}
+            </button>
+          </div>
         </form>
-      </div>
-
-      {error && <Alert type="error" message={error} />}
+      </ErpSearchPanel>
 
       {result && (
         <>
-          <section className="card">
-            <h2>Current Stock — {result.lot}</h2>
-            {result.current.length === 0 ? (
-              <p className="muted">No current stock</p>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    <th>Location</th>
-                    <th>Type</th>
-                    <th className="num">Qty</th>
-                    <th>Updated</th>
+          <ErpGridPanel
+            gridId="trace-current-v1"
+            title={`Current Stock — ${lotTitle}`}
+            columns={traceCurrentColumns}
+            isEmpty={result.current.length === 0}
+            emptyText="No current stock"
+          >
+            {(layout) => (
+              <tbody>
+                {result.current.map((c, index) => (
+                  <tr key={`${c.item_nm}-${c.location_cd}-${index}`} className={erpRowClass(index)}>
+                    {layout.orderedColumns.map((col) => {
+                      switch (col.key) {
+                        case 'item':
+                          return <td key={col.key}>{c.item_nm}</td>
+                        case 'location':
+                          return (
+                            <td key={col.key}>
+                              <code>{c.location_cd}</code> {c.location_nm}
+                            </td>
+                          )
+                        case 'type':
+                          return <td key={col.key}>{c.itemtyp_nm}</td>
+                        case 'qty':
+                          return <td key={col.key}>{formatQty(c.qty)}</td>
+                        case 'updated':
+                          return <td key={col.key}>{formatDateTime(c.updated_at)}</td>
+                        default:
+                          return <td key={col.key} />
+                      }
+                    })}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.current.map((c, i) => (
-                    <tr key={i}>
-                      <td>{c.item_nm}</td>
-                      <td>
-                        <code>{c.location_cd}</code> {c.location_nm}
-                      </td>
-                      <td>{c.itemtyp_nm}</td>
-                      <td className="num">{formatQty(c.qty)}</td>
-                      <td>{formatDateTime(c.updated_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
             )}
-          </section>
+          </ErpGridPanel>
 
-          <section className="card">
-            <h2>Movement History</h2>
-            {result.history.length === 0 ? (
-              <p className="muted">No history</p>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Item</th>
-                    <th>Location</th>
-                    <th>Type</th>
-                    <th className="num">Move Qty</th>
-                    <th className="num">Balance Qty</th>
-                    <th>Actual Date/Time</th>
+          <ErpGridPanel
+            gridId="trace-history-v1"
+            title="Movement History"
+            columns={traceHistoryColumns}
+            isEmpty={result.history.length === 0}
+            emptyText="No history"
+          >
+            {(layout) => (
+              <tbody>
+                {result.history.map((h, index) => (
+                  <tr key={h.inv_grgi_id} className={erpRowClass(index)}>
+                    {layout.orderedColumns.map((col) => {
+                      switch (col.key) {
+                        case 'id':
+                          return <td key={col.key}>{h.inv_grgi_id}</td>
+                        case 'item':
+                          return <td key={col.key}>{h.item_nm}</td>
+                        case 'location':
+                          return (
+                            <td key={col.key}>
+                              <code>{h.location_cd}</code> {h.location_nm}
+                            </td>
+                          )
+                        case 'type':
+                          return <td key={col.key}>{h.movetyps_nm}</td>
+                        case 'move_qty':
+                          return <td key={col.key}>{formatQty(h.move_qty)}</td>
+                        case 'qty':
+                          return <td key={col.key}>{formatQty(h.qty)}</td>
+                        case 'actual_at':
+                          return <td key={col.key}>{formatDateTime(h.actual_at)}</td>
+                        default:
+                          return <td key={col.key} />
+                      }
+                    })}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.history.map((h) => (
-                    <tr key={h.inv_grgi_id}>
-                      <td>{h.inv_grgi_id}</td>
-                      <td>{h.item_nm}</td>
-                      <td>
-                        <code>{h.location_cd}</code> {h.location_nm}
-                      </td>
-                      <td>{h.movetyps_nm}</td>
-                      <td className="num">{formatQty(h.move_qty)}</td>
-                      <td className="num">{formatQty(h.qty)}</td>
-                      <td>{formatDateTime(h.actual_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
             )}
-          </section>
+          </ErpGridPanel>
 
-          <section className="card">
-            <h2>Monthly Balance Snapshots</h2>
-            {result.balances.length === 0 ? (
-              <p className="muted">No balance data</p>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    <th>Item</th>
-                    <th>Location</th>
-                    <th className="num">Opening Qty</th>
-                    <th className="num">Closing Qty</th>
-                    <th>Opening Date/Time</th>
+          <ErpGridPanel
+            gridId="trace-balances-v1"
+            title="Monthly Balance Snapshots"
+            columns={traceBalanceColumns}
+            isEmpty={result.balances.length === 0}
+            emptyText="No balance data"
+          >
+            {(layout) => (
+              <tbody>
+                {result.balances.map((b, index) => (
+                  <tr key={`${b.period_year_month}-${b.item_nm}-${index}`} className={erpRowClass(index)}>
+                    {layout.orderedColumns.map((col) => {
+                      switch (col.key) {
+                        case 'period':
+                          return <td key={col.key}>{b.period_year_month}</td>
+                        case 'item':
+                          return <td key={col.key}>{b.item_nm}</td>
+                        case 'location':
+                          return (
+                            <td key={col.key}>
+                              <code>{b.location_cd}</code> {b.location_nm}
+                            </td>
+                          )
+                        case 'beg_qty':
+                          return <td key={col.key}>{formatQty(b.beg_qty)}</td>
+                        case 'qty':
+                          return <td key={col.key}>{formatQty(b.qty)}</td>
+                        case 'beg_at':
+                          return <td key={col.key}>{formatDateTime(b.beg_at)}</td>
+                        default:
+                          return <td key={col.key} />
+                      }
+                    })}
                   </tr>
-                </thead>
-                <tbody>
-                  {result.balances.map((b, i) => (
-                    <tr key={i}>
-                      <td>{b.period_year_month}</td>
-                      <td>{b.item_nm}</td>
-                      <td>
-                        <code>{b.location_cd}</code> {b.location_nm}
-                      </td>
-                      <td className="num">{formatQty(b.beg_qty)}</td>
-                      <td className="num">{formatQty(b.qty)}</td>
-                      <td>{formatDateTime(b.beg_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                ))}
+              </tbody>
             )}
-          </section>
+          </ErpGridPanel>
         </>
       )}
-    </>
+    </ErpScreen>
   )
 }

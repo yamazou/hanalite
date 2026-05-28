@@ -23,6 +23,7 @@ from app.services.drafts import (
     approve_draft,
     cancel_draft,
     create_draft,
+    restore_draft,
     get_draft,
     list_drafts,
     update_draft,
@@ -45,6 +46,7 @@ def api_list_drafts(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     suppliers_id: int | None = Query(default=None, gt=0),
+    reference_no: str | None = Query(default=None, max_length=100),
     item_id: int | None = Query(default=None, gt=0),
     lot: str | None = Query(default=None, min_length=1, max_length=50),
 ):
@@ -54,6 +56,7 @@ def api_list_drafts(
         date_from=date_from,
         date_to=date_to,
         suppliers_id=suppliers_id,
+        reference_no=reference_no,
         item_id=item_id,
         lot=lot,
     )
@@ -245,6 +248,17 @@ def api_cancel_draft(
 ):
     try:
         return cancel_draft(db, draft_id)
+    except DraftServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/{draft_id}/restore", response_model=DraftRead)
+def api_restore_draft(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        return restore_draft(db, draft_id)
     except DraftServiceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
