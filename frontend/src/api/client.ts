@@ -14,6 +14,7 @@ import type {
   ItemSearchRow,
   ItemTyp,
   MoveTypMaster,
+  ItemProcMaster,
   LocationMaster,
   SupplierMaster,
 } from '../types/masters'
@@ -26,6 +27,12 @@ import type {
   LotTraceResult,
   MoveTyp,
 } from '../types/inventory'
+import type {
+  ProductionOrderCreatePayload,
+  ProductionOrderDetail,
+  ProductionOrderListItem,
+  ProductionOrderUpdatePayload,
+} from '../types/production'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 const API_PREFIX = '/api/v1'
@@ -234,8 +241,41 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ location_cd, location_nm }),
     }),
+  updateLocation: (location_id: number, location_cd: string, location_nm: string) =>
+    request<LocationMaster>(`/masters/locations/${location_id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ location_cd, location_nm }),
+    }),
   deleteLocation: (location_id: number) =>
     request<void>(`/masters/locations/${location_id}`, { method: 'DELETE' }),
+
+  listItemprocsMaster: () => request<ItemProcMaster[]>('/masters/itemprocs'),
+  createItemproc: (payload: {
+    item_id: number
+    process_no: number
+    process_nm: string
+    rm_location_id: number
+    wip_location_id: number
+  }) =>
+    request<ItemProcMaster>('/masters/itemprocs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateItemproc: (
+    itemproc_id: number,
+    payload: {
+      process_no?: number
+      process_nm?: string
+      rm_location_id?: number
+      wip_location_id?: number
+    }
+  ) =>
+    request<ItemProcMaster>(`/masters/itemprocs/${itemproc_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteItemproc: (itemproc_id: number) =>
+    request<void>(`/masters/itemprocs/${itemproc_id}`, { method: 'DELETE' }),
 
   listItemsMaster: () => request<ItemListRow[]>('/masters/items'),
   searchItems: (q: string, limit = 20) =>
@@ -391,4 +431,45 @@ export const api = {
       `/inventory/balances?period=${period}${location_id != null ? `&location_id=${location_id}` : ''}`,
       { method: 'POST' }
     ),
+
+  listProductionOrders: (status?: string) =>
+    request<ProductionOrderListItem[]>(
+      `/production/orders${status ? `?status=${encodeURIComponent(status)}` : ''}`
+    ),
+  getProductionOrder: (order_id: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}`),
+  createProductionOrder: (payload: ProductionOrderCreatePayload) =>
+    request<ProductionOrderDetail>('/production/orders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateProductionOrder: (order_id: number, payload: ProductionOrderUpdatePayload) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  recalculateProductionInputs: (order_id: number, basis_qty: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/recalculate-inputs`, {
+      method: 'POST',
+      body: JSON.stringify({ basis_qty }),
+    }),
+  completeProductionOrder: (order_id: number, actual_qty: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ actual_qty }),
+    }),
+  completeProductionLine: (order_id: number, line_id: number, actual_qty: number) =>
+    request<ProductionOrderDetail>(
+      `/production/orders/${order_id}/lines/${line_id}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ actual_qty }),
+      }
+    ),
+  deleteProductionOrder: (order_id: number) =>
+    request<void>(`/production/orders/${order_id}`, { method: 'DELETE' }),
+  approveProductionOrder: (order_id: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/approve`, { method: 'POST' }),
+  cancelProductionOrder: (order_id: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/cancel`, { method: 'POST' }),
 }

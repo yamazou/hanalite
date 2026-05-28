@@ -4,14 +4,16 @@ import { useGridColumnLayout, type GridColumnLayout } from '../../hooks/useGridC
 
 type Props = {
   gridId: string
-  title: string
+  title?: string
   columns: GridColumnDef[]
   loading?: boolean
   isEmpty?: boolean
   loadingText?: string
   emptyText?: string
   onRefresh?: () => void
+  toolbarLeft?: ReactNode
   toolbarRight?: ReactNode
+  showSaveGridButton?: boolean
   panelClassName?: string
   children: (layout: GridColumnLayout) => ReactNode
 }
@@ -25,7 +27,9 @@ export function ErpGridPanel({
   loadingText = 'Loading…',
   emptyText = 'No data',
   onRefresh,
+  toolbarLeft,
   toolbarRight,
+  showSaveGridButton = false,
   panelClassName,
   children,
 }: Props) {
@@ -33,13 +37,23 @@ export function ErpGridPanel({
 
   return (
     <div className={`erp-panel erp-panel-grow${panelClassName ? ` ${panelClassName}` : ''}`}>
-      <div className="erp-panel-title">{title}</div>
+      {title ? <div className="erp-panel-title">{title}</div> : null}
       <div className="erp-panel-content">
-        {(onRefresh || toolbarRight) && (
+        {(onRefresh || toolbarLeft || toolbarRight || showSaveGridButton) && (
           <div className="erp-toolbar">
-            <div className="erp-toolbar-left" />
+            <div className="erp-toolbar-left">{toolbarLeft}</div>
             <div className="erp-toolbar-right">
               {toolbarRight}
+              {showSaveGridButton && (
+                <button
+                  type="button"
+                  className="btn erp-btn erp-btn-search"
+                  disabled={!layout.isDirty}
+                  onClick={() => layout.saveLayout()}
+                >
+                  Save Grid
+                </button>
+              )}
               {onRefresh && (
                 <button type="button" className="btn erp-btn erp-btn-clear" onClick={onRefresh}>
                   Refresh

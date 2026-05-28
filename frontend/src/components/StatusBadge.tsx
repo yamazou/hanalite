@@ -1,4 +1,5 @@
 import type { DraftStatus } from '../types'
+import type { ProductionStatus } from '../types/production'
 import { statusLabel } from '../utils/format'
 
 const classMap: Record<DraftStatus, string> = {
@@ -7,7 +8,7 @@ const classMap: Record<DraftStatus, string> = {
   cancelled: 'badge-cancelled',
 }
 
-export function StatusBadge({ status }: { status: DraftStatus }) {
+export function StatusBadge({ status }: { status: DraftStatus | ProductionStatus }) {
   return (
     <span className={`badge ${classMap[status]}`}>
       {statusLabel[status] ?? status}

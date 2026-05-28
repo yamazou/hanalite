@@ -63,3 +63,17 @@ export interface LocationMaster {
   location_nm: string
   created_at?: string | null
 }
+
+export interface ItemProcMaster {
+  itemproc_id: number
+  item_id: number
+  item_cd: string
+  item_nm: string
+  process_no: number
+  process_nm: string
+  rm_location_id: number
+  rm_location_cd: string
+  wip_location_id: number
+  wip_location_cd: string
+  created_at?: string | null
+}

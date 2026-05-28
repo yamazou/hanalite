@@ -16,7 +16,7 @@ type NavGroup =
       modules: NavModule[]
     }
   | {
-      id: 'Inventory' | 'Masters'
+      id: 'Inventory' | 'Production' | 'Masters'
       label: string
       items: NavLink[]
     }
@@ -46,12 +46,17 @@ const navGroups: NavGroup[] = [
         id: 'Delivery',
         label: 'Delivery',
         items: [
-          { to: '/delivery', label: 'Delivery Drafts' },
+          { to: '/delivery', label: 'Delivery List' },
           { to: '/delivery/new', label: 'Delivery Entry' },
           { to: '/delivery/import', label: 'Excel Import' },
         ],
       },
     ],
+  },
+  {
+    id: 'Production',
+    label: 'Production',
+    items: [{ to: '/production/orders', label: 'Production List' }],
   },
   {
     id: 'Inventory',
@@ -67,6 +72,7 @@ const navGroups: NavGroup[] = [
     id: 'Masters',
     label: 'Masters',
     items: [
+      { to: '/masters/itemprocs', label: 'Item Processes' },
       { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/suppliers', label: 'Suppliers' },
       { to: '/masters/movetyps', label: 'Move Types' },
@@ -85,6 +91,7 @@ function isActive(pathname: string, to: string) {
 
 function openKeysForPath(pathname: string): string[] {
   if (pathname.startsWith('/masters')) return ['Masters']
+  if (pathname.startsWith('/production')) return ['Production']
   if (pathname.startsWith('/inventory') || pathname.startsWith('/trace')) return ['Inventory']
   if (pathname.startsWith('/delivery')) return ['Sales', 'Sales:Delivery']
   return ['Purchase', 'Purchase:Receipt']

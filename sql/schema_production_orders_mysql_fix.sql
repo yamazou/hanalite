@@ -1,0 +1,2 @@
+-- Deprecated: use schema_production_orders_alter_existing.sql instead.
+-- That file adds active_key on m_itemprocs and itemproc_id on prd_orders.

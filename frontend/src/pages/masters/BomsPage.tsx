@@ -7,7 +7,7 @@ import { masterBomColumns } from '../../components/erp/masterGridColumns'
 import { ItemSearchPicker } from '../../components/ItemSearchPicker'
 import type { BomCreatePayload, BomRow } from '../../types/boms'
 import { itemRefFromSearch } from '../../types/boms'
-import type { ItemSearchRow } from '../../types/masters'
+import type { ItemSearchRow, LocationMaster } from '../../types/masters'
 import { formatQty } from '../../utils/format'
 
 export function BomsPage() {
@@ -17,6 +17,8 @@ export function BomsPage() {
   const [parent, setParent] = useState<ItemSearchRow | null>(null)
   const [child, setChild] = useState<ItemSearchRow | null>(null)
   const [reqQty, setReqQty] = useState('')
+  const [locationId, setLocationId] = useState('')
+  const [locations, setLocations] = useState<LocationMaster[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,11 +41,16 @@ export function BomsPage() {
     load()
   }, [load])
 
+  useEffect(() => {
+    api.listLocationsMaster().then(setLocations).catch(() => {})
+  }, [])
+
   const resetForm = () => {
     setEditId(null)
     setParent(null)
     setChild(null)
     setReqQty('')
+    setLocationId('')
   }
 
   const startEdit = (row: BomRow) => {
@@ -63,14 +70,15 @@ export function BomsPage() {
       itemtyp_nm: '',
     })
     setReqQty(String(row.c_req_qty))
+    setLocationId(String(row.location_id))
     setError(null)
     setSuccess(null)
   }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!parent || !child) {
-      setError('Select parent and child items.')
+    if (!parent || !child || !locationId) {
+      setError('Select parent, child and location.')
       return
     }
     const qty = Number(reqQty)
@@ -86,6 +94,7 @@ export function BomsPage() {
       const payload: BomCreatePayload = {
         parent: itemRefFromSearch(parent),
         child: itemRefFromSearch(child),
+        location_id: Number(locationId),
         c_req_qty: qty,
       }
       if (editId) {
@@ -138,6 +147,21 @@ export function BomsPage() {
         <form onSubmit={onSubmit} className="erp-search-form erp-search-form-bom">
           <ItemSearchPicker label="Parent (FG)" value={parent} onChange={setParent} required />
           <ItemSearchPicker label="Child (RM)" value={child} onChange={setChild} required />
+          <label className="erp-search-field erp-search-field-qty">
+            <select
+              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
+              value={locationId}
+              onChange={(e) => setLocationId(e.target.value)}
+              required
+            >
+              <option value="">Location</option>
+              {locations.map((l) => (
+                <option key={l.location_id} value={l.location_id}>
+                  {l.location_cd}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="erp-search-field erp-search-field-qty">
             <input
               type="number"
@@ -197,6 +221,8 @@ export function BomsPage() {
                       )
                     case 'qty':
                       return <td key={col.key}>{formatQty(row.c_req_qty)}</td>
+                    case 'location':
+                      return <td key={col.key}><code>{row.location_cd}</code> {row.location_nm}</td>
                     case 'actions':
                       return (
                         <td

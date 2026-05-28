@@ -8,6 +8,7 @@ import type { LocationMaster } from '../../types/masters'
 
 export function LocationsPage() {
   const [rows, setRows] = useState<LocationMaster[]>([])
+  const [editId, setEditId] = useState<number | null>(null)
   const [locationCd, setLocationCd] = useState('')
   const [locationNm, setLocationNm] = useState('')
   const [loading, setLoading] = useState(true)
@@ -40,7 +41,12 @@ export function LocationsPage() {
     setError(null)
     setSuccess(null)
     try {
-      await api.createLocation(cd, nm)
+      if (editId) {
+        await api.updateLocation(editId, cd, nm)
+      } else {
+        await api.createLocation(cd, nm)
+      }
+      setEditId(null)
       setLocationCd('')
       setLocationNm('')
       setSuccess('Saved.')
@@ -58,11 +64,30 @@ export function LocationsPage() {
     setSuccess(null)
     try {
       await api.deleteLocation(id)
+      if (editId === id) {
+        setEditId(null)
+        setLocationCd('')
+        setLocationNm('')
+      }
       setSuccess('Deleted.')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete')
     }
+  }
+
+  const startEdit = (row: LocationMaster) => {
+    setEditId(row.location_id)
+    setLocationCd(row.location_cd)
+    setLocationNm(row.location_nm)
+    setError(null)
+    setSuccess(null)
+  }
+
+  const cancelEdit = () => {
+    setEditId(null)
+    setLocationCd('')
+    setLocationNm('')
   }
 
   return (
@@ -91,8 +116,13 @@ export function LocationsPage() {
           </label>
           <div className="erp-search-actions">
             <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save'}
+              {submitting ? 'Saving…' : editId ? 'Update' : 'Save'}
             </button>
+            {editId && (
+              <button type="button" className="btn erp-btn erp-btn-clear" onClick={cancelEdit}>
+                Cancel
+              </button>
+            )}
           </div>
         </form>
       </ErpSearchPanel>
@@ -108,7 +138,11 @@ export function LocationsPage() {
         {(layout) => (
           <tbody>
             {rows.map((row, index) => (
-              <tr key={row.location_id} className={erpRowClass(index)}>
+              <tr
+                key={row.location_id}
+                className={erpRowClass(index, editId === row.location_id)}
+                onClick={() => startEdit(row)}
+              >
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
                     case 'id':
@@ -123,7 +157,18 @@ export function LocationsPage() {
                       return <td key={col.key}>{row.location_nm}</td>
                     case 'actions':
                       return (
-                        <td key={col.key} className="erp-col-actions">
+                        <td
+                          key={col.key}
+                          className="erp-col-actions"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="btn erp-btn erp-btn-search"
+                            onClick={() => startEdit(row)}
+                          >
+                            Edit
+                          </button>
                           <button
                             type="button"
                             className="btn erp-btn erp-btn-cancel"

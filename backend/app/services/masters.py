@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.inventory import MoveTyp
-from app.models.masters import Item, ItemTyp, Location, Supplier
+from app.models.masters import Item, ItemProc, ItemTyp, Location, Supplier
 from app.schemas.masters import (
     ItemCreate,
     ItemDetailOut,
@@ -17,8 +17,12 @@ from app.schemas.masters import (
     ItemSearchOut,
     ItemTypCreate,
     ItemTypOut,
+    ItemProcCreate,
+    ItemProcOut,
+    ItemProcUpdate,
     LocationCreate,
     LocationOut,
+    LocationUpdate,
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
@@ -139,6 +143,20 @@ def delete_location(db: Session, location_id: int) -> None:
     if not row or row.deleted_at is not None:
         raise MasterError("Location not found.")
     _soft_delete(row)
+
+
+def update_location(db: Session, location_id: int, payload: LocationUpdate) -> LocationOut:
+    row = db.get(Location, location_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Location not found.")
+    row.location_cd = payload.location_cd.strip()
+    row.location_nm = payload.location_nm.strip()
+    row.updated_at = _now()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Location code or name already exists.") from e
+    return LocationOut.model_validate(row)
 
 
 def get_default_location_id(db: Session) -> int:
@@ -379,4 +397,145 @@ def delete_item(db: Session, item_id: int) -> None:
     row = db.get(Item, item_id)
     if not row or row.deleted_at is not None:
         raise MasterError("Item not found.")
+    _soft_delete(row)
+
+
+def list_itemprocs(db: Session) -> list[ItemProcOut]:
+    item = Item.__table__.alias("it")
+    rm = Location.__table__.alias("rm")
+    wip = Location.__table__.alias("wip")
+    stmt = (
+        select(
+            ItemProc,
+            item.c.item_cd,
+            item.c.item_nm,
+            rm.c.location_cd,
+            wip.c.location_cd,
+        )
+        .join(item, item.c.item_id == ItemProc.item_id)
+        .join(rm, rm.c.location_id == ItemProc.rm_location_id)
+        .join(wip, wip.c.location_id == ItemProc.wip_location_id)
+        .where(ItemProc.deleted_at.is_(None))
+        .order_by(item.c.item_cd, ItemProc.process_no, ItemProc.itemproc_id)
+    )
+    rows = db.execute(stmt).all()
+    return [
+        ItemProcOut(
+            itemproc_id=row.itemproc_id,
+            item_id=row.item_id,
+            item_cd=item_cd,
+            item_nm=item_nm,
+            process_no=row.process_no,
+            process_nm=row.process_nm,
+            rm_location_id=row.rm_location_id,
+            rm_location_cd=rm_cd,
+            wip_location_id=row.wip_location_id,
+            wip_location_cd=wip_cd,
+            created_at=row.created_at,
+        )
+        for row, item_cd, item_nm, rm_cd, wip_cd in rows
+    ]
+
+
+def create_itemproc(db: Session, payload: ItemProcCreate) -> ItemProcOut:
+    item_row = resolve_item_by_ref(db, item_id=payload.item_id)
+    rm_row = db.get(Location, payload.rm_location_id)
+    wip_row = db.get(Location, payload.wip_location_id)
+    if not rm_row or rm_row.deleted_at is not None:
+        raise MasterError(f"Location {payload.rm_location_id} not found.")
+    if not wip_row or wip_row.deleted_at is not None:
+        raise MasterError(f"Location {payload.wip_location_id} not found.")
+    dup = db.scalar(
+        select(ItemProc).where(
+            ItemProc.item_id == payload.item_id,
+            ItemProc.process_no == payload.process_no,
+            ItemProc.deleted_at.is_(None),
+        )
+    )
+    if dup:
+        raise MasterError("Item process already exists for this item/process_no.")
+
+    now = _now()
+    row = ItemProc(
+        item_id=payload.item_id,
+        process_no=payload.process_no,
+        process_nm=payload.process_nm.strip(),
+        rm_location_id=payload.rm_location_id,
+        wip_location_id=payload.wip_location_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.flush()
+    return ItemProcOut(
+        itemproc_id=row.itemproc_id,
+        item_id=row.item_id,
+        item_cd=item_row.item_cd,
+        item_nm=item_row.item_nm,
+        process_no=row.process_no,
+        process_nm=row.process_nm,
+        rm_location_id=row.rm_location_id,
+        rm_location_cd=rm_row.location_cd,
+        wip_location_id=row.wip_location_id,
+        wip_location_cd=wip_row.location_cd,
+        created_at=row.created_at,
+    )
+
+
+def update_itemproc(db: Session, itemproc_id: int, payload: ItemProcUpdate) -> ItemProcOut:
+    row = db.get(ItemProc, itemproc_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Item process not found.")
+
+    if payload.process_no is not None:
+        dup = db.scalar(
+            select(ItemProc).where(
+                ItemProc.item_id == row.item_id,
+                ItemProc.process_no == payload.process_no,
+                ItemProc.deleted_at.is_(None),
+                ItemProc.itemproc_id != itemproc_id,
+            )
+        )
+        if dup:
+            raise MasterError("Item process already exists for this item/process_no.")
+        row.process_no = payload.process_no
+    if payload.process_nm is not None:
+        row.process_nm = payload.process_nm.strip()
+    if payload.rm_location_id is not None:
+        loc = db.get(Location, payload.rm_location_id)
+        if not loc or loc.deleted_at is not None:
+            raise MasterError(f"Location {payload.rm_location_id} not found.")
+        row.rm_location_id = payload.rm_location_id
+    if payload.wip_location_id is not None:
+        loc = db.get(Location, payload.wip_location_id)
+        if not loc or loc.deleted_at is not None:
+            raise MasterError(f"Location {payload.wip_location_id} not found.")
+        row.wip_location_id = payload.wip_location_id
+    row.updated_at = _now()
+    db.flush()
+
+    item_row = db.get(Item, row.item_id)
+    rm_row = db.get(Location, row.rm_location_id)
+    wip_row = db.get(Location, row.wip_location_id)
+    if not item_row or not rm_row or not wip_row:
+        raise MasterError("Item process references invalid master rows.")
+    return ItemProcOut(
+        itemproc_id=row.itemproc_id,
+        item_id=row.item_id,
+        item_cd=item_row.item_cd,
+        item_nm=item_row.item_nm,
+        process_no=row.process_no,
+        process_nm=row.process_nm,
+        rm_location_id=row.rm_location_id,
+        rm_location_cd=rm_row.location_cd,
+        wip_location_id=row.wip_location_id,
+        wip_location_cd=wip_row.location_cd,
+        created_at=row.created_at,
+    )
+
+
+def delete_itemproc(db: Session, itemproc_id: int) -> None:
+    row = db.get(ItemProc, itemproc_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Item process not found.")
     _soft_delete(row)

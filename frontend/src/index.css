@@ -867,6 +867,17 @@ input[type='file'] {
   min-height: 100px;
 }
 
+.erp-screen-stacked .erp-panel-orders-header {
+  flex: 0 1 38%;
+  max-height: 42%;
+  min-height: 120px;
+}
+
+.erp-screen-stacked .erp-detail-panel {
+  flex: 1 1 55%;
+  min-height: 220px;
+}
+
 .erp-panel-grow-main {
   flex: 1 1 auto;
   min-height: 160px;
@@ -1713,7 +1724,38 @@ a.erp-link-cell:hover {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.erp-production-detail-section {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-section-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--erp-title-dark);
+  padding: 4px 8px;
+  background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
+  border-bottom: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-toolbar {
+  flex-shrink: 0;
+}
+
+.erp-detail-content .erp-grid-wrap-static {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
+
+.erp-grid-empty-cell {
+  text-align: center;
+  color: var(--muted, #666);
+  font-style: italic;
 }
 
 .erp-screen .add-line-row label {

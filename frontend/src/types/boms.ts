@@ -8,6 +8,9 @@ export interface BomRow {
   c_item_id: number
   c_item_cd: string
   c_item_nm: string
+  location_id: number
+  location_cd: string
+  location_nm: string
   c_req_qty: string | number
   created_at?: string | null
   updated_at?: string | null
@@ -22,12 +25,14 @@ export interface BomItemRefPayload {
 export interface BomCreatePayload {
   parent: BomItemRefPayload
   child: BomItemRefPayload
+  location_id: number
   c_req_qty: number
 }
 
 export interface BomUpdatePayload {
   parent?: BomItemRefPayload
   child?: BomItemRefPayload
+  location_id?: number
   c_req_qty?: number
 }
 

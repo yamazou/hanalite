@@ -5,13 +5,20 @@ from app.models.drafts import (
     SlsDeliveryDraftLine,
 )
 from app.models.inventory import InvCurrent, InvGrgi, MoveTyp
-from app.models.masters import Item, ItemTyp, Location, Supplier
+from app.models.masters import Item, ItemProc, ItemTyp, Location, Supplier
+from app.models.production import (
+    ProductionOrder,
+    ProductionOrderInput,
+    ProductionOrderLine,
+    ProductionOrderOutput,
+)
 
 __all__ = [
     "ItemTyp",
     "Supplier",
     "Location",
     "Item",
+    "ItemProc",
     "MoveTyp",
     "InvCurrent",
     "InvGrgi",
@@ -19,4 +26,8 @@ __all__ = [
     "InvReceiptDraftLine",
     "SlsDeliveryDraft",
     "SlsDeliveryDraftLine",
+    "ProductionOrder",
+    "ProductionOrderLine",
+    "ProductionOrderInput",
+    "ProductionOrderOutput",
 ]

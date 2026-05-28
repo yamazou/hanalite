@@ -10,12 +10,14 @@ import { CurrentStockPage } from './pages/CurrentStockPage'
 import { GrgiPage } from './pages/GrgiPage'
 import { LotTracePage } from './pages/LotTracePage'
 import { BomsPage } from './pages/masters/BomsPage'
+import { ItemProcessesPage } from './pages/masters/ItemProcessesPage'
 import { ItemTypesPage } from './pages/masters/ItemTypesPage'
 import { ItemsPage } from './pages/masters/ItemsPage'
 import { MoveTypesPage } from './pages/masters/MoveTypesPage'
 import { LocationsPage } from './pages/masters/LocationsPage'
 import { SuppliersPage } from './pages/masters/SuppliersPage'
 import { ApiDocsPage } from './pages/ApiDocsPage'
+import { ProductionOrdersPage } from './pages/ProductionOrdersPage'
 
 function DraftDetailRedirect({ variant }: { variant: DraftVariant }) {
   const { id } = useParams()
@@ -41,10 +43,12 @@ export default function App() {
           <Route path="delivery/new" element={<DraftEntryPage variant="delivery" />} />
           <Route path="delivery/import" element={<DraftExcelImportPage variant="delivery" />} />
           <Route path="delivery/:id" element={<DraftDetailRedirect variant="delivery" />} />
+          <Route path="production/orders" element={<ProductionOrdersPage />} />
           <Route path="inventory/currents" element={<CurrentStockPage />} />
           <Route path="inventory/grgi" element={<GrgiPage />} />
           <Route path="inventory/balances" element={<BalancesPage />} />
           <Route path="trace" element={<LotTracePage />} />
+          <Route path="masters/itemprocs" element={<ItemProcessesPage />} />
           <Route path="masters/itemtyps" element={<ItemTypesPage />} />
           <Route path="masters/suppliers" element={<SuppliersPage />} />
           <Route path="masters/movetyps" element={<MoveTypesPage />} />
