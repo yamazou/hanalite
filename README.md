@@ -2,13 +2,12 @@
 
 軽量ロットトレーサビリティシステム（MySQL `hanalite`）
 
-- **React UI**（推奨）: http://localhost:5180 — Purchase / Sales / Inventory / Masters（画面表記は英語）
+- **React UI**: http://localhost:5180 — Purchase / Sales / Inventory / Masters（画面表記は英語）
 - **FastAPI**: http://127.0.0.1:8000/docs
-- **PHP 版**（プロトタイプ）: http://localhost:8080/hanalite/
 
 ## 前提
 
-- XAMPP 8.2（Apache: 8080, MySQL: 3306）
+- MySQL 8（例: XAMPP の MySQL on 3306）
 - データベース: `hanalite`
 
 ## セットアップ
@@ -128,4 +127,4 @@ cd backend
 
 ## 設定
 
-DB 接続は `config.php`（PHP 版）または `backend/.env`（FastAPI）で変更できます。
+DB 接続は `backend/.env` で変更できます。

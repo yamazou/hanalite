@@ -3,7 +3,7 @@
 ## 全体構成（目標）
 
 ```
-┌─────────────┐     HTTP/JSON      ┌──────────────┐     SQL      ┌─────────┐
+┌─────────────┐     HTTP/JSON    ┌──────────────┐     SQL      ┌─────────┐
 │   React     │ ◄──────────────► │   FastAPI    │ ◄──────────► │  MySQL  │
 │  (Vite)     │   /api/v1/...    │   (Python)   │   hanalite   │         │
 └─────────────┘                  └──────────────┘              └─────────┘
@@ -68,9 +68,3 @@ schemas/     … Pydantic 入出力
 services/    … トランザクション・業務ルール
 models/      … SQLAlchemy ORM
 ```
-
-## PHP 版との共存
-
-- DB `hanalite` は共有可能
-- PHP 画面はプロトタイプとして残し、新機能は FastAPI + React に集約
-- 直接 `inv_grgi` を PHP から登録する場合は `inv_receipt_draft_id = NULL` で可
