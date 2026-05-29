@@ -11,9 +11,13 @@ type Props = {
   excelLabel: string
   onExcel: () => void
   onClose: () => void
+  items?: Array<{
+    label: string
+    onClick: () => void
+  }>
 }
 
-export function GridContextMenu({ menu, excelLabel, onExcel, onClose }: Props) {
+export function GridContextMenu({ menu, excelLabel, onExcel, onClose, items = [] }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -41,8 +45,10 @@ export function GridContextMenu({ menu, excelLabel, onExcel, onClose }: Props) {
   if (left + width > window.innerWidth - 8) {
     left = Math.max(8, window.innerWidth - width - 8)
   }
-  if (top + 40 > window.innerHeight - 8) {
-    top = Math.max(8, window.innerHeight - 48)
+  const itemCount = 1 + items.length
+  const estimatedHeight = itemCount * 32 + 8
+  if (top + estimatedHeight > window.innerHeight - 8) {
+    top = Math.max(8, window.innerHeight - estimatedHeight - 8)
   }
 
   return createPortal(
@@ -63,6 +69,20 @@ export function GridContextMenu({ menu, excelLabel, onExcel, onClose }: Props) {
       >
         {excelLabel}
       </button>
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          className="erp-grid-context-item"
+          role="menuitem"
+          onClick={() => {
+            item.onClick()
+            onClose()
+          }}
+        >
+          {item.label}
+        </button>
+      ))}
     </div>,
     document.body
   )

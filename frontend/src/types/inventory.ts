@@ -4,6 +4,7 @@ export interface CurrentStock {
   location_id: number
   location_cd: string
   location_nm: string
+  item_cd: string
   item_nm: string
   itemtyp_nm: string
   lot: string

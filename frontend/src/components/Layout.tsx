@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate, useRoutes } from 'react-router-dom'
+import { appRouteObjects } from '../appRoutes'
+import { AppShellProvider } from '../context/AppNavigateContext'
+import { normalizeTabPath, parseAppRoute } from '../utils/appRoute'
 
 type NavLink = { to: string; label: string }
+type OpenTab = { to: string; label: string; pinned?: boolean }
+
+const TAB_STORAGE_KEY = 'hanalite.openTabs.v1'
 
 type NavModule = {
   id: 'Receipt' | 'Delivery'
@@ -56,15 +62,19 @@ const navGroups: NavGroup[] = [
   {
     id: 'Production',
     label: 'Production',
-    items: [{ to: '/production/orders', label: 'Production List' }],
+    items: [
+      { to: '/production/orders', label: 'Production List' },
+      { to: '/production/new', label: 'Production Order Entry' },
+      { to: '/production/import', label: 'Excel Import' },
+    ],
   },
   {
     id: 'Inventory',
     label: 'Inventory',
     items: [
       { to: '/inventory/currents', label: 'Current Stock' },
-      { to: '/inventory/grgi', label: 'GR/GI Movements' },
       { to: '/trace', label: 'Lot Trace' },
+      { to: '/inventory/grgi', label: 'GR/GI Movements' },
       { to: '/inventory/balances', label: 'Period Balances' },
     ],
   },
@@ -72,13 +82,12 @@ const navGroups: NavGroup[] = [
     id: 'Masters',
     label: 'Masters',
     items: [
-      { to: '/masters/itemprocs', label: 'Item Processes' },
-      { to: '/masters/itemtyps', label: 'Item Types' },
-      { to: '/masters/suppliers', label: 'Suppliers' },
-      { to: '/masters/movetyps', label: 'Move Types' },
-      { to: '/masters/locations', label: 'Locations' },
       { to: '/masters/items', label: 'Items' },
+      { to: '/masters/locations', label: 'Locations' },
       { to: '/masters/boms', label: 'BOM' },
+      { to: '/masters/itemtyps', label: 'Item Types' },
+      { to: '/masters/movetyps', label: 'Move Types' },
+      { to: '/masters/suppliers', label: 'Suppliers' },
     ],
   },
 ]
@@ -108,18 +117,123 @@ function moduleHasActive(pathname: string, mod: NavModule): boolean {
   return mod.items.some((item) => isActive(pathname, item.to))
 }
 
+function normalizeAndDedupeTabs(rawTabs: Array<{ to: string; label: string; pinned?: boolean }>): OpenTab[] {
+  const deduped = new Map<string, OpenTab>()
+  for (const tab of rawTabs) {
+    const to = normalizeTabPath(tab.to)
+    const existing = deduped.get(to)
+    if (!existing) {
+      deduped.set(to, { to, label: tab.label, pinned: tab.pinned === true })
+      continue
+    }
+    deduped.set(to, {
+      to,
+      label: existing.label || tab.label,
+      pinned: existing.pinned === true || tab.pinned === true,
+    })
+  }
+  return Array.from(deduped.values())
+}
+
 export function Layout() {
-  const { pathname } = useLocation()
-  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set(openKeysForPath(pathname)))
+  const location = useLocation()
+  const { pathname } = location
+  const routerPath = normalizeTabPath(pathname)
+  const navigate = useNavigate()
+  const [viewRoute, setViewRoute] = useState(() => ({
+    pathname: routerPath,
+    search: location.search,
+  }))
+  const currentPath = viewRoute.pathname
+  const closingPathRef = useRef<string | null>(null)
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set(openKeysForPath(currentPath)))
+  const [tabs, setTabs] = useState<OpenTab[]>(() => {
+    try {
+      const raw = localStorage.getItem(TAB_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Array<OpenTab | { to: string; label: string }>
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const normalized = parsed
+            .filter((t): t is { to: string; label: string; pinned?: boolean } =>
+              !!t && typeof t.to === 'string' && typeof t.label === 'string'
+            )
+            .map((t) => ({
+              to: normalizeTabPath(t.to),
+              label: t.label,
+              // Only true boolean should be treated as pinned.
+              pinned: (t as OpenTab).pinned === true,
+            }))
+          return normalizeAndDedupeTabs(normalized)
+        }
+      }
+    } catch {
+      // ignore bad localStorage
+    }
+    return [{ to: currentPath, label: labelForPath(currentPath), pinned: false }]
+  })
+
+  const activeTab = useMemo(() => tabs.find((t) => t.to === currentPath), [tabs, currentPath])
 
   useEffect(() => {
-    const keys = openKeysForPath(pathname)
+    if (activeTab) return
+    if (closingPathRef.current === currentPath) return
+    setTabs((prev) => [...prev, { to: currentPath, label: labelForPath(currentPath), pinned: false }])
+  }, [currentPath, activeTab])
+
+  useEffect(() => {
+    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs))
+  }, [tabs])
+
+  useEffect(() => {
+    const keys = openKeysForPath(currentPath)
     setOpenKeys((prev) => {
       const next = new Set(prev)
       for (const key of keys) next.add(key)
       return next
     })
-  }, [pathname])
+  }, [currentPath])
+
+  useEffect(() => {
+    if (closingPathRef.current && closingPathRef.current !== currentPath) {
+      closingPathRef.current = null
+    }
+  }, [currentPath])
+
+  useEffect(() => {
+    setViewRoute({ pathname: routerPath, search: location.search })
+  }, [routerPath, location.search])
+
+  const appNavigate = useCallback(
+    (to: string, options?: { replace?: boolean }) => {
+      const next = parseAppRoute(to)
+      setViewRoute(next)
+      if (routerPath !== next.pathname || location.search !== next.search) {
+        navigate({ pathname: next.pathname, search: next.search }, options)
+      }
+    },
+    [navigate, routerPath, location.search]
+  )
+
+  const displayLocation = useMemo(() => {
+    if (viewRoute.pathname === routerPath && viewRoute.search === location.search) {
+      return location
+    }
+    return {
+      ...location,
+      pathname: viewRoute.pathname,
+      search: viewRoute.search,
+      hash: '',
+      key: `view-${viewRoute.pathname}${viewRoute.search}`,
+    }
+  }, [location, viewRoute, routerPath])
+
+  const routeElement = useRoutes(appRouteObjects, displayLocation)
+
+  const requestRoute = (to: string) => {
+    const normalizedTo = normalizeTabPath(to)
+    if (currentPath === normalizedTo && viewRoute.search === '') return
+    appNavigate(to)
+  }
 
   const toggleKey = (key: string) => {
     setOpenKeys((prev) => {
@@ -130,7 +244,63 @@ export function Layout() {
     })
   }
 
+  const openTab = (to: string, label?: string) => {
+    const normalizedTo = normalizeTabPath(to)
+    setTabs((prev) => {
+      if (prev.some((t) => t.to === normalizedTo)) return prev
+      return [...prev, { to: normalizedTo, label: label ?? labelForPath(normalizedTo), pinned: false }]
+    })
+    requestRoute(normalizedTo)
+  }
+
+  const closeTab = (to: string) => {
+    const normalizedTo = normalizeTabPath(to)
+    const idx = tabs.findIndex((t) => t.to === normalizedTo)
+    if (idx < 0) return
+    const nextTabs = tabs.filter((t) => t.to !== normalizedTo)
+    if (currentPath === normalizedTo) {
+      closingPathRef.current = normalizedTo
+      const fallback = nextTabs[Math.max(0, idx - 1)] ?? nextTabs[0] ?? null
+      if (fallback) requestRoute(fallback.to)
+    }
+    setTabs(nextTabs)
+  }
+
+  const togglePinTab = (to: string) => {
+    const normalizedTo = normalizeTabPath(to)
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.to === normalizedTo)
+      if (idx < 0) return prev
+      const next = [...prev]
+      const target = { ...next[idx], pinned: !next[idx].pinned }
+      next[idx] = target
+      if (target.pinned) {
+        next.splice(idx, 1)
+        const firstUnpinned = next.findIndex((t) => !t.pinned)
+        const insertAt = firstUnpinned < 0 ? next.length : firstUnpinned
+        next.splice(insertAt, 0, target)
+      }
+      return next
+    })
+  }
+
+  const reorderTabs = (fromTo: string, targetTo: string) => {
+    const normalizedFromTo = normalizeTabPath(fromTo)
+    const normalizedTargetTo = normalizeTabPath(targetTo)
+    if (normalizedFromTo === normalizedTargetTo) return
+    setTabs((prev) => {
+      const fromIndex = prev.findIndex((t) => t.to === normalizedFromTo)
+      const toIndex = prev.findIndex((t) => t.to === normalizedTargetTo)
+      if (fromIndex < 0 || toIndex < 0) return prev
+      const next = [...prev]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+  }
+
   return (
+    <AppShellProvider navigate={appNavigate} viewRoute={viewRoute}>
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
@@ -146,7 +316,7 @@ export function Layout() {
           {navGroups.map((group) => {
             const groupKey = group.id
             const groupOpen = openKeys.has(groupKey)
-            const groupActive = groupHasActive(pathname, group)
+            const groupActive = groupHasActive(currentPath, group)
 
             if ('modules' in group) {
               return (
@@ -166,7 +336,7 @@ export function Layout() {
                     {group.modules.map((mod) => {
                       const moduleKey = `${groupKey}:${mod.id}`
                       const moduleOpen = openKeys.has(moduleKey)
-                      const moduleActive = moduleHasActive(pathname, mod)
+                      const moduleActive = moduleHasActive(currentPath, mod)
                       return (
                         <div
                           key={moduleKey}
@@ -185,13 +355,14 @@ export function Layout() {
                           </button>
                           <div className="nav-module-links">
                             {mod.items.map((item) => (
-                              <Link
+                              <button
                                 key={`${moduleKey}-${item.to}`}
-                                to={item.to}
-                                className={isActive(pathname, item.to) ? 'active' : ''}
+                                type="button"
+                                className={`nav-link${isActive(currentPath, item.to) ? ' active' : ''}`}
+                                onClick={() => openTab(item.to, item.label)}
                               >
                                 {item.label}
-                              </Link>
+                              </button>
                             ))}
                           </div>
                         </div>
@@ -217,13 +388,14 @@ export function Layout() {
                 </button>
                 <div className="nav-submenu">
                   {group.items.map((item) => (
-                    <Link
+                    <button
                       key={item.to}
-                      to={item.to}
-                      className={isActive(pathname, item.to) ? 'active' : ''}
+                      type="button"
+                      className={`nav-link${isActive(currentPath, item.to) ? ' active' : ''}`}
+                      onClick={() => openTab(item.to, item.label)}
                     >
                       {item.label}
-                    </Link>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -231,17 +403,96 @@ export function Layout() {
           })}
         </nav>
         <div className="sidebar-footer">
-          <Link to="/api-docs" className={pathname === '/api-docs' ? 'active' : ''}>
-            API Docs
-          </Link>
+          <div className="sidebar-footer-tabs">
+            <button
+              type="button"
+              className={`erp-tab${currentPath === '/api-docs' ? ' active' : ''}`}
+              onClick={() => openTab('/api-docs', 'API Docs')}
+            >
+              API Docs
+            </button>
+          </div>
           <div aria-hidden="true">&nbsp;</div>
           <div>hanalite v1.0 powered by</div>
           <div>PT.BAHTERA HISISTEM INDONESIA</div>
         </div>
       </aside>
       <main className="main">
-        <Outlet />
+        <div className="main-tabs">
+          {tabs.map((tab) => (
+            <button
+              key={tab.to}
+              type="button"
+              className={`main-tab ${tab.to === currentPath ? 'active' : ''}`}
+              onClick={() => requestRoute(tab.to)}
+              title={tab.to}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/tab-to', tab.to)
+                e.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                const fromTo = e.dataTransfer.getData('text/tab-to')
+                if (fromTo) reorderTabs(fromTo, tab.to)
+              }}
+            >
+              <span
+                className={`main-tab-pin ${tab.pinned ? 'is-pinned' : ''}`}
+                title={tab.pinned ? 'Unpin tab' : 'Pin tab'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  togglePinTab(tab.to)
+                }}
+              >
+                {tab.pinned ? '📌' : '📍'}
+              </span>
+              <span className="main-tab-label">{tab.label}</span>
+              {(
+                <span
+                  className="main-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTab(tab.to)
+                  }}
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        {tabs.length === 0 ? (
+          <div className="erp-panel">
+            <div className="erp-panel-content">
+              <p className="muted erp-grid-empty">No tab open. Select a menu to open a page.</p>
+            </div>
+          </div>
+        ) : (
+          routeElement
+        )}
       </main>
     </div>
+    </AppShellProvider>
   )
+}
+
+function labelForPath(pathname: string): string {
+  let best: NavLink | null = null
+  for (const group of navGroups) {
+    const items = 'modules' in group ? group.modules.flatMap((m) => m.items) : group.items
+    for (const item of items) {
+      const matched = item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(`${item.to}/`)
+      if (!matched) continue
+      if (!best || item.to.length > best.to.length) best = item
+    }
+  }
+  if (best) return best.label
+  if (pathname.startsWith('/drafts')) return 'Receipt'
+  if (pathname.startsWith('/delivery')) return 'Delivery'
+  return pathname
 }

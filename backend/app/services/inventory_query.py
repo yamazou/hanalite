@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.inventory import InvBalance, InvCurrent, InvGrgi, MoveTyp
@@ -30,12 +30,19 @@ def list_current_stock(
     db: Session,
     *,
     lot: str | None = None,
-    item_id: int | None = None,
-    location_id: int | None = None,
+    item_q: str | None = None,
+    location_q: str | None = None,
     include_zero: bool = False,
 ) -> list[CurrentStockItem]:
     stmt = (
-        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm, Location.location_cd, Location.location_nm)
+        select(
+            InvCurrent,
+            Item.item_cd,
+            Item.item_nm,
+            ItemTyp.itemtyp_nm,
+            Location.location_cd,
+            Location.location_nm,
+        )
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .join(Location, Location.location_id == InvCurrent.location_id)
@@ -44,11 +51,31 @@ def list_current_stock(
     if not include_zero:
         stmt = stmt.where(InvCurrent.qty > 0)
     if lot:
-        stmt = stmt.where(InvCurrent.lot.like(f"%{lot}%"))
-    if item_id:
-        stmt = stmt.where(InvCurrent.item_id == item_id)
-    if location_id:
-        stmt = stmt.where(InvCurrent.location_id == location_id)
+        lot_term = lot.strip()
+        if lot_term:
+            stmt = stmt.where(InvCurrent.lot.like(f"%{lot_term}%"))
+    if item_q:
+        item_term = item_q.strip()
+        if item_term:
+            item_pattern = f"%{item_term}%"
+            item_label = func.concat(Item.item_cd, " - ", Item.item_nm)
+            stmt = stmt.where(
+                or_(
+                    Item.item_cd.like(item_pattern),
+                    Item.item_nm.like(item_pattern),
+                    item_label.like(item_pattern),
+                )
+            )
+    if location_q:
+        location_term = location_q.strip()
+        if location_term:
+            location_pattern = f"%{location_term}%"
+            stmt = stmt.where(
+                or_(
+                    Location.location_cd.like(location_pattern),
+                    Location.location_nm.like(location_pattern),
+                )
+            )
     stmt = stmt.order_by(InvCurrent.location_id, InvCurrent.lot, InvCurrent.item_id)
 
     rows = db.execute(stmt).all()
@@ -59,14 +86,30 @@ def list_current_stock(
             location_id=c.location_id,
             location_cd=location_cd,
             location_nm=location_nm,
+            item_cd=item_cd,
             item_nm=item_nm,
             itemtyp_nm=itemtyp_nm,
             lot=c.lot,
             qty=c.qty,
             updated_at=c.updated_at,
         )
-        for c, item_nm, itemtyp_nm, location_cd, location_nm in rows
+        for c, item_cd, item_nm, itemtyp_nm, location_cd, location_nm in rows
     ]
+
+
+def suggest_current_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    stmt = (
+        select(InvCurrent.lot)
+        .distinct()
+        .where(InvCurrent.deleted_at.is_(None))
+        .order_by(InvCurrent.lot)
+    )
+    if q:
+        term = q.strip()
+        if term:
+            stmt = stmt.where(InvCurrent.lot.like(f"%{term}%"))
+    stmt = stmt.limit(min(max(limit, 1), 50))
+    return [row[0] for row in db.execute(stmt).all()]
 
 
 def list_grgi_history(
@@ -186,7 +229,10 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
 
 
 def list_balances(
-    db: Session, period: str | None = None, location_id: int | None = None
+    db: Session,
+    period: str | None = None,
+    location_id: int | None = None,
+    location_q: str | None = None,
 ) -> list[BalanceItem]:
     stmt = (
         select(InvBalance, Item.item_nm, Location.location_cd, Location.location_nm)
@@ -198,6 +244,15 @@ def list_balances(
         stmt = stmt.where(InvBalance.period_year_month == period)
     if location_id:
         stmt = stmt.where(InvBalance.location_id == location_id)
+    location_value = (location_q or "").strip()
+    if location_value:
+        location_pattern = f"%{location_value}%"
+        stmt = stmt.where(
+            or_(
+                Location.location_cd.like(location_pattern),
+                Location.location_nm.like(location_pattern),
+            )
+        )
     stmt = stmt.order_by(
         InvBalance.period_year_month.desc(), InvBalance.location_id, InvBalance.lot, InvBalance.item_id
     )

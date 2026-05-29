@@ -25,6 +25,15 @@ export function mergeColumnOrder(saved: string[] | undefined, keys: string[]): s
   return next
 }
 
+/** Keep pinned keys at the start (e.g. row selection checkbox column). */
+export function pinKeysFirst(order: string[], pinFirst: string[]): string[] {
+  if (!pinFirst.length) return order
+  const pinSet = new Set(pinFirst)
+  const pinned = pinFirst.filter((key) => order.includes(key))
+  const rest = order.filter((key) => !pinSet.has(key))
+  return [...pinned, ...rest]
+}
+
 export function mergeColumnWidths(
   columns: GridColumnDef[],
   minWidths: number[],
@@ -42,13 +51,15 @@ export function mergeColumnWidths(
 export function loadGridLayout(
   storageKey: string,
   columns: GridColumnDef[],
-  minWidths: number[]
+  minWidths: number[],
+  pinFirst?: string[]
 ): StoredGridLayout {
   const keys = columnKeys(columns)
+  const defaultOrder = pinFirst?.length ? pinKeysFirst(keys, pinFirst) : keys
   const defaultWidths = mergeColumnWidths(columns, minWidths, undefined)
   try {
     const raw = localStorage.getItem(storageKey)
-    if (!raw) return { order: keys, widths: defaultWidths }
+    if (!raw) return { order: defaultOrder, widths: defaultWidths }
     const parsed = JSON.parse(raw) as StoredGridLayout | number[]
     if (Array.isArray(parsed)) {
       const widths = { ...defaultWidths }
@@ -58,13 +69,14 @@ export function loadGridLayout(
         const min = minWidths[index] ?? GRID_MIN_COL_WIDTH
         widths[key] = Math.max(min, width ?? columns[index].defaultWidth)
       })
-      return { order: keys, widths }
+      return { order: defaultOrder, widths }
     }
-    const order = mergeColumnOrder(parsed.order, keys)
+    let order = mergeColumnOrder(parsed.order, keys)
+    if (pinFirst?.length) order = pinKeysFirst(order, pinFirst)
     const widths = mergeColumnWidths(columns, minWidths, parsed.widths)
     return { order, widths }
   } catch {
-    return { order: keys, widths: defaultWidths }
+    return { order: defaultOrder, widths: defaultWidths }
   }
 }
 

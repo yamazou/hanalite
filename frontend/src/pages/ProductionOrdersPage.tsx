@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
@@ -10,7 +11,6 @@ import {
 } from '../components/erp/masterGridColumns'
 import { ResizableGridTable } from '../components/ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
-import type { Item } from '../types'
 import type {
   ProductionOrderDetail,
   ProductionOrderListItem,
@@ -19,25 +19,33 @@ import type {
 import { StatusBadge } from '../components/StatusBadge'
 import { formatDateTime, formatQty, statusLabel } from '../utils/format'
 
-const emptyCreate = {
-  parent_item_id: '',
-  planned_qty: '',
-  lot: '',
-  notes: '',
+/** FG → WIP → Purchase parts → RM/Material (within the same BOM level). */
+function itemtypSortKey(itemtypNm: string | undefined): number {
+  const n = (itemtypNm ?? '').trim().toLowerCase()
+  if (n === 'fg') return 0
+  if (n === 'wip') return 1
+  if (n.includes('purchase')) return 2
+  if (n === 'rm' || n === 'material') return 3
+  return 99
 }
 
 export function ProductionOrdersPage() {
+  const navigate = useAppNavigate()
   const [orders, setOrders] = useState<ProductionOrderListItem[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<ProductionOrderDetail | null>(null)
-  const [items, setItems] = useState<Item[]>([])
   const [statusFilter, setStatusFilter] = useState<'' | ProductionStatus>('')
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [selectedProcessKey, setSelectedProcessKey] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-  const [createForm, setCreateForm] = useState(emptyCreate)
+  const [orderGridLayoutApi, setOrderGridLayoutApi] = useState<{
+    saveLayout: () => void
+    isDirty: boolean
+  } | null>(null)
+  const [gridHeaderEdits, setGridHeaderEdits] = useState<Record<number, { planned_qty: string; lot: string }>>({})
 
   const loadOrders = useCallback(async () => {
     setLoading(true)
@@ -71,16 +79,16 @@ export function ProductionOrdersPage() {
   }, [])
 
   useEffect(() => {
-    api.listItems().then(setItems).catch(() => {})
-  }, [])
-
-  useEffect(() => {
     void loadOrders()
   }, [loadOrders])
 
   useEffect(() => {
     void loadDetail(selectedId)
   }, [selectedId, loadDetail])
+
+  useEffect(() => {
+    setSelectedProcessKey(null)
+  }, [detail?.production_order_id])
 
   const lineLayout = useGridColumnLayout('production-lines-v1', productionLineColumns)
   const inputLayout = useGridColumnLayout('production-inputs-v1', productionInputColumns)
@@ -96,6 +104,67 @@ export function ProductionOrdersPage() {
     () => orders.find((r) => r.production_order_id === selectedId) ?? null,
     [orders, selectedId]
   )
+  const selectedGridHeaderEdit = useMemo(
+    () => (selectedId != null ? gridHeaderEdits[selectedId] : undefined),
+    [gridHeaderEdits, selectedId]
+  )
+
+  const processGroups = useMemo(() => {
+    if (!detail) return []
+    const groups = new Map<
+      string,
+      {
+        key: string
+        no: number
+        process: string
+        status: 'planned' | 'completed'
+        output: string
+        actualQty: string | number | null
+        lineNos: number[]
+      }
+    >()
+    let nextNo = 1
+    for (const ln of detail.lines) {
+      const key = ln.process_nm
+      const existing = groups.get(key)
+      if (!existing) {
+        groups.set(key, {
+          key,
+          no: nextNo++,
+          process: ln.process_nm,
+          status: ln.status,
+          output: ln.output_item_cd ?? detail.parent_item_cd,
+          actualQty: ln.actual_qty,
+          lineNos: [ln.line_no],
+        })
+        continue
+      }
+      existing.lineNos.push(ln.line_no)
+      if (existing.status !== 'planned' && ln.status === 'planned') {
+        existing.status = 'planned'
+      }
+      if (existing.actualQty == null && ln.actual_qty != null) {
+        existing.actualQty = ln.actual_qty
+      }
+    }
+    return Array.from(groups.values())
+  }, [detail])
+
+  const visibleInputs = useMemo(() => {
+    if (!detail) return []
+    if (selectedProcessKey == null) return []
+    const group = processGroups.find((g) => g.key === selectedProcessKey)
+    if (!group) return []
+    const lineNos = new Set(group.lineNos)
+    return detail.inputs
+      .filter((ln) => lineNos.has(ln.line_no))
+      .sort(
+        (a, b) =>
+          (a.level ?? 0) - (b.level ?? 0) ||
+          itemtypSortKey(a.itemtyp_nm) - itemtypSortKey(b.itemtyp_nm) ||
+          a.line_no - b.line_no,
+      )
+  }, [detail, selectedProcessKey, processGroups])
 
   const canApprove =
     detail?.status === 'registered' &&
@@ -103,35 +172,31 @@ export function ProductionOrdersPage() {
     detail?.completed_line_count === detail?.line_count
 
   const canCancel = detail?.status === 'registered' || detail?.status === 'approved'
+  const canRestore = detail?.status === 'cancelled'
+  const canDelete = detail?.status === 'cancelled'
 
-  const createOrder = async (e: FormEvent) => {
-    e.preventDefault()
+  const handleRestore = async () => {
+    if (!selectedId || detail?.status !== 'cancelled') return
+    if (!confirm('Restore this production order to registered?')) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
-      const created = await api.createProductionOrder({
-        parent_item_id: Number(createForm.parent_item_id),
-        planned_qty: Number(createForm.planned_qty),
-        lot: createForm.lot.trim(),
-        notes: createForm.notes.trim() || null,
-      })
-      setCreateForm(emptyCreate)
-      setSuccess(
-        `Production order #${created.production_order_id} created with ${created.lines.length} process step(s).`
-      )
+      const row = await api.restoreProductionOrder(selectedId)
+      setDetail(row)
+      setSuccess('Production order restored.')
       await loadOrders()
-      setSelectedId(created.production_order_id)
-      await loadDetail(created.production_order_id)
-    } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : 'Failed to create production order')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to restore production order')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleDelete = async (orderId: number) => {
+  const handleDelete = async () => {
+    if (!selectedId || detail?.status !== 'cancelled') return
     if (!confirm('Delete this production order?')) return
+    const orderId = selectedId
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -195,12 +260,22 @@ export function ProductionOrdersPage() {
     setError(null)
     setSuccess(null)
     try {
+      const nextPlanned =
+        selectedGridHeaderEdit != null
+          ? Number(selectedGridHeaderEdit.planned_qty || detail.planned_qty)
+          : Number(detail.planned_qty)
+      const nextLot = selectedGridHeaderEdit?.lot?.trim() || detail.lot
       const row = await api.updateProductionOrder(selectedId, {
-        planned_qty: Number(detail.planned_qty),
-        lot: detail.lot,
+        planned_qty: nextPlanned,
+        lot: nextLot,
         notes: detail.notes,
       })
       setDetail(row)
+      setGridHeaderEdits((prev) => {
+        const next = { ...prev }
+        delete next[selectedId]
+        return next
+      })
       setSuccess('Saved.')
       await loadOrders()
     } catch (e) {
@@ -210,63 +285,15 @@ export function ProductionOrdersPage() {
     }
   }
 
+  const handleSaveAllGridLayouts = () => {
+    orderGridLayoutApi?.saveLayout()
+    lineLayout.saveLayout()
+    inputLayout.saveLayout()
+    setSuccess('Grid layout saved.')
+  }
+
   return (
     <ErpScreen error={error} success={success} className="erp-screen-stacked">
-      <ErpSearchPanel>
-        <form className="erp-search-form" onSubmit={createOrder}>
-          <span className="erp-search-section-label">Create Order</span>
-          <label className="erp-search-field erp-search-field-item">
-            <select
-              className={`erp-input${createForm.parent_item_id === '' ? ' erp-input-empty' : ''}`}
-              value={createForm.parent_item_id}
-              onChange={(e) => setCreateForm((p) => ({ ...p, parent_item_id: e.target.value }))}
-              required
-            >
-              <option value="">FG Item</option>
-              {items.map((i) => (
-                <option key={i.item_id} value={i.item_id}>
-                  {i.item_cd} / {i.item_nm}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="erp-search-field erp-search-field-qty">
-            <input
-              className="erp-input"
-              type="number"
-              step="0.001"
-              min="0.001"
-              placeholder="Plan Qty"
-              value={createForm.planned_qty}
-              onChange={(e) => setCreateForm((p) => ({ ...p, planned_qty: e.target.value }))}
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-reference">
-            <input
-              className="erp-input"
-              placeholder="Lot"
-              value={createForm.lot}
-              onChange={(e) => setCreateForm((p) => ({ ...p, lot: e.target.value }))}
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-grow">
-            <input
-              className="erp-input"
-              placeholder="Notes"
-              value={createForm.notes}
-              onChange={(e) => setCreateForm((p) => ({ ...p, notes: e.target.value }))}
-            />
-          </label>
-          <div className="erp-search-actions">
-            <button className="btn erp-btn erp-btn-search" type="submit" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </ErpSearchPanel>
-
       <ErpGridPanel
         gridId="production-orders-v1"
         panelClassName="erp-panel-orders-header"
@@ -285,37 +312,68 @@ export function ProductionOrdersPage() {
         ))}
         toolbarRight={
           <>
-            {selectedId && (
+            {selectedId && canApprove && (
               <button
                 type="button"
                 className="btn erp-btn erp-btn-approve"
-                disabled={!canApprove || submitting}
+                disabled={submitting}
                 onClick={() => void handleApprove()}
               >
                 Approve
               </button>
             )}
-            {selectedId && (
+            {selectedId && canCancel && (
               <button
                 type="button"
                 className="btn erp-btn erp-btn-cancel"
-                disabled={!canCancel || submitting}
+                disabled={submitting}
                 onClick={() => void handleCancel()}
               >
                 Cancel
               </button>
             )}
-            <button
-              type="button"
-              className="btn erp-btn erp-btn-search"
-              disabled={!selectedId || detail?.status !== 'registered' || submitting}
-              onClick={() => void handleSaveData()}
-            >
-              Save Data
+            {selectedId && canRestore && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-new"
+                disabled={submitting}
+                onClick={() => void handleRestore()}
+              >
+                Restore
+              </button>
+            )}
+            {selectedId && canDelete && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-cancel"
+                disabled={submitting}
+                onClick={() => void handleDelete()}
+              >
+                Delete
+              </button>
+            )}
+            {selectedId && detail?.status === 'registered' && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-search"
+                disabled={submitting}
+                onClick={() => void handleSaveData()}
+              >
+                Save Data
+              </button>
+            )}
+            <button type="button" className="btn erp-btn erp-btn-search" onClick={handleSaveAllGridLayouts}>
+              Save Grid
             </button>
           </>
         }
-        showSaveGridButton
+        onLayoutReady={(layout) => {
+          setOrderGridLayoutApi((prev) =>
+            prev && prev.saveLayout === layout.saveLayout && prev.isDirty === layout.isDirty
+              ? prev
+              : { saveLayout: layout.saveLayout, isDirty: layout.isDirty }
+          )
+        }}
         onRefresh={() => void loadOrders()}
       >
         {(layout) => (
@@ -325,6 +383,10 @@ export function ProductionOrdersPage() {
                 key={row.production_order_id}
                 className={erpRowClass(index, selectedId === row.production_order_id)}
                 onClick={() => setSelectedId(row.production_order_id)}
+                onDoubleClick={(event) => {
+                  event.stopPropagation()
+                  navigate(`/production/new?id=${row.production_order_id}`)
+                }}
               >
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
@@ -339,7 +401,34 @@ export function ProductionOrdersPage() {
                     case 'parent':
                       return <td key={col.key}><code>{row.parent_item_cd}</code> {row.parent_item_nm}</td>
                     case 'planned_qty':
-                      return <td key={col.key}>{formatQty(row.planned_qty)}</td>
+                      return (
+                        <td key={col.key}>
+                          {selectedId === row.production_order_id && row.status === 'registered' ? (
+                            <input
+                              className="erp-input"
+                              type="number"
+                              step="0.001"
+                              min="0.001"
+                              value={
+                                gridHeaderEdits[row.production_order_id]?.planned_qty ?? String(row.planned_qty)
+                              }
+                              onChange={(e) =>
+                                setGridHeaderEdits((prev) => ({
+                                  ...prev,
+                                  [row.production_order_id]: {
+                                    planned_qty: e.target.value,
+                                    lot:
+                                      prev[row.production_order_id]?.lot ??
+                                      row.lot,
+                                  },
+                                }))
+                              }
+                            />
+                          ) : (
+                            formatQty(row.planned_qty)
+                          )}
+                        </td>
+                      )
                     case 'actual_qty':
                       return <td key={col.key}>{row.actual_qty != null ? formatQty(row.actual_qty) : '-'}</td>
                     case 'lines':
@@ -349,29 +438,33 @@ export function ProductionOrdersPage() {
                         </td>
                       )
                     case 'lot':
-                      return <td key={col.key}><code>{row.lot}</code></td>
+                      return (
+                        <td key={col.key}>
+                          {selectedId === row.production_order_id && row.status === 'registered' ? (
+                            <input
+                              className="erp-input"
+                              value={gridHeaderEdits[row.production_order_id]?.lot ?? row.lot}
+                              onChange={(e) =>
+                                setGridHeaderEdits((prev) => ({
+                                  ...prev,
+                                  [row.production_order_id]: {
+                                    planned_qty:
+                                      prev[row.production_order_id]?.planned_qty ??
+                                      String(row.planned_qty),
+                                    lot: e.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          ) : (
+                            <code>{row.lot}</code>
+                          )}
+                        </td>
+                      )
                     case 'created':
                       return <td key={col.key}>{formatDateTime(row.created_at)}</td>
                     case 'approved':
                       return <td key={col.key}>{formatDateTime(row.approved_at)}</td>
-                    case 'actions':
-                      return (
-                        <td key={col.key} className="erp-col-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="btn erp-btn erp-btn-cancel"
-                            type="button"
-                            disabled={
-                              submitting ||
-                              row.status === 'approved' ||
-                              row.status === 'cancelled' ||
-                              row.completed_line_count > 0
-                            }
-                            onClick={() => void handleDelete(row.production_order_id)}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      )
                     default:
                       return <td key={col.key} />
                   }
@@ -393,43 +486,36 @@ export function ProductionOrdersPage() {
                 <div className="erp-grid-wrap erp-grid-wrap-static">
                   <ResizableGridTable layout={lineLayout}>
                     <tbody>
-                    {detail.lines.map((ln, idx) => (
+                    {processGroups.map((ln, idx) => (
                       <tr
-                        key={ln.prd_order_line_id}
-                        className={erpRowClass(idx)}
+                        key={ln.key}
+                        className={erpRowClass(idx, selectedProcessKey === ln.key)}
+                        onClick={() =>
+                          setSelectedProcessKey((prev) => (prev === ln.key ? null : ln.key))
+                        }
                       >
                         {lineLayout.orderedColumns.map((col) => {
                           switch (col.key) {
                             case 'line_no':
-                              return <td key={col.key}>{ln.line_no}</td>
+                              return <td key={col.key}>{ln.no}</td>
                             case 'process':
                               return (
                                 <td key={col.key}>
-                                  {ln.process_nm}
+                                  {ln.process}
                                 </td>
                               )
-                            case 'input':
-                              return (
-                                <td key={col.key}>
-                                  <code>{ln.line_no === 1 ? (detail.inputs[0]?.item_cd ?? 'RM') : 'WIP'}</code>
-                                </td>
-                              )
-                            case 'from':
-                              return <td key={col.key}>{ln.rm_location_cd}</td>
-                            case 'to':
-                              return <td key={col.key}>{ln.wip_location_cd}</td>
                             case 'status':
                               return <td key={col.key}>{ln.status}</td>
                             case 'output':
                               return (
                                 <td key={col.key}>
-                                  <code>{detail.inputs[0]?.item_cd ?? 'WIP'}</code>
+                                  <code>{ln.output}</code>
                                 </td>
                               )
                             case 'actual_qty':
                               return (
                                 <td key={col.key}>
-                                  {ln.actual_qty != null ? formatQty(ln.actual_qty) : '-'}
+                                  {ln.actualQty != null ? formatQty(ln.actualQty) : '-'}
                                 </td>
                               )
                             case 'actions':
@@ -450,23 +536,25 @@ export function ProductionOrdersPage() {
               </section>
 
               <section className="erp-production-detail-section">
-                <div className="erp-production-detail-section-title">Input (RM) — first step</div>
+                <div className="erp-production-detail-section-title">Input</div>
                 <div className="erp-grid-wrap erp-grid-wrap-static">
                   <ResizableGridTable layout={inputLayout}>
                     <tbody>
-                    {detail.inputs.length === 0 ? (
+                    {visibleInputs.length === 0 ? (
                       <tr>
                         <td colSpan={inputLayout.orderedColumns.length} className="erp-grid-empty-cell">
-                          No input lines
+                          {selectedProcessKey == null
+                            ? 'Select a process to show input lines'
+                            : 'No child items for selected process'}
                         </td>
                       </tr>
                     ) : (
-                    detail.inputs.map((ln, idx) => (
+                    visibleInputs.map((ln, idx) => (
                       <tr key={ln.prd_order_input_id} className={erpRowClass(idx)}>
                         {inputLayout.orderedColumns.map((col) => {
                           switch (col.key) {
                             case 'line_no':
-                              return <td key={col.key}>{ln.line_no}</td>
+                              return <td key={col.key}>{idx + 1}</td>
                             case 'item':
                               return <td key={col.key}><code>{ln.item_cd}</code> {ln.item_nm}</td>
                             case 'req_qty':

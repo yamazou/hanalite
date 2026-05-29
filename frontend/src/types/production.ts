@@ -10,11 +10,11 @@ export interface ProductionOrderLine {
 
   line_no: number
 
-  itemproc_id: number
-
   process_no: number
 
   process_nm: string
+
+  output_item_cd: string | null
 
   rm_location_id: number
 
@@ -39,6 +39,10 @@ export interface ProductionOrderInput {
   prd_order_input_id: number
 
   line_no: number
+
+  level: number
+
+  itemtyp_nm: string
 
   item_id: number
 
@@ -90,6 +94,10 @@ export interface ProductionOrderListItem {
 
   status: ProductionStatus
 
+  production_date: string
+
+  reference_no: string | null
+
   parent_item_id: number
 
   parent_item_cd: string
@@ -134,6 +142,10 @@ export interface ProductionOrderDetail extends ProductionOrderListItem {
 
 export interface ProductionOrderCreatePayload {
 
+  production_date: string
+
+  reference_no?: string | null
+
   parent_item_id: number
 
   planned_qty: number
@@ -165,6 +177,10 @@ export interface ProductionOrderInputWritePayload {
 
 
 export interface ProductionOrderUpdatePayload {
+
+  production_date?: string
+
+  reference_no?: string | null
 
   planned_qty?: number
 

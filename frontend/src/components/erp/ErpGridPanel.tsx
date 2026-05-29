@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ResizableGridTable, type GridColumnDef } from '../ResizableGridTable'
 import { useGridColumnLayout, type GridColumnLayout } from '../../hooks/useGridColumnLayout'
 
@@ -15,6 +15,7 @@ type Props = {
   toolbarRight?: ReactNode
   showSaveGridButton?: boolean
   panelClassName?: string
+  onLayoutReady?: (layout: GridColumnLayout) => void
   children: (layout: GridColumnLayout) => ReactNode
 }
 
@@ -31,9 +32,21 @@ export function ErpGridPanel({
   toolbarRight,
   showSaveGridButton = false,
   panelClassName,
+  onLayoutReady,
   children,
 }: Props) {
   const layout = useGridColumnLayout(gridId, columns)
+  const [saveHint, setSaveHint] = useState<string | null>(null)
+
+  useEffect(() => {
+    onLayoutReady?.(layout)
+  }, [layout, onLayoutReady])
+
+  useEffect(() => {
+    if (!saveHint) return
+    const t = window.setTimeout(() => setSaveHint(null), 1800)
+    return () => window.clearTimeout(t)
+  }, [saveHint])
 
   return (
     <div className={`erp-panel erp-panel-grow${panelClassName ? ` ${panelClassName}` : ''}`}>
@@ -48,12 +61,19 @@ export function ErpGridPanel({
                 <button
                   type="button"
                   className="btn erp-btn erp-btn-search"
-                  disabled={!layout.isDirty}
-                  onClick={() => layout.saveLayout()}
+                  onClick={() => {
+                    if (layout.isDirty) {
+                      layout.saveLayout()
+                      setSaveHint('Grid layout saved.')
+                    } else {
+                      setSaveHint('No layout changes.')
+                    }
+                  }}
                 >
                   Save Grid
                 </button>
               )}
+              {saveHint && <span className="muted">{saveHint}</span>}
               {onRefresh && (
                 <button type="button" className="btn erp-btn erp-btn-clear" onClick={onRefresh}>
                   Refresh

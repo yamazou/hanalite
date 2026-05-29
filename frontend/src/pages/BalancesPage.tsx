@@ -1,12 +1,13 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { balanceColumns } from '../components/erp/masterGridColumns'
 import type { BalanceItem } from '../types/inventory'
-import type { LocationMaster } from '../types/masters'
 import { formatDateTime, formatQty } from '../utils/format'
+import { resolveLocationIdFromText, suggestLocations } from '../utils/searchSuggest'
 
 function currentPeriod(): string {
   const d = new Date()
@@ -18,8 +19,7 @@ function currentPeriod(): string {
 export function BalancesPage() {
   const [period, setPeriod] = useState('')
   const [rows, setRows] = useState<BalanceItem[]>([])
-  const [locations, setLocations] = useState<LocationMaster[]>([])
-  const [locationId, setLocationId] = useState('')
+  const [locationText, setLocationText] = useState('')
   const [createPeriod, setCreatePeriod] = useState(currentPeriod())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -30,17 +30,20 @@ export function BalancesPage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.listBalances(period || undefined, locationId ? Number(locationId) : undefined)
+      const data = await api.listBalances(
+        period || undefined,
+        undefined,
+        locationText.trim() || undefined
+      )
       setRows(data)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
       setLoading(false)
     }
-  }, [period, locationId])
+  }, [period, locationText])
 
   useEffect(() => {
-    api.listLocationsMaster().then(setLocations).catch(() => {})
     load()
   }, [load])
 
@@ -60,7 +63,8 @@ export function BalancesPage() {
     setError(null)
     setSuccess(null)
     try {
-      const res = await api.createPeriodBalance(p, locationId ? Number(locationId) : undefined)
+      const locationId = await resolveLocationIdFromText(locationText)
+      const res = await api.createPeriodBalance(p, locationId)
       setSuccess(`Saved ${res.rows_saved} balance rows for ${res.period_year_month}.`)
       setPeriod(p)
       await load()
@@ -74,7 +78,15 @@ export function BalancesPage() {
   return (
     <ErpScreen error={error} success={success}>
       <ErpSearchPanel>
-        <form onSubmit={onCreate} className="erp-search-form">
+        <form onSubmit={onCreate} className="erp-search-form erp-search-form-suggest">
+          <ErpSuggestInput
+            value={locationText}
+            onChange={setLocationText}
+            placeholder="Location (optional)"
+            ariaLabel="Location"
+            fieldClassName="erp-search-field-supplier"
+            fetchSuggestions={suggestLocations}
+          />
           <label className="erp-search-field erp-search-field-reference">
             <input
               className="erp-input"
@@ -95,22 +107,15 @@ export function BalancesPage() {
       </ErpSearchPanel>
 
       <ErpSearchPanel>
-        <form onSubmit={onFilter} className="erp-search-form">
-          <label className="erp-search-field erp-search-field-supplier">
-            <select
-              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
-              value={locationId}
-              aria-label="Location"
-              onChange={(e) => setLocationId(e.target.value)}
-            >
-              <option value="">Location</option>
-              {locations.map((l) => (
-                <option key={l.location_id} value={l.location_id}>
-                  {l.location_cd} / {l.location_nm}
-                </option>
-              ))}
-            </select>
-          </label>
+        <form onSubmit={onFilter} className="erp-search-form erp-search-form-suggest">
+          <ErpSuggestInput
+            value={locationText}
+            onChange={setLocationText}
+            placeholder="Location"
+            ariaLabel="Location"
+            fieldClassName="erp-search-field-supplier"
+            fetchSuggestions={suggestLocations}
+          />
           <label className="erp-search-field erp-search-field-reference">
             <input
               className="erp-input"

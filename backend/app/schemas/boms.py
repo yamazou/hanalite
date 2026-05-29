@@ -26,9 +26,13 @@ class BomOut(BaseModel):
     c_item_id: int
     c_item_cd: str
     c_item_nm: str
-    location_id: int
-    location_cd: str
-    location_nm: str
+    level: int
+    from_location_id: int
+    from_location_cd: str
+    from_location_nm: str
+    to_location_id: int
+    to_location_cd: str
+    to_location_nm: str
     c_req_qty: Decimal
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -37,12 +41,16 @@ class BomOut(BaseModel):
 class BomCreate(BaseModel):
     parent: BomItemRef
     child: BomItemRef
-    location_id: int = Field(gt=0)
+    level: int = Field(default=0, ge=0)
+    from_location_id: int = Field(gt=0)
+    to_location_id: int = Field(gt=0)
     c_req_qty: Decimal = Field(gt=0)
 
 
 class BomUpdate(BaseModel):
     parent: BomItemRef | None = None
     child: BomItemRef | None = None
-    location_id: int | None = Field(default=None, gt=0)
+    level: int | None = Field(default=None, ge=0)
+    from_location_id: int | None = Field(default=None, gt=0)
+    to_location_id: int | None = Field(default=None, gt=0)
     c_req_qty: Decimal | None = Field(default=None, gt=0)

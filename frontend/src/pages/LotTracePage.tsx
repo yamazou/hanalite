@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
@@ -10,19 +11,18 @@ import {
   traceHistoryColumns,
 } from '../components/erp/masterGridColumns'
 import type { LotTraceResult } from '../types/inventory'
-import type { LocationMaster } from '../types/masters'
 import { formatDateTime, formatQty } from '../utils/format'
+import { resolveLocationIdFromText, suggestCurrentLots, suggestLocations } from '../utils/searchSuggest'
 
 export function LotTracePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [lot, setLot] = useState(() => searchParams.get('lot') ?? '')
-  const [locationId, setLocationId] = useState(() => searchParams.get('location_id') ?? '')
-  const [locations, setLocations] = useState<LocationMaster[]>([])
+  const [locationText, setLocationText] = useState('')
   const [result, setResult] = useState<LotTraceResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const runTrace = async (value: string, locId?: number) => {
+  const runTrace = async (value: string, locationLabel: string) => {
     const trimmed = value.trim()
     if (!trimmed) {
       setError('Enter a lot number.')
@@ -31,6 +31,9 @@ export function LotTracePage() {
     setLoading(true)
     setError(null)
     try {
+      const locId = locationLabel.trim()
+        ? await resolveLocationIdFromText(locationLabel)
+        : undefined
       const data = await api.traceLot(trimmed, locId)
       setResult(data)
       const qp: Record<string, string> = { lot: trimmed }
@@ -46,19 +49,28 @@ export function LotTracePage() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    void runTrace(lot, locationId ? Number(locationId) : undefined)
+    void runTrace(lot, locationText)
   }
 
   useEffect(() => {
-    api.listLocationsMaster().then(setLocations).catch(() => {})
     const q = searchParams.get('lot')?.trim()
-    const loc = searchParams.get('location_id')?.trim()
-    if (loc) setLocationId(loc)
-    if (q) {
+    const locId = searchParams.get('location_id')?.trim()
+    if (!q) return
+    const init = async () => {
+      let locLabel = ''
+      if (locId) {
+        const locations = await api.listLocationsMaster()
+        const loc = locations.find((l) => String(l.location_id) === locId)
+        if (loc) {
+          locLabel = `${loc.location_cd} / ${loc.location_nm}`
+          setLocationText(locLabel)
+        }
+      }
       setLot(q)
-      void runTrace(q, loc ? Number(loc) : undefined)
+      await runTrace(q, locLabel)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial URL lot only
+    void init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial URL only
   }, [])
 
   const lotTitle = result?.lot ?? lot
@@ -66,32 +78,23 @@ export function LotTracePage() {
   return (
     <ErpScreen error={error} className="erp-screen-stacked">
       <ErpSearchPanel>
-        <form onSubmit={onSubmit} className="erp-search-form">
-          <label className="erp-search-field erp-search-field-reference">
-            <input
-              className="erp-input"
-              value={lot}
-              onChange={(e) => setLot(e.target.value)}
-              placeholder="Lot Number"
-              aria-label="Lot Number"
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-supplier">
-            <select
-              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
-              value={locationId}
-              aria-label="Location"
-              onChange={(e) => setLocationId(e.target.value)}
-            >
-              <option value="">Location</option>
-              {locations.map((l) => (
-                <option key={l.location_id} value={l.location_id}>
-                  {l.location_cd} / {l.location_nm}
-                </option>
-              ))}
-            </select>
-          </label>
+        <form onSubmit={onSubmit} className="erp-search-form erp-search-form-suggest">
+          <ErpSuggestInput
+            value={lot}
+            onChange={setLot}
+            placeholder="Lot Number"
+            ariaLabel="Lot Number"
+            fieldClassName="erp-search-field-reference"
+            fetchSuggestions={suggestCurrentLots}
+          />
+          <ErpSuggestInput
+            value={locationText}
+            onChange={setLocationText}
+            placeholder="Location"
+            ariaLabel="Location"
+            fieldClassName="erp-search-field-supplier"
+            fetchSuggestions={suggestLocations}
+          />
           <div className="erp-search-actions">
             <button type="submit" className="btn erp-btn erp-btn-search" disabled={loading}>
               {loading ? 'Searching…' : 'Trace'}
@@ -104,31 +107,27 @@ export function LotTracePage() {
         <>
           <ErpGridPanel
             gridId="trace-current-v1"
-            title={`Current Stock — ${lotTitle}`}
+            title={`Current Stock — Lot ${lotTitle}`}
             columns={traceCurrentColumns}
             isEmpty={result.current.length === 0}
-            emptyText="No current stock"
+            emptyText="No current stock for this lot"
           >
             {(layout) => (
               <tbody>
-                {result.current.map((c, index) => (
-                  <tr key={`${c.item_nm}-${c.location_cd}-${index}`} className={erpRowClass(index)}>
+                {result.current.map((r, index) => (
+                  <tr key={`${r.location_id}-${r.item_id}`} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
                         case 'item':
-                          return <td key={col.key}>{c.item_nm}</td>
+                          return <td key={col.key}>{r.item_nm}</td>
                         case 'location':
                           return (
                             <td key={col.key}>
-                              <code>{c.location_cd}</code> {c.location_nm}
+                              <code>{r.location_cd}</code> {r.location_nm}
                             </td>
                           )
-                        case 'type':
-                          return <td key={col.key}>{c.itemtyp_nm}</td>
                         case 'qty':
-                          return <td key={col.key}>{formatQty(c.qty)}</td>
-                        case 'updated':
-                          return <td key={col.key}>{formatDateTime(c.updated_at)}</td>
+                          return <td key={col.key}>{formatQty(r.qty)}</td>
                         default:
                           return <td key={col.key} />
                       }
@@ -141,10 +140,10 @@ export function LotTracePage() {
 
           <ErpGridPanel
             gridId="trace-history-v1"
-            title="Movement History"
+            title="GR/GI History"
             columns={traceHistoryColumns}
             isEmpty={result.history.length === 0}
-            emptyText="No history"
+            emptyText="No movements"
           >
             {(layout) => (
               <tbody>
@@ -152,16 +151,6 @@ export function LotTracePage() {
                   <tr key={h.inv_grgi_id} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
-                        case 'id':
-                          return <td key={col.key}>{h.inv_grgi_id}</td>
-                        case 'item':
-                          return <td key={col.key}>{h.item_nm}</td>
-                        case 'location':
-                          return (
-                            <td key={col.key}>
-                              <code>{h.location_cd}</code> {h.location_nm}
-                            </td>
-                          )
                         case 'type':
                           return <td key={col.key}>{h.movetyps_nm}</td>
                         case 'move_qty':
@@ -181,16 +170,16 @@ export function LotTracePage() {
           </ErpGridPanel>
 
           <ErpGridPanel
-            gridId="trace-balances-v1"
-            title="Monthly Balance Snapshots"
+            gridId="trace-balance-v1"
+            title="Period Balances"
             columns={traceBalanceColumns}
             isEmpty={result.balances.length === 0}
-            emptyText="No balance data"
+            emptyText="No balance snapshots"
           >
             {(layout) => (
               <tbody>
                 {result.balances.map((b, index) => (
-                  <tr key={`${b.period_year_month}-${b.item_nm}-${index}`} className={erpRowClass(index)}>
+                  <tr key={b.inv_balance_id} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
                         case 'period':
@@ -207,8 +196,6 @@ export function LotTracePage() {
                           return <td key={col.key}>{formatQty(b.beg_qty)}</td>
                         case 'qty':
                           return <td key={col.key}>{formatQty(b.qty)}</td>
-                        case 'beg_at':
-                          return <td key={col.key}>{formatDateTime(b.beg_at)}</td>
                         default:
                           return <td key={col.key} />
                       }

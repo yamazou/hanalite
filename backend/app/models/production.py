@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -25,6 +25,8 @@ class ProductionOrder(Base):
 
     production_order_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     status: Mapped[str] = mapped_column(ProductionStatus, default="registered")
+    production_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reference_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
     parent_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
     planned_qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
     actual_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)
@@ -43,7 +45,6 @@ class ProductionOrderLine(Base):
     prd_order_line_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     production_order_id: Mapped[int] = mapped_column(ForeignKey("prd_orders.production_order_id"))
     line_no: Mapped[int] = mapped_column(Integer, default=1)
-    itemproc_id: Mapped[int] = mapped_column(ForeignKey("m_itemprocs.itemproc_id"))
     rm_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     wip_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     status: Mapped[str] = mapped_column(LineStatus, default="planned")

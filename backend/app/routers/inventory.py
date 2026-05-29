@@ -22,6 +22,7 @@ from app.services.inventory_query import (
     create_period_balance,
     list_balances,
     list_current_stock,
+    suggest_current_lots,
     list_grgi_history,
     list_movetyps_for_manual,
     trace_lot,
@@ -34,17 +35,26 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 def api_list_currents(
     db: Annotated[Session, Depends(get_db)],
     lot: str | None = Query(default=None),
-    item_id: int | None = Query(default=None),
-    location_id: int | None = Query(default=None),
+    item_q: str | None = Query(default=None),
+    location_q: str | None = Query(default=None),
     include_zero: bool = Query(default=False),
 ):
     return list_current_stock(
         db,
         lot=lot,
-        item_id=item_id,
-        location_id=location_id,
+        item_q=item_q,
+        location_q=location_q,
         include_zero=include_zero,
     )
+
+
+@router.get("/currents/suggest-lots", response_model=list[str])
+def api_suggest_current_lots(
+    db: Annotated[Session, Depends(get_db)],
+    q: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    return suggest_current_lots(db, q, limit=limit)
 
 
 @router.get("/grgi", response_model=list[GrgiHistoryItem])
@@ -145,8 +155,9 @@ def api_list_balances(
     db: Annotated[Session, Depends(get_db)],
     period: str | None = Query(default=None, pattern=r"^\d{6}$"),
     location_id: int | None = Query(default=None),
+    location_q: str | None = Query(default=None, max_length=100),
 ):
-    return list_balances(db, period=period, location_id=location_id)
+    return list_balances(db, period=period, location_id=location_id, location_q=location_q)
 
 
 @router.post("/balances", response_model=BalanceCreateResult, status_code=201)

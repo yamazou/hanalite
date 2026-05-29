@@ -1,5 +1,5 @@
 import type { DraftDetail, DraftLine, Item } from '../types'
-import { toDatetimeLocalValue } from './format'
+import { parseDateInputValue } from './format'
 
 export const APPROVE_ITEM_CD_REQUIRED_MSG =
   'Please enter the item code. This code will be used to generate the master.'
@@ -123,7 +123,7 @@ export function editRowToDraftLine(row: EditLineRow): DraftLine {
 
 export function headerEditFromDraft(data: DraftDetail): HeaderEdit {
   return {
-    receiptAt: toDatetimeLocalValue(new Date(data.receipt_at)),
+    receiptAt: parseDateInputValue(data.receipt_at),
     suppliersId: data.suppliers_id ?? '',
     referenceNo: data.reference_no ?? '',
     notes: data.notes ?? '',

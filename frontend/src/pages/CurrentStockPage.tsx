@@ -1,40 +1,45 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { currentStockColumns } from '../components/erp/masterGridColumns'
-import type { Item } from '../types'
-import type { LocationMaster } from '../types/masters'
 import type { CurrentStock } from '../types/inventory'
-import { formatDateTime, formatItemLabel, formatQty } from '../utils/format'
+import { formatDateTime, formatQty } from '../utils/format'
+import { suggestCurrentLots, suggestItems, suggestLocations } from '../utils/searchSuggest'
+
+type SearchFilters = {
+  item: string
+  lot: string
+  location: string
+  includeZero: boolean
+}
+
+const emptySearch: SearchFilters = {
+  item: '',
+  lot: '',
+  location: '',
+  includeZero: false,
+}
 
 export function CurrentStockPage() {
-  const [items, setItems] = useState<Item[]>([])
-  const [lot, setLot] = useState('')
-  const [itemId, setItemId] = useState('')
-  const [locationId, setLocationId] = useState('')
-  const [locations, setLocations] = useState<LocationMaster[]>([])
-  const [includeZero, setIncludeZero] = useState(false)
+  const [searchInput, setSearchInput] = useState<SearchFilters>(emptySearch)
+  const [appliedSearch, setAppliedSearch] = useState<SearchFilters>(emptySearch)
   const [rows, setRows] = useState<CurrentStock[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.listItems().then(setItems).catch(() => {})
-    api.listLocationsMaster().then(setLocations).catch(() => {})
-  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await api.listCurrentStock({
-        lot: lot.trim() || undefined,
-        item_id: itemId ? Number(itemId) : undefined,
-        location_id: locationId ? Number(locationId) : undefined,
-        include_zero: includeZero,
+        lot: appliedSearch.lot.trim() || undefined,
+        item_q: appliedSearch.item.trim() || undefined,
+        location_q: appliedSearch.location.trim() || undefined,
+        include_zero: appliedSearch.includeZero,
       })
       setRows(data)
     } catch (e) {
@@ -42,7 +47,7 @@ export function CurrentStockPage() {
     } finally {
       setLoading(false)
     }
-  }, [lot, itemId, locationId, includeZero])
+  }, [appliedSearch])
 
   useEffect(() => {
     load()
@@ -50,64 +55,60 @@ export function CurrentStockPage() {
 
   const onSearch = (e: FormEvent) => {
     e.preventDefault()
-    load()
+    setAppliedSearch(searchInput)
   }
+
+  const clearSearch = () => {
+    setSearchInput(emptySearch)
+    setAppliedSearch(emptySearch)
+  }
+
+  const searchFormClass = useMemo(() => 'erp-search-form erp-search-form-suggest', [])
 
   return (
     <ErpScreen error={error}>
       <ErpSearchPanel>
-        <form onSubmit={onSearch} className="erp-search-form">
-          <label className="erp-search-field erp-search-field-reference">
-            <input
-              type="text"
-              className="erp-input"
-              value={lot}
-              placeholder="Lot"
-              aria-label="Lot"
-              onChange={(e) => setLot(e.target.value)}
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-supplier">
-            <select
-              className={`erp-input${locationId === '' ? ' erp-input-empty' : ''}`}
-              value={locationId}
-              aria-label="Location"
-              onChange={(e) => setLocationId(e.target.value)}
-            >
-              <option value="">Location</option>
-              {locations.map((l) => (
-                <option key={l.location_id} value={l.location_id}>
-                  {l.location_cd} / {l.location_nm}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="erp-search-field erp-search-field-item">
-            <select
-              className={`erp-input${itemId === '' ? ' erp-input-empty' : ''}`}
-              value={itemId}
-              aria-label="Item"
-              onChange={(e) => setItemId(e.target.value)}
-            >
-              <option value="">Item</option>
-              {items.map((i) => (
-                <option key={i.item_id} value={i.item_id}>
-                  {formatItemLabel(i)}
-                </option>
-              ))}
-            </select>
-          </label>
+        <form onSubmit={onSearch} className={searchFormClass}>
+          <ErpSuggestInput
+            value={searchInput.item}
+            onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
+            placeholder="Item code - Item name"
+            ariaLabel="Item code - Item name"
+            fieldClassName="erp-search-field-item"
+            fetchSuggestions={suggestItems}
+          />
+          <ErpSuggestInput
+            value={searchInput.lot}
+            onChange={(lot) => setSearchInput((prev) => ({ ...prev, lot }))}
+            placeholder="Lot"
+            ariaLabel="Lot"
+            fieldClassName="erp-search-field-reference"
+            fetchSuggestions={suggestCurrentLots}
+          />
+          <ErpSuggestInput
+            value={searchInput.location}
+            onChange={(location) => setSearchInput((prev) => ({ ...prev, location }))}
+            placeholder="Location"
+            ariaLabel="Location"
+            fieldClassName="erp-search-field-supplier"
+            fetchSuggestions={suggestLocations}
+          />
           <label className="erp-search-field erp-search-field-check">
             <input
               type="checkbox"
-              checked={includeZero}
-              onChange={(e) => setIncludeZero(e.target.checked)}
+              checked={searchInput.includeZero}
+              onChange={(e) =>
+                setSearchInput((prev) => ({ ...prev, includeZero: e.target.checked }))
+              }
             />
             <span>Include zero</span>
           </label>
           <div className="erp-search-actions">
             <button type="submit" className="btn erp-btn erp-btn-search">
               Search
+            </button>
+            <button type="button" className="btn erp-btn erp-btn-clear" onClick={clearSearch}>
+              Clear
             </button>
             <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
               Refresh
@@ -117,7 +118,7 @@ export function CurrentStockPage() {
       </ErpSearchPanel>
 
       <ErpGridPanel
-        gridId="inventory-current-v1"
+        gridId="inventory-current-v2"
         title="Current Stock"
         columns={currentStockColumns}
         loading={loading}
@@ -130,7 +131,13 @@ export function CurrentStockPage() {
               <tr key={r.inv_current_id} className={erpRowClass(index)}>
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
-                    case 'item':
+                    case 'item_cd':
+                      return (
+                        <td key={col.key}>
+                          <code>{r.item_cd}</code>
+                        </td>
+                      )
+                    case 'item_nm':
                       return <td key={col.key}>{r.item_nm}</td>
                     case 'location':
                       return (

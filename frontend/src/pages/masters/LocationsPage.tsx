@@ -8,9 +8,11 @@ import type { LocationMaster } from '../../types/masters'
 
 export function LocationsPage() {
   const [rows, setRows] = useState<LocationMaster[]>([])
+  const locationTypes: Array<LocationMaster['location_type']> = ['RM', 'Process', 'NG', 'FG']
   const [editId, setEditId] = useState<number | null>(null)
   const [locationCd, setLocationCd] = useState('')
   const [locationNm, setLocationNm] = useState('')
+  const [locationType, setLocationType] = useState<LocationMaster['location_type']>('Process')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,13 +44,14 @@ export function LocationsPage() {
     setSuccess(null)
     try {
       if (editId) {
-        await api.updateLocation(editId, cd, nm)
+        await api.updateLocation(editId, cd, nm, locationType)
       } else {
-        await api.createLocation(cd, nm)
+        await api.createLocation(cd, nm, locationType)
       }
       setEditId(null)
       setLocationCd('')
       setLocationNm('')
+      setLocationType('Process')
       setSuccess('Saved.')
       await load()
     } catch (err) {
@@ -68,6 +71,7 @@ export function LocationsPage() {
         setEditId(null)
         setLocationCd('')
         setLocationNm('')
+        setLocationType('Process')
       }
       setSuccess('Deleted.')
       await load()
@@ -80,6 +84,7 @@ export function LocationsPage() {
     setEditId(row.location_id)
     setLocationCd(row.location_cd)
     setLocationNm(row.location_nm)
+    setLocationType(row.location_type)
     setError(null)
     setSuccess(null)
   }
@@ -88,6 +93,7 @@ export function LocationsPage() {
     setEditId(null)
     setLocationCd('')
     setLocationNm('')
+    setLocationType('Process')
   }
 
   return (
@@ -113,6 +119,21 @@ export function LocationsPage() {
               aria-label="Location Name"
               required
             />
+          </label>
+          <label className="erp-search-field">
+            <select
+              className="erp-input"
+              value={locationType}
+              onChange={(e) => setLocationType(e.target.value as LocationMaster['location_type'])}
+              aria-label="Location Type"
+              required
+            >
+              {locationTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="erp-search-actions">
             <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
@@ -155,6 +176,8 @@ export function LocationsPage() {
                       )
                     case 'name':
                       return <td key={col.key}>{row.location_nm}</td>
+                    case 'type':
+                      return <td key={col.key}>{row.location_type}</td>
                     case 'actions':
                       return (
                         <td

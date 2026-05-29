@@ -1,11 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { AppLink, useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { Supplier } from '../types'
-import { datetimeLocalToIso, toDatetimeLocalValue } from '../utils/format'
+import { dateInputToIso, toDateInputValue } from '../utils/format'
 
 type Props = {
   variant?: DraftVariant
@@ -13,9 +13,9 @@ type Props = {
 
 export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
   const copy = getDraftPageCopy(variant)
-  const navigate = useNavigate()
+  const navigate = useAppNavigate()
   const [file, setFile] = useState<File | null>(null)
-  const [receiptAt, setReceiptAt] = useState(toDatetimeLocalValue())
+  const [receiptAt, setReceiptAt] = useState(toDateInputValue())
   const [suppliersId, setSuppliersId] = useState<number | ''>('')
   const [referenceNo, setReferenceNo] = useState('')
   const [notes, setNotes] = useState('')
@@ -42,7 +42,7 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
     setError(null)
     try {
       const draft = await api.importExcel(file, {
-        receipt_at: datetimeLocalToIso(receiptAt),
+        receipt_at: dateInputToIso(receiptAt),
         suppliers_id: suppliersId === '' ? undefined : suppliersId,
         reference_no: referenceNo.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -59,9 +59,9 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
     <ErpScreen error={error}>
       <ErpSearchPanel>
         <div className="erp-search-form">
-          <Link to={copy.listPath} className="erp-link">
+          <AppLink to={copy.listPath} className="btn erp-btn erp-btn-clear">
             {copy.backToList}
-          </Link>
+          </AppLink>
           <span className="erp-search-section-label">{copy.excelTitle}</span>
           <div className="erp-search-actions">
             <button
@@ -102,7 +102,7 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
         <p className="muted erp-grid-empty">{copy.loadingText}</p>
       ) : (
         <ErpSearchPanel>
-          <form onSubmit={handleSubmit} className="erp-search-form">
+          <form onSubmit={handleSubmit} className="erp-search-form erp-search-form-production-import">
             <label className="erp-search-field erp-search-field-grow">
               <input
                 type="file"
@@ -115,7 +115,7 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
             </label>
             <label className="erp-search-field erp-search-field-date">
               <input
-                type="datetime-local"
+                type="date"
                 className="erp-input erp-input-date"
                 value={receiptAt}
                 aria-label={copy.dateTimeLabel}
@@ -162,9 +162,9 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
               <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
                 {submitting ? copy.submittingImport : copy.submitImport}
               </button>
-              <Link to={copy.listPath} className="btn erp-btn erp-btn-clear">
+              <AppLink to={copy.listPath} className="btn erp-btn erp-btn-clear">
                 {copy.cancelBtn}
-              </Link>
+              </AppLink>
             </div>
           </form>
         </ErpSearchPanel>

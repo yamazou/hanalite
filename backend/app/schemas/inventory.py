@@ -10,6 +10,7 @@ class CurrentStockItem(BaseModel):
     location_id: int
     location_cd: str
     location_nm: str
+    item_cd: str
     item_nm: str
     itemtyp_nm: str
     lot: str

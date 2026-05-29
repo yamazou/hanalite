@@ -24,8 +24,10 @@ from app.services.drafts import (
     cancel_draft,
     create_draft,
     restore_draft,
+    delete_draft,
     get_draft,
     list_drafts,
+    suggest_draft_lots,
     update_draft,
 )
 from app.services.excel_import import ExcelImportError, build_template_workbook, parse_excel_to_draft_create
@@ -46,9 +48,11 @@ def api_list_drafts(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     suppliers_id: int | None = Query(default=None, gt=0),
+    supplier_q: str | None = Query(default=None, max_length=100),
     reference_no: str | None = Query(default=None, max_length=100),
     item_id: int | None = Query(default=None, gt=0),
-    lot: str | None = Query(default=None, min_length=1, max_length=50),
+    item_q: str | None = Query(default=None, max_length=100),
+    lot: str | None = Query(default=None, max_length=50),
 ):
     return list_drafts(
         db,
@@ -56,10 +60,21 @@ def api_list_drafts(
         date_from=date_from,
         date_to=date_to,
         suppliers_id=suppliers_id,
+        supplier_q=supplier_q,
         reference_no=reference_no,
         item_id=item_id,
+        item_q=item_q,
         lot=lot,
     )
+
+
+@router.get("/suggest-lots", response_model=list[str])
+def api_suggest_draft_lots(
+    db: Annotated[Session, Depends(get_db)],
+    q: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    return suggest_draft_lots(db, q, limit=limit)
 
 
 @router.post("", response_model=DraftRead, status_code=201)
@@ -259,6 +274,17 @@ def api_restore_draft(
 ):
     try:
         return restore_draft(db, draft_id)
+    except DraftServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/{draft_id}", status_code=204, response_class=Response)
+def api_delete_draft(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        delete_draft(db, draft_id)
     except DraftServiceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS m_locations (
     location_id   INT UNSIGNED NOT NULL AUTO_INCREMENT,
     location_cd   VARCHAR(50)  NOT NULL,
     location_nm   VARCHAR(200) NOT NULL,
+    location_type VARCHAR(20)  NOT NULL DEFAULT 'Process',
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at    DATETIME NULL DEFAULT NULL,
@@ -152,8 +153,10 @@ SET FOREIGN_KEY_CHECKS = 1;
 INSERT INTO m_movetyps (movetyps_nm) VALUES ('GR'), ('GI'), ('MV')
 ON DUPLICATE KEY UPDATE movetyps_nm = VALUES(movetyps_nm);
 
-INSERT INTO m_locations (location_cd, location_nm) VALUES ('MAIN', 'Main Location')
-ON DUPLICATE KEY UPDATE location_nm = VALUES(location_nm);
+INSERT INTO m_locations (location_cd, location_nm, location_type) VALUES ('MAIN', 'Main Location', 'Process')
+ON DUPLICATE KEY UPDATE
+    location_nm = VALUES(location_nm),
+    location_type = VALUES(location_type);
 
 INSERT INTO m_itemtyps (itemtyp_nm) VALUES
     ('RM'), ('Purchase parts'), ('WIP'), ('FG')

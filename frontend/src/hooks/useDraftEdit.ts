@@ -11,7 +11,7 @@ import {
   headerEditFromDraft,
   lineToEditRow,
 } from '../utils/draftEdit'
-import { datetimeLocalToIso } from '../utils/format'
+import { dateInputToIso } from '../utils/format'
 
 export function useDraftEdit(
   draftId: number | null,
@@ -100,11 +100,17 @@ export function useDraftEdit(
     setEditLines((prev) => [...prev, emptyEditLine(prev.length + 1)])
   }
 
-  const removeRow = (key: string) => {
+  const removeRows = (keys: string[]) => {
+    if (keys.length === 0) return
+    const drop = new Set(keys)
     setEditLines((prev) =>
-      prev.filter((row) => row.key !== key).map((row, index) => ({ ...row, line_no: index + 1 }))
+      prev.filter((row) => !drop.has(row.key)).map((row, index) => ({ ...row, line_no: index + 1 }))
     )
     setRowError(null)
+  }
+
+  const removeRow = (key: string) => {
+    removeRows([key])
   }
 
   const buildPayloadLines = () => {
@@ -137,7 +143,7 @@ export function useDraftEdit(
       const updated = await api.updateDraft(
         draft.inv_receipt_draft_id,
         {
-          receipt_at: datetimeLocalToIso(headerEdit.receiptAt),
+          receipt_at: dateInputToIso(headerEdit.receiptAt),
           suppliers_id: headerEdit.suppliersId === '' ? null : headerEdit.suppliersId,
           reference_no: headerEdit.referenceNo.trim() || null,
           notes: headerEdit.notes.trim() || null,
@@ -174,6 +180,7 @@ export function useDraftEdit(
     updateLine,
     addRow,
     removeRow,
+    removeRows,
     items,
     suppliers,
     locations,

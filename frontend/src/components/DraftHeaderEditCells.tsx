@@ -15,7 +15,7 @@ export function DraftHeaderEditCell({ colKey, header, onPatch, suppliers, copy }
     case 'date':
       return (
         <input
-          type="datetime-local"
+          type="date"
           className="erp-grid-input"
           value={header.receiptAt}
           onClick={(e) => e.stopPropagation()}

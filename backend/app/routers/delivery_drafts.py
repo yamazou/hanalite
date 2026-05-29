@@ -21,6 +21,8 @@ from app.services.delivery_drafts import (
     cancel_delivery_draft,
     create_delivery_draft,
     restore_delivery_draft,
+    delete_delivery_draft,
+    suggest_delivery_draft_lots,
     from_receipt_payload,
     get_delivery_draft,
     list_delivery_drafts,
@@ -38,9 +40,11 @@ def api_list_delivery_drafts(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     suppliers_id: int | None = Query(default=None, gt=0),
+    supplier_q: str | None = Query(default=None, max_length=100),
     reference_no: str | None = Query(default=None, max_length=100),
     item_id: int | None = Query(default=None, gt=0),
-    lot: str | None = Query(default=None, min_length=1, max_length=50),
+    item_q: str | None = Query(default=None, max_length=100),
+    lot: str | None = Query(default=None, max_length=50),
 ):
     return list_delivery_drafts(
         db,
@@ -48,10 +52,21 @@ def api_list_delivery_drafts(
         date_from=date_from,
         date_to=date_to,
         suppliers_id=suppliers_id,
+        supplier_q=supplier_q,
         reference_no=reference_no,
         item_id=item_id,
+        item_q=item_q,
         lot=lot,
     )
+
+
+@router.get("/suggest-lots", response_model=list[str])
+def api_suggest_delivery_draft_lots(
+    db: Annotated[Session, Depends(get_db)],
+    q: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    return suggest_delivery_draft_lots(db, q, limit=limit)
 
 
 @router.post("", response_model=DeliveryDraftRead, status_code=201)
@@ -182,6 +197,17 @@ def api_restore_delivery_draft(
 ):
     try:
         return restore_delivery_draft(db, draft_id)
+    except DeliveryDraftServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/{draft_id}", status_code=204, response_class=Response)
+def api_delete_delivery_draft(
+    draft_id: int,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        delete_delivery_draft(db, draft_id)
     except DeliveryDraftServiceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

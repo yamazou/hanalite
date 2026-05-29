@@ -1,6 +1,6 @@
 import type { DraftLine, DraftListItem } from '../types'
 import { compareValues, type SortDir } from '../hooks/useGridSort'
-import { formatDateTime, formatQty, statusLabel } from './format'
+import { formatDate, formatDateTime, formatQty, statusLabel } from './format'
 import { toFilterCellValue } from './gridColumnFilter'
 
 export function compareDraftListItems(
@@ -53,7 +53,7 @@ export function getDraftListFilterValue(
     case 'status':
       return toFilterCellValue(statusLabel[row.status] ?? row.status)
     case 'date':
-      return toFilterCellValue(formatDateTime(row.receipt_at) === '-' ? null : formatDateTime(row.receipt_at))
+      return toFilterCellValue(formatDate(row.receipt_at) === '-' ? null : formatDate(row.receipt_at))
     case 'reference':
       return toFilterCellValue(row.reference_no)
     case 'supplier':

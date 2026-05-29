@@ -12,6 +12,7 @@ import {
   layoutsEqual,
   loadGridLayout,
   persistGridLayout,
+  pinKeysFirst,
   type StoredGridLayout,
 } from '../utils/gridLayoutStorage'
 
@@ -19,6 +20,8 @@ export const GRID_MIN_COL_WIDTH = 16
 
 type Options = {
   onLayoutChange?: () => void
+  /** Column keys that always stay leftmost (in this order). */
+  pinFirst?: string[]
 }
 
 function columnKeys(columns: GridColumnDef[]): string[] {
@@ -34,16 +37,17 @@ export function useGridColumnLayout(
   const minWidths = useMemo(() => columns.map((col) => col.minWidth ?? GRID_MIN_COL_WIDTH), [columns])
   const keysSignature = columnKeys(columns).join('|')
   const onLayoutChange = options?.onLayoutChange
+  const pinFirst = options?.pinFirst
 
   const initial = useMemo(
-    () => loadGridLayout(storageKey, columns, minWidths),
+    () => loadGridLayout(storageKey, columns, minWidths, pinFirst),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per gridId + column set
-    [storageKey, keysSignature]
+    [storageKey, keysSignature, pinFirst]
   )
 
   const [order, setOrder] = useState<string[]>(initial.order)
   const [widthsByKey, setWidthsByKey] = useState<Record<string, number>>(initial.widths)
-  const savedSnapshotRef = useRef<StoredGridLayout>(initial)
+  const [savedSnapshot, setSavedSnapshot] = useState<StoredGridLayout>(initial)
 
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
@@ -56,41 +60,40 @@ export function useGridColumnLayout(
   )
 
   const isDirty = useMemo(
-    () => !layoutsEqual(currentLayout, savedSnapshotRef.current),
-    [currentLayout]
+    () => !layoutsEqual(currentLayout, savedSnapshot),
+    [currentLayout, savedSnapshot]
   )
 
   useEffect(() => {
-    const loaded = loadGridLayout(storageKey, columns, minWidths)
-    savedSnapshotRef.current = loaded
+    const loaded = loadGridLayout(storageKey, columns, minWidths, pinFirst)
+    setSavedSnapshot(loaded)
     setOrder(loaded.order)
     setWidthsByKey(loaded.widths)
-  }, [storageKey, keysSignature, columns, minWidths])
+  }, [storageKey, keysSignature, columns, minWidths, pinFirst])
 
   useEffect(() => {
     const keys = columnKeys(columns)
-    setOrder((prev) => {
-      const merged = mergeOrderInHook(prev, keys)
-      return merged
-    })
+    setOrder((prev) => mergeOrderInHook(prev, keys, pinFirst))
     setWidthsByKey((prev) => mergeWidthsInHook(columns, minWidths, prev))
-  }, [keysSignature, columns, minWidths])
+  }, [keysSignature, columns, minWidths, pinFirst])
 
   const notifyChange = useCallback(() => {
     onLayoutChange?.()
   }, [onLayoutChange])
 
   const saveLayout = useCallback(() => {
-    const payload: StoredGridLayout = { order, widths: widthsByKey }
+    const pinnedOrder = pinFirst?.length ? pinKeysFirst(order, pinFirst) : order
+    const payload: StoredGridLayout = { order: pinnedOrder, widths: widthsByKey }
     persistGridLayout(storageKey, payload)
-    savedSnapshotRef.current = payload
+    setSavedSnapshot(payload)
     notifyChange()
-  }, [order, widthsByKey, storageKey, notifyChange])
+  }, [order, widthsByKey, storageKey, notifyChange, pinFirst])
 
   const orderedColumns = useMemo(() => {
     const byKey = new Map(columns.map((col) => [col.key, col]))
-    return order.map((key) => byKey.get(key)).filter((col): col is GridColumnDef => col != null)
-  }, [order, columns])
+    const keys = pinFirst?.length ? pinKeysFirst(order, pinFirst) : order
+    return keys.map((key) => byKey.get(key)).filter((col): col is GridColumnDef => col != null)
+  }, [order, columns, pinFirst])
 
   const widths = useMemo(
     () => orderedColumns.map((col) => widthsByKey[col.key] ?? col.defaultWidth),
@@ -202,14 +205,18 @@ export function useGridColumnLayout(
   }
 }
 
-function mergeOrderInHook(saved: string[], keys: string[]): string[] {
-  if (!saved.length) return keys
-  const keySet = new Set(keys)
-  const next = saved.filter((key) => keySet.has(key))
-  for (const key of keys) {
-    if (!next.includes(key)) next.push(key)
+function mergeOrderInHook(saved: string[], keys: string[], pinFirst?: string[]): string[] {
+  let next: string[]
+  if (!saved.length) {
+    next = keys
+  } else {
+    const keySet = new Set(keys)
+    next = saved.filter((key) => keySet.has(key))
+    for (const key of keys) {
+      if (!next.includes(key)) next.push(key)
+    }
   }
-  return next
+  return pinFirst?.length ? pinKeysFirst(next, pinFirst) : next
 }
 
 function mergeWidthsInHook(

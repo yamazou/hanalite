@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -17,6 +17,7 @@ from app.services.production import (
     ProductionError,
     approve_order,
     cancel_order,
+    restore_order,
     complete_line,
     complete_order,
     create_order,
@@ -25,6 +26,10 @@ from app.services.production import (
     list_orders,
     recalculate_inputs,
     update_order,
+)
+from app.services.production_excel_import import (
+    ProductionExcelImportError,
+    parse_excel_to_production_create,
 )
 
 router = APIRouter(prefix="/production/orders", tags=["production"])
@@ -59,6 +64,27 @@ def api_create_order(payload: ProductionOrderCreate, db: Annotated[Session, Depe
     except ProductionError as e:
         db.rollback()
         raise _handle_error(e) from e
+
+
+@router.post("/import", response_model=ProductionOrderRead, status_code=201)
+async def api_import_order_excel(
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(..., description="Excel .xlsx file"),
+):
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    try:
+        payload = parse_excel_to_production_create(db, raw)
+        row = create_order(db, payload)
+        db.commit()
+        return row
+    except (ProductionExcelImportError, ProductionError) as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.put("/{order_id}", response_model=ProductionOrderRead)
@@ -137,6 +163,17 @@ def api_approve_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
 def api_cancel_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         row = cancel_order(db, order_id)
+        db.commit()
+        return row
+    except ProductionError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.post("/{order_id}/restore", response_model=ProductionOrderRead)
+def api_restore_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
+    try:
+        row = restore_order(db, order_id)
         db.commit()
         return row
     except ProductionError as e:

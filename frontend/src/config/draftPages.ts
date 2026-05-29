@@ -41,6 +41,9 @@ export type DraftPageCopy = {
   qtyLabel: string
   addLineBtn: string
   addRowBtn: string
+  deleteRowBtn: string
+  checkAllRowsTitle: string
+  uncheckAllRowsTitle: string
   saveRowBtn: string
   removeRowBtn: string
   removeLineBtn: string
@@ -77,6 +80,10 @@ export type DraftPageCopy = {
   restoreConfirm: string
   restoredMsg: string
   restoreFail: string
+  deleteBtn: string
+  deleteConfirm: string
+  deletedMsg: string
+  deleteFail: string
   loadFail: string
   masterLoadFail: string
   createFail: string
@@ -149,7 +156,7 @@ const receiptCopy: DraftPageCopy = {
   createTitle: 'Receipt Entry',
   createDesc: 'Enter header and rows, then save as Registered.',
   backToList: '← Back to list',
-  dateTimeLabel: 'Receipt Date/Time',
+  dateTimeLabel: 'Receipt Date',
   referenceLabel: 'Reference No. (PO / delivery note)',
   referencePlaceholder: 'PO-2026-001',
   supplierLabel: 'Supplier',
@@ -164,6 +171,9 @@ const receiptCopy: DraftPageCopy = {
   qtyLabel: 'Qty',
   addLineBtn: 'Add line',
   addRowBtn: 'Add row',
+  deleteRowBtn: 'Delete row',
+  checkAllRowsTitle: 'Check all',
+  uncheckAllRowsTitle: 'Uncheck all',
   saveRowBtn: 'Save',
   removeRowBtn: 'Remove',
   removeLineBtn: 'Remove',
@@ -201,6 +211,10 @@ const receiptCopy: DraftPageCopy = {
   restoreConfirm: 'Restore this cancelled receipt to Registered?',
   restoredMsg: 'Restored to Registered.',
   restoreFail: 'Restore failed',
+  deleteBtn: 'Delete',
+  deleteConfirm: 'Permanently delete this cancelled receipt?',
+  deletedMsg: 'Receipt deleted.',
+  deleteFail: 'Delete failed',
   loadFail: 'Failed to load',
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
@@ -271,7 +285,7 @@ const deliveryCopy: DraftPageCopy = {
   createTitle: 'Delivery Entry',
   createDesc: 'Enter header and rows, then save as Registered.',
   backToList: '← Back to list',
-  dateTimeLabel: 'Delivery Date/Time',
+  dateTimeLabel: 'Delivery Date',
   referenceLabel: 'Reference No. (PO / delivery note)',
   referencePlaceholder: 'DN-2026-001',
   supplierLabel: 'Supplier',
@@ -286,6 +300,9 @@ const deliveryCopy: DraftPageCopy = {
   qtyLabel: 'Qty',
   addLineBtn: 'Add line',
   addRowBtn: 'Add row',
+  deleteRowBtn: 'Delete row',
+  checkAllRowsTitle: 'Check all',
+  uncheckAllRowsTitle: 'Uncheck all',
   saveRowBtn: 'Save',
   removeRowBtn: 'Remove',
   removeLineBtn: 'Remove',
@@ -321,6 +338,10 @@ const deliveryCopy: DraftPageCopy = {
   restoreConfirm: 'Restore this cancelled delivery to Registered?',
   restoredMsg: 'Restored to Registered.',
   restoreFail: 'Restore failed',
+  deleteBtn: 'Delete',
+  deleteConfirm: 'Permanently delete this cancelled delivery?',
+  deletedMsg: 'Delivery deleted.',
+  deleteFail: 'Delete failed',
   loadFail: 'Failed to load',
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
@@ -329,7 +350,7 @@ const deliveryCopy: DraftPageCopy = {
   lineValidation: 'Enter at least one line with item code or name, location, lot, and quantity.',
   showPdfImport: false,
   filterAll: 'All',
-  filterPending: 'Pending',
+  filterPending: 'Registered',
   filterApproved: 'Approved',
   filterCancelled: 'Cancelled',
   filterDateFrom: 'Delivery Date From',

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
+import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { Alert } from '../components/Alert'
 import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
 import { DraftHeaderEditCell } from '../components/DraftHeaderEditCells'
@@ -21,8 +22,9 @@ import {
 } from '../utils/draftEdit'
 import { StatusBadge } from '../components/StatusBadge'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
-import type { DraftListItem, DraftStatus, Item, Supplier } from '../types'
-import { formatDateTime, formatItemLabel } from '../utils/format'
+import type { DraftListItem, DraftStatus } from '../types'
+import { formatDate, formatDateTime } from '../utils/format'
+import { suggestDraftLots, suggestItems, suggestSuppliers } from '../utils/searchSuggest'
 
 const sourceLabelByVariant = {
   receipt: { manual: 'Manual', excel: 'Excel', pdf: 'PDF' },
@@ -32,9 +34,9 @@ const sourceLabelByVariant = {
 type SearchFilters = {
   dateFrom: string
   dateTo: string
-  supplierId: number | ''
+  supplier: string
   referenceNo: string
-  itemId: number | ''
+  item: string
   lot: string
 }
 
@@ -45,9 +47,9 @@ type Props = {
 const emptySearchFilters: SearchFilters = {
   dateFrom: '',
   dateTo: '',
-  supplierId: '',
+  supplier: '',
   referenceNo: '',
-  itemId: '',
+  item: '',
   lot: '',
 }
 
@@ -84,13 +86,11 @@ function SearchDateInput({
 export function DraftListPage({ variant = 'receipt' }: Props) {
   const copy = getDraftPageCopy(variant)
   const sourceLabel = sourceLabelByVariant[variant]
-  const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useAppNavigate()
+  const { search } = useAppViewRoute()
   const [status, setStatus] = useState<'' | DraftStatus>('')
   const [searchInput, setSearchInput] = useState<SearchFilters>(emptySearchFilters)
   const [appliedSearch, setAppliedSearch] = useState<SearchFilters>(emptySearchFilters)
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [items, setItems] = useState<Item[]>([])
   const [drafts, setDrafts] = useState<DraftListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -104,11 +104,11 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   const bumpGridLayout = useCallback(() => setGridLayoutTick((n) => n + 1), [])
 
   const selectedId = useMemo(() => {
-    const raw = searchParams.get('id')
+    const raw = new URLSearchParams(search).get('id')
     if (!raw) return null
     const id = Number(raw)
     return Number.isNaN(id) ? null : id
-  }, [searchParams])
+  }, [search])
 
   const selectedDraft = useMemo(
     () => drafts.find((d) => d.inv_receipt_draft_id === selectedId) ?? null,
@@ -124,16 +124,9 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     { value: 'cancelled', label: copy.filterCancelled },
   ]
 
-  useEffect(() => {
-    api
-      .listSuppliers()
-      .then(setSuppliers)
-      .catch(() => setSuppliers([]))
-    api
-      .listItems()
-      .then(setItems)
-      .catch(() => setItems([]))
-  }, [])
+  const fetchItemSuggestions = useCallback((q: string) => suggestItems(q), [])
+  const fetchSupplierSuggestions = useCallback((q: string) => suggestSuppliers(q), [])
+  const fetchLotSuggestions = useCallback((q: string) => suggestDraftLots(q, variant), [variant])
 
   useEffect(() => {
     const prev = document.title
@@ -152,9 +145,9 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           status: status || undefined,
           date_from: appliedSearch.dateFrom || undefined,
           date_to: appliedSearch.dateTo || undefined,
-          suppliers_id: appliedSearch.supplierId === '' ? undefined : appliedSearch.supplierId,
+          supplier_q: appliedSearch.supplier.trim() || undefined,
           reference_no: appliedSearch.referenceNo.trim() || undefined,
-          item_id: appliedSearch.itemId === '' ? undefined : appliedSearch.itemId,
+          item_q: appliedSearch.item.trim() || undefined,
           lot: appliedSearch.lot.trim() || undefined,
         },
         variant
@@ -172,7 +165,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   }, [load])
 
   const selectDraft = (id: number) => {
-    setSearchParams({ id: String(id) })
+    navigate(copy.listPathWithId(id), { replace: true })
     setMessage(null)
   }
 
@@ -262,11 +255,30 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     }
   }
 
+  async function handleDelete() {
+    if (!selectedId || selectedDraft?.status !== 'cancelled') return
+    if (!confirm(copy.deleteConfirm)) return
+    setActing(true)
+    setError(null)
+    setMessage(null)
+    try {
+      await api.deleteDraft(selectedId, variant)
+      setMessage(copy.deletedMsg)
+      navigate(copy.listPath, { replace: true })
+      void load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : copy.deleteFail)
+    } finally {
+      setActing(false)
+    }
+  }
+
   const canApprove =
     selectedDraft?.status === 'registered' && (selectedDraft?.line_count ?? 0) > 0
   const canCancel =
     selectedDraft?.status === 'registered' || selectedDraft?.status === 'approved'
   const canRestore = selectedDraft?.status === 'cancelled'
+  const canDelete = selectedDraft?.status === 'cancelled'
 
   const headerColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
@@ -400,7 +412,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           </td>
         )
       case 'date':
-        return <td key={colKey}>{formatDateTime(d.receipt_at)}</td>
+        return <td key={colKey}>{formatDate(d.receipt_at)}</td>
       case 'reference':
         return (
           <td key={colKey} className="erp-link-cell">
@@ -471,7 +483,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
 
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
-          <div className="erp-search-row">
+          <div className="erp-search-row erp-search-form-suggest">
             <div className="erp-search-field erp-search-field-date">
               <span className="erp-search-date-range">
                 <SearchDateInput
@@ -491,26 +503,14 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 />
               </span>
             </div>
-            <label className="erp-search-field erp-search-field-supplier">
-              <select
-                className={`erp-input${searchInput.supplierId === '' ? ' erp-input-empty' : ''}`}
-                value={searchInput.supplierId}
-                aria-label={copy.supplierLabel}
-                onChange={(e) =>
-                  setSearchInput((prev) => ({
-                    ...prev,
-                    supplierId: e.target.value === '' ? '' : Number(e.target.value),
-                  }))
-                }
-              >
-                <option value="">{copy.supplierLabel}</option>
-                {suppliers.map((s) => (
-                  <option key={s.suppliers_id} value={s.suppliers_id}>
-                    {s.suppliers_nm}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ErpSuggestInput
+              value={searchInput.supplier}
+              onChange={(supplier) => setSearchInput((prev) => ({ ...prev, supplier }))}
+              placeholder={copy.supplierLabel}
+              ariaLabel={copy.supplierLabel}
+              fieldClassName="erp-search-field-supplier"
+              fetchSuggestions={fetchSupplierSuggestions}
+            />
             <label className="erp-search-field erp-search-field-reference">
               <input
                 type="text"
@@ -523,36 +523,22 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 }
               />
             </label>
-            <label className="erp-search-field erp-search-field-item">
-              <select
-                className={`erp-input${searchInput.itemId === '' ? ' erp-input-empty' : ''}`}
-                value={searchInput.itemId}
-                aria-label={copy.itemLabel}
-                onChange={(e) =>
-                  setSearchInput((prev) => ({
-                    ...prev,
-                    itemId: e.target.value === '' ? '' : Number(e.target.value),
-                  }))
-                }
-              >
-                <option value="">{copy.itemLabel}</option>
-                {items.map((item) => (
-                  <option key={item.item_id} value={item.item_id}>
-                    {formatItemLabel(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="erp-search-field erp-search-field-lot">
-              <input
-                type="text"
-                className="erp-input erp-input-lot"
-                value={searchInput.lot}
-                placeholder={copy.filterLotPh}
-                aria-label={copy.filterLotPh}
-                onChange={(e) => setSearchInput((prev) => ({ ...prev, lot: e.target.value }))}
-              />
-            </label>
+            <ErpSuggestInput
+              value={searchInput.item}
+              onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
+              placeholder={`${copy.itemCdLabel} - ${copy.itemNmLabel}`}
+              ariaLabel={copy.itemLabel}
+              fieldClassName="erp-search-field-item"
+              fetchSuggestions={fetchItemSuggestions}
+            />
+            <ErpSuggestInput
+              value={searchInput.lot}
+              onChange={(lot) => setSearchInput((prev) => ({ ...prev, lot }))}
+              placeholder={copy.filterLotPh}
+              ariaLabel={copy.filterLotPh}
+              fieldClassName="erp-search-field-lot"
+              fetchSuggestions={fetchLotSuggestions}
+            />
             <div className="erp-search-actions">
               <button type="button" className="btn erp-btn erp-btn-search" onClick={applySearchFilters}>
                 {copy.filterApply}
@@ -619,6 +605,16 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 onClick={() => void handleRestore()}
               >
                 {copy.restoreBtn}
+              </button>
+            )}
+            {selectedId && canDelete && (
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-cancel"
+                disabled={acting}
+                onClick={() => void handleDelete()}
+              >
+                {copy.deleteBtn}
               </button>
             )}
             <button

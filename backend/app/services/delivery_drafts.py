@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.drafts import SlsDeliveryDraft, SlsDeliveryDraftLine
@@ -249,8 +249,10 @@ def list_delivery_drafts(
     date_from: date | None = None,
     date_to: date | None = None,
     suppliers_id: int | None = None,
+    supplier_q: str | None = None,
     reference_no: str | None = None,
     item_id: int | None = None,
+    item_q: str | None = None,
     lot: str | None = None,
 ) -> list[DeliveryDraftListItem]:
     stmt = (
@@ -285,6 +287,9 @@ def list_delivery_drafts(
         stmt = stmt.where(SlsDeliveryDraft.delivery_at <= datetime.combine(date_to, time.max))
     if suppliers_id is not None:
         stmt = stmt.where(SlsDeliveryDraft.suppliers_id == suppliers_id)
+    supplier_value = (supplier_q or "").strip()
+    if supplier_value:
+        stmt = stmt.where(Supplier.suppliers_nm.like(f"%{supplier_value}%"))
     reference_value = (reference_no or "").strip()
     if reference_value:
         stmt = stmt.where(SlsDeliveryDraft.reference_no.like(f"%{reference_value}%"))
@@ -298,13 +303,34 @@ def list_delivery_drafts(
                 )
             )
         )
+    item_value = (item_q or "").strip()
+    if item_value:
+        item_pattern = f"%{item_value}%"
+        item_label = func.concat(Item.item_cd, " - ", Item.item_nm)
+        stmt = stmt.where(
+            exists(
+                select(1)
+                .select_from(SlsDeliveryDraftLine)
+                .join(Item, Item.item_id == SlsDeliveryDraftLine.item_id)
+                .where(
+                    SlsDeliveryDraftLine.sls_delivery_draft_id == SlsDeliveryDraft.sls_delivery_draft_id,
+                    SlsDeliveryDraftLine.deleted_at.is_(None),
+                    or_(
+                        Item.item_cd.like(item_pattern),
+                        Item.item_nm.like(item_pattern),
+                        item_label.like(item_pattern),
+                    ),
+                )
+            )
+        )
     lot_value = (lot or "").strip()
     if lot_value:
+        lot_pattern = f"%{lot_value}%"
         stmt = stmt.where(
             exists(
                 select(1).where(
                     SlsDeliveryDraftLine.sls_delivery_draft_id == SlsDeliveryDraft.sls_delivery_draft_id,
-                    SlsDeliveryDraftLine.lot == lot_value,
+                    SlsDeliveryDraftLine.lot.like(lot_pattern),
                     SlsDeliveryDraftLine.deleted_at.is_(None),
                 )
             )
@@ -460,6 +486,53 @@ def restore_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
     draft.updated_at = now
     db.commit()
     return get_delivery_draft(db, draft_id)
+
+
+def suggest_delivery_draft_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    stmt = (
+        select(SlsDeliveryDraftLine.lot)
+        .distinct()
+        .join(
+            SlsDeliveryDraft,
+            SlsDeliveryDraft.sls_delivery_draft_id == SlsDeliveryDraftLine.sls_delivery_draft_id,
+        )
+        .where(
+            SlsDeliveryDraft.deleted_at.is_(None),
+            SlsDeliveryDraftLine.deleted_at.is_(None),
+        )
+        .order_by(SlsDeliveryDraftLine.lot)
+    )
+    if q:
+        term = q.strip()
+        if term:
+            stmt = stmt.where(SlsDeliveryDraftLine.lot.like(f"%{term}%"))
+    stmt = stmt.limit(min(max(limit, 1), 50))
+    return [row[0] for row in db.execute(stmt).all()]
+
+
+def delete_delivery_draft(db: Session, draft_id: int) -> None:
+    draft = db.scalar(
+        select(SlsDeliveryDraft)
+        .options(selectinload(SlsDeliveryDraft.lines))
+        .where(
+            SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
+            SlsDeliveryDraft.deleted_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if not draft:
+        raise DeliveryDraftServiceError(f"Draft {draft_id} not found.")
+    if draft.status != "cancelled":
+        raise DeliveryDraftServiceError("Only cancelled drafts can be deleted.")
+
+    now = datetime.now()
+    for line in draft.lines:
+        if line.deleted_at is None:
+            line.deleted_at = now
+            line.updated_at = now
+    draft.deleted_at = now
+    draft.updated_at = now
+    db.commit()
 
 
 def from_receipt_payload(payload: DraftCreate) -> DeliveryDraftCreate:

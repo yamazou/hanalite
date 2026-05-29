@@ -14,7 +14,6 @@ import type {
   ItemSearchRow,
   ItemTyp,
   MoveTypMaster,
-  ItemProcMaster,
   LocationMaster,
   SupplierMaster,
 } from '../types/masters'
@@ -41,8 +40,10 @@ export type DraftListFilters = {
   date_from?: string
   date_to?: string
   suppliers_id?: number
+  supplier_q?: string
   reference_no?: string
   item_id?: number
+  item_q?: string
   lot?: string
 }
 
@@ -145,8 +146,10 @@ export const api = {
     if (filters.date_from) params.set('date_from', filters.date_from)
     if (filters.date_to) params.set('date_to', filters.date_to)
     if (filters.suppliers_id != null) params.set('suppliers_id', String(filters.suppliers_id))
+    if (filters.supplier_q?.trim()) params.set('supplier_q', filters.supplier_q.trim())
     if (filters.reference_no?.trim()) params.set('reference_no', filters.reference_no.trim())
     if (filters.item_id != null) params.set('item_id', String(filters.item_id))
+    if (filters.item_q?.trim()) params.set('item_q', filters.item_q.trim())
     if (filters.lot?.trim()) params.set('lot', filters.lot.trim())
     const q = params.toString()
     const rows = await request<any[]>(`${draftBase(kind)}${q ? `?${q}` : ''}`)
@@ -205,6 +208,9 @@ export const api = {
     return normalizeDetail(kind, row)
   },
 
+  deleteDraft: (id: number, kind: DraftKind = 'receipt') =>
+    request<void>(`${draftBase(kind)}/${id}`, { method: 'DELETE' }),
+
   listItems: () => request<Item[]>('/masters/items'),
   listSuppliers: () => request<Supplier[]>('/masters/suppliers'),
 
@@ -236,46 +242,23 @@ export const api = {
     request<void>(`/masters/movetyps/${movetyps_id}`, { method: 'DELETE' }),
 
   listLocationsMaster: () => request<LocationMaster[]>('/masters/locations'),
-  createLocation: (location_cd: string, location_nm: string) =>
+  createLocation: (location_cd: string, location_nm: string, location_type: 'RM' | 'Process' | 'NG' | 'FG') =>
     request<LocationMaster>('/masters/locations', {
       method: 'POST',
-      body: JSON.stringify({ location_cd, location_nm }),
+      body: JSON.stringify({ location_cd, location_nm, location_type }),
     }),
-  updateLocation: (location_id: number, location_cd: string, location_nm: string) =>
+  updateLocation: (
+    location_id: number,
+    location_cd: string,
+    location_nm: string,
+    location_type: 'RM' | 'Process' | 'NG' | 'FG'
+  ) =>
     request<LocationMaster>(`/masters/locations/${location_id}`, {
       method: 'PUT',
-      body: JSON.stringify({ location_cd, location_nm }),
+      body: JSON.stringify({ location_cd, location_nm, location_type }),
     }),
   deleteLocation: (location_id: number) =>
     request<void>(`/masters/locations/${location_id}`, { method: 'DELETE' }),
-
-  listItemprocsMaster: () => request<ItemProcMaster[]>('/masters/itemprocs'),
-  createItemproc: (payload: {
-    item_id: number
-    process_no: number
-    process_nm: string
-    rm_location_id: number
-    wip_location_id: number
-  }) =>
-    request<ItemProcMaster>('/masters/itemprocs', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  updateItemproc: (
-    itemproc_id: number,
-    payload: {
-      process_no?: number
-      process_nm?: string
-      rm_location_id?: number
-      wip_location_id?: number
-    }
-  ) =>
-    request<ItemProcMaster>(`/masters/itemprocs/${itemproc_id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    }),
-  deleteItemproc: (itemproc_id: number) =>
-    request<void>(`/masters/itemprocs/${itemproc_id}`, { method: 'DELETE' }),
 
   listItemsMaster: () => request<ItemListRow[]>('/masters/items'),
   searchItems: (q: string, limit = 20) =>
@@ -378,16 +361,32 @@ export const api = {
   attachmentUrl: (draftId: number, kind: DraftKind = 'receipt') =>
     `${API_BASE}${API_PREFIX}${draftBase(kind)}/${draftId}/attachment`,
 
+  suggestDraftLots: (q?: string, kind: DraftKind = 'receipt', limit = 20) => {
+    const params = new URLSearchParams()
+    if (q?.trim()) params.set('q', q.trim())
+    params.set('limit', String(limit))
+    const qs = params.toString()
+    return request<string[]>(`${draftBase(kind)}/suggest-lots?${qs}`)
+  },
+
+  suggestCurrentStockLots: (q?: string, limit = 20) => {
+    const params = new URLSearchParams()
+    if (q?.trim()) params.set('q', q.trim())
+    params.set('limit', String(limit))
+    const qs = params.toString()
+    return request<string[]>(`/inventory/currents/suggest-lots?${qs}`)
+  },
+
   listCurrentStock: (params?: {
     lot?: string
-    item_id?: number
-    location_id?: number
+    item_q?: string
+    location_q?: string
     include_zero?: boolean
   }) => {
     const q = new URLSearchParams()
     if (params?.lot) q.set('lot', params.lot)
-    if (params?.item_id != null) q.set('item_id', String(params.item_id))
-    if (params?.location_id != null) q.set('location_id', String(params.location_id))
+    if (params?.item_q) q.set('item_q', params.item_q)
+    if (params?.location_q) q.set('location_q', params.location_q)
     if (params?.include_zero) q.set('include_zero', 'true')
     const qs = q.toString()
     return request<CurrentStock[]>(`/inventory/currents${qs ? `?${qs}` : ''}`)
@@ -419,11 +418,13 @@ export const api = {
       }`
     ),
 
-  listBalances: (period?: string, location_id?: number) => {
-    const q = period ? `?period=${period}` : ''
-    const sep = q ? '&' : '?'
-    const q2 = location_id != null ? `${q}${sep}location_id=${location_id}` : q
-    return request<BalanceItem[]>(`/inventory/balances${q2}`)
+  listBalances: (period?: string, location_id?: number, location_q?: string) => {
+    const params = new URLSearchParams()
+    if (period) params.set('period', period)
+    if (location_id != null) params.set('location_id', String(location_id))
+    if (location_q?.trim()) params.set('location_q', location_q.trim())
+    const qs = params.toString()
+    return request<BalanceItem[]>(`/inventory/balances${qs ? `?${qs}` : ''}`)
   },
 
   createPeriodBalance: (period: string, location_id?: number) =>
@@ -472,4 +473,14 @@ export const api = {
     request<ProductionOrderDetail>(`/production/orders/${order_id}/approve`, { method: 'POST' }),
   cancelProductionOrder: (order_id: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}/cancel`, { method: 'POST' }),
+  restoreProductionOrder: (order_id: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/restore`, { method: 'POST' }),
+  importProductionExcel: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<ProductionOrderDetail>('/production/orders/import', {
+      method: 'POST',
+      body: form,
+    })
+  },
 }

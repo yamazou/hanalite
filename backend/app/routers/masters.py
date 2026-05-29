@@ -11,9 +11,6 @@ from app.schemas.masters import (
     ItemSearchOut,
     ItemTypCreate,
     ItemTypOut,
-    ItemProcCreate,
-    ItemProcOut,
-    ItemProcUpdate,
     LocationCreate,
     LocationOut,
     LocationUpdate,
@@ -44,10 +41,6 @@ from app.services.masters import (
     search_items,
     update_item,
     update_location,
-    create_itemproc,
-    delete_itemproc,
-    list_itemprocs,
-    update_itemproc,
 )
 
 router = APIRouter(prefix="/masters", tags=["masters"])
@@ -228,40 +221,3 @@ def api_delete_item(item_id: int, db: Annotated[Session, Depends(get_db)]):
         raise _handle_error(e) from e
 
 
-@router.get("/itemprocs", response_model=list[ItemProcOut])
-def api_list_itemprocs(db: Annotated[Session, Depends(get_db)]):
-    return list_itemprocs(db)
-
-
-@router.post("/itemprocs", response_model=ItemProcOut, status_code=201)
-def api_create_itemproc(payload: ItemProcCreate, db: Annotated[Session, Depends(get_db)]):
-    try:
-        row = create_itemproc(db, payload)
-        db.commit()
-        return row
-    except MasterError as e:
-        db.rollback()
-        raise _handle_error(e) from e
-
-
-@router.put("/itemprocs/{itemproc_id}", response_model=ItemProcOut)
-def api_update_itemproc(
-    itemproc_id: int, payload: ItemProcUpdate, db: Annotated[Session, Depends(get_db)]
-):
-    try:
-        row = update_itemproc(db, itemproc_id, payload)
-        db.commit()
-        return row
-    except MasterError as e:
-        db.rollback()
-        raise _handle_error(e) from e
-
-
-@router.delete("/itemprocs/{itemproc_id}", status_code=204, response_class=Response)
-def api_delete_itemproc(itemproc_id: int, db: Annotated[Session, Depends(get_db)]):
-    try:
-        delete_itemproc(db, itemproc_id)
-        db.commit()
-    except MasterError as e:
-        db.rollback()
-        raise _handle_error(e) from e

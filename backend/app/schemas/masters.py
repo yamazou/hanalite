@@ -1,6 +1,9 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+LocationType = Literal["RM", "Process", "NG", "FG"]
 
 
 class ItemTypOut(BaseModel):
@@ -41,17 +44,20 @@ class LocationOut(BaseModel):
     location_id: int
     location_cd: str
     location_nm: str
+    location_type: LocationType
     created_at: datetime | None = None
 
 
 class LocationCreate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
     location_nm: str = Field(min_length=1, max_length=200)
+    location_type: LocationType
 
 
 class LocationUpdate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
     location_nm: str = Field(min_length=1, max_length=200)
+    location_type: LocationType
 
 
 class ItemListOut(BaseModel):
@@ -108,30 +114,3 @@ class ItemUpdate(BaseModel):
     supplier5_id: int | None = None
 
 
-class ItemProcOut(BaseModel):
-    itemproc_id: int
-    item_id: int
-    item_cd: str
-    item_nm: str
-    process_no: int
-    process_nm: str
-    rm_location_id: int
-    rm_location_cd: str
-    wip_location_id: int
-    wip_location_cd: str
-    created_at: datetime | None = None
-
-
-class ItemProcCreate(BaseModel):
-    item_id: int = Field(gt=0)
-    process_no: int = Field(gt=0)
-    process_nm: str = Field(min_length=1, max_length=100)
-    rm_location_id: int = Field(gt=0)
-    wip_location_id: int = Field(gt=0)
-
-
-class ItemProcUpdate(BaseModel):
-    process_no: int | None = Field(default=None, gt=0)
-    process_nm: str | None = Field(default=None, min_length=1, max_length=100)
-    rm_location_id: int | None = Field(default=None, gt=0)
-    wip_location_id: int | None = Field(default=None, gt=0)

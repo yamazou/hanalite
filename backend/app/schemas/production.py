@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -18,6 +18,8 @@ class ProductionOrderInputWrite(BaseModel):
 
 
 class ProductionOrderCreate(BaseModel):
+    production_date: date
+    reference_no: str | None = Field(default=None, max_length=100)
     parent_item_id: int = Field(gt=0)
     planned_qty: Decimal = Field(gt=0)
     lot: str = Field(min_length=1, max_length=50)
@@ -25,6 +27,8 @@ class ProductionOrderCreate(BaseModel):
 
 
 class ProductionOrderUpdate(BaseModel):
+    production_date: date | None = None
+    reference_no: str | None = Field(default=None, max_length=100)
     planned_qty: Decimal | None = Field(default=None, gt=0)
     actual_qty: Decimal | None = Field(default=None, gt=0)
     lot: str | None = Field(default=None, min_length=1, max_length=50)
@@ -44,6 +48,8 @@ class ProductionOrderCompleteLineIn(BaseModel):
 class ProductionOrderInputRead(BaseModel):
     prd_order_input_id: int
     line_no: int
+    level: int
+    itemtyp_nm: str
     item_id: int
     item_cd: str
     item_nm: str
@@ -55,9 +61,9 @@ class ProductionOrderInputRead(BaseModel):
 class ProductionOrderLineRead(BaseModel):
     prd_order_line_id: int
     line_no: int
-    itemproc_id: int
     process_no: int
     process_nm: str
+    output_item_cd: str | None
     rm_location_id: int
     rm_location_cd: str
     wip_location_id: int
@@ -84,6 +90,8 @@ class ProductionOrderOutputRead(BaseModel):
 class ProductionOrderListItem(BaseModel):
     production_order_id: int
     status: ProductionStatus
+    production_date: date
+    reference_no: str | None
     parent_item_id: int
     parent_item_cd: str
     parent_item_nm: str

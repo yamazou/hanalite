@@ -17,7 +17,9 @@ class Bom(Base):
     bom_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     p_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
     c_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
-    location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
+    level: Mapped[int] = mapped_column(Integer, default=0)
+    from_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
+    to_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     c_req_qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
@@ -25,4 +27,5 @@ class Bom(Base):
 
     parent_item: Mapped["Item"] = relationship(foreign_keys=[p_item_id])
     child_item: Mapped["Item"] = relationship(foreign_keys=[c_item_id])
-    location: Mapped["Location"] = relationship(foreign_keys=[location_id])
+    from_location: Mapped["Location"] = relationship(foreign_keys=[from_location_id])
+    to_location: Mapped["Location"] = relationship(foreign_keys=[to_location_id])
