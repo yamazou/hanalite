@@ -1,27 +1,40 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import { ErpGridPanel, erpRowClass } from '../../components/erp/ErpGridPanel'
+import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
-import { ErpSearchPanel } from '../../components/erp/ErpSearchPanel'
-import { masterItemColumns } from '../../components/erp/masterGridColumns'
-import type { ItemDetail, ItemListRow, ItemPayload, ItemTyp, SupplierMaster } from '../../types/masters'
+import { GridRowNumCell } from '../../components/GridRowNumCell'
+import { masterItemEditColumns } from '../../components/erp/masterGridColumns'
+import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import type { ItemTyp, SupplierMaster } from '../../types/masters'
+import {
+  buildItemPayload,
+  emptyEditItemRow,
+  isActiveItemRow,
+  isBlankItemRow,
+  listRowsToEditItemRows,
+  type EditItemRow,
+} from '../../utils/itemMasterEdit'
+import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
+import { toFilterCellValue } from '../../utils/gridColumnFilter'
+import { mergeItemImportRows } from '../../utils/itemExcelImport'
+import { itemTypDropdownLabel, itemTypTabLabel } from '../../utils/itemTypDisplay'
+import { useItemTypColors } from '../../context/ItemTypColorContext'
+import { itemTextColorStyle } from '../../utils/itemTypColor'
 
-const emptySuppliers = () => ['', '', '', '', '']
+export type ItemsTabFilter = 'ALL' | number
 
 export function ItemsPage() {
-  const [rows, setRows] = useState<ItemListRow[]>([])
+  const { colorForItemRef, reload: reloadItemTypColors } = useItemTypColors()
+  const [editRows, setEditRows] = useState<EditItemRow[]>([])
   const [itemtyps, setItemtyps] = useState<ItemTyp[]>([])
   const [suppliers, setSuppliers] = useState<SupplierMaster[]>([])
-  const [editId, setEditId] = useState<number | null>(null)
-  const [itemCd, setItemCd] = useState('')
-  const [itemNm, setItemNm] = useState('')
-  const [itemtypId, setItemtypId] = useState('')
-  const [supplierIds, setSupplierIds] = useState<string[]>(emptySuppliers())
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
-
+  const [rowError, setRowError] = useState<string | null>(null)
+  const [activeFilter, setActiveFilter] = useState<ItemsTabFilter>('ALL')
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -31,9 +44,17 @@ export function ItemsPage() {
         api.listItemtyps(),
         api.listSuppliersMaster(),
       ])
-      setRows(items)
       setItemtyps(types)
       setSuppliers(sups)
+      setEditRows(
+        ensureTrailingBlankRow(
+          listRowsToEditItemRows(items),
+          isBlankItemRow,
+          () => emptyEditItemRow(trailingRowItemtypId())
+        )
+      )
+      setSelectedKeys(new Set())
+      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -42,64 +63,312 @@ export function ItemsPage() {
   }, [])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
-  const resetForm = () => {
-    setEditId(null)
-    setItemCd('')
-    setItemNm('')
-    setItemtypId('')
-    setSupplierIds(emptySuppliers())
-  }
+  useEffect(() => {
+    const valid = new Set(editRows.map((row) => row.key))
+    setSelectedKeys((prev) => {
+      const next = new Set([...prev].filter((key) => valid.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [editRows])
 
-  const startEdit = async (id: number) => {
-    setError(null)
-    try {
-      const item: ItemDetail = await api.getItem(id)
-      setEditId(id)
-      setItemCd(item.item_cd)
-      setItemNm(item.item_nm)
-      setItemtypId(String(item.itemtyp_id))
-      setSupplierIds([
-        item.supplier1_id ? String(item.supplier1_id) : '',
-        item.supplier2_id ? String(item.supplier2_id) : '',
-        item.supplier3_id ? String(item.supplier3_id) : '',
-        item.supplier4_id ? String(item.supplier4_id) : '',
-        item.supplier5_id ? String(item.supplier5_id) : '',
-      ])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load item')
+  const itemtypIds = useMemo(
+    () => new Set(itemtyps.map((t) => t.itemtyp_id)),
+    [itemtyps]
+  )
+
+  useEffect(() => {
+    if (activeFilter === 'ALL') return
+    if (!itemtypIds.has(activeFilter)) {
+      setActiveFilter('ALL')
     }
-  }
+  }, [activeFilter, itemtypIds])
 
-  const buildPayload = (): ItemPayload => ({
-    item_cd: itemCd.trim(),
-    item_nm: itemNm.trim(),
-    itemtyp_id: Number(itemtypId),
-    supplier1_id: supplierIds[0] ? Number(supplierIds[0]) : null,
-    supplier2_id: supplierIds[1] ? Number(supplierIds[1]) : null,
-    supplier3_id: supplierIds[2] ? Number(supplierIds[2]) : null,
-    supplier4_id: supplierIds[3] ? Number(supplierIds[3]) : null,
-    supplier5_id: supplierIds[4] ? Number(supplierIds[4]) : null,
+  const itemtypCodeById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const t of itemtyps) {
+      map.set(t.itemtyp_id, itemTypDropdownLabel(t))
+    }
+    return map
+  }, [itemtyps])
+
+  const matchesItemTab = useCallback(
+    (itemtypId: number | '' | undefined): boolean => {
+      if (activeFilter === 'ALL') return true
+      return itemtypId !== '' && itemtypId === activeFilter
+    },
+    [activeFilter]
+  )
+
+  const filteredRows = useMemo(() => {
+    if (editRows.length === 0) return []
+
+    const last = editRows[editRows.length - 1]
+    const hasSentinel = isBlankItemRow(last)
+    const dataRows = hasSentinel ? editRows.slice(0, -1) : editRows
+    const sentinel = hasSentinel ? last : null
+
+    const matched = dataRows.filter((row) => matchesItemTab(row.itemtyp_id))
+    if (!sentinel) return matched
+    if (sentinel.itemtyp_id === '' || matchesItemTab(sentinel.itemtyp_id)) {
+      return [...matched, sentinel]
+    }
+    return matched
+  }, [editRows, matchesItemTab])
+
+  const getFilterValue = useCallback(
+    (row: EditItemRow, col: string): string => {
+      switch (col) {
+        case 'code':
+          return toFilterCellValue(row.item_cd)
+        case 'name':
+          return toFilterCellValue(row.item_nm)
+        case 'type':
+          return toFilterCellValue(itemtypCodeById.get(row.itemtyp_id as number) ?? null)
+        case 'supplier1':
+        case 'supplier2':
+        case 'supplier3':
+          return toFilterCellValue('')
+        default:
+          return toFilterCellValue('')
+      }
+    },
+    [itemtypCodeById]
+  )
+
+  const itemExportValue = useCallback(
+    (row: EditItemRow, col: string): string | number => {
+      switch (col) {
+        case 'code':
+          return row.item_cd
+        case 'name':
+          return row.item_nm
+        case 'type':
+          return itemtypCodeById.get(row.itemtyp_id as number) ?? ''
+        case 'supplier1':
+        case 'supplier2':
+        case 'supplier3':
+          return ''
+        default:
+          return ''
+      }
+    },
+    [itemtypCodeById]
+  )
+
+  /** Type preset on trailing row: blank on All, selected tab's type otherwise. */
+  const trailingRowItemtypId = useCallback((): number | '' => {
+    if (activeFilter === 'ALL') return ''
+    return activeFilter
+  }, [activeFilter])
+
+  const defaultItemtypIdFromFilter = useCallback((): number | '' => {
+    if (activeFilter === 'ALL') return itemtyps[0]?.itemtyp_id ?? ''
+    return activeFilter
+  }, [activeFilter, itemtyps])
+
+  useEffect(() => {
+    setEditRows((rows) => {
+      if (rows.length === 0) return rows
+      const last = rows[rows.length - 1]
+      if (!isBlankItemRow(last)) return rows
+      const nextTyp = trailingRowItemtypId()
+      if (last.itemtyp_id === nextTyp) return rows
+      return rows.map((row, index) =>
+        index === rows.length - 1 ? { ...row, itemtyp_id: nextTyp } : row
+      )
+    })
+  }, [trailingRowItemtypId])
+
+  const deleteRowsRef = useRef<() => void>(() => {})
+
+  const grid = useExcelLikeGrid({
+    columns: masterItemEditColumns,
+    rows: filteredRows,
+    getFilterValue,
+    rowDelete: {
+      label: 'Delete row',
+      getSelectedCount: () => selectedKeys.size,
+      onDelete: () => deleteRowsRef.current(),
+    },
+    excelExport: {
+      sheetName: 'Items',
+      filenamePrefix: 'items',
+      getExportValue: itemExportValue,
+    },
+    excelImport: {
+      applyParsedRows: (parsed) => {
+        let added = 0
+        let updated = 0
+        setEditRows((prev) => {
+          const result = mergeItemImportRows(
+            parsed,
+            prev,
+            itemtyps,
+            defaultItemtypIdFromFilter()
+          )
+          added = result.added
+          updated = result.updated
+          return ensureTrailingBlankRow(
+            result.rows,
+            isBlankItemRow,
+            () => emptyEditItemRow(trailingRowItemtypId())
+          )
+        })
+        setRowError(null)
+        setSuccess(
+          added + updated > 0
+            ? `Import: ${added} added, ${updated} updated. Click Save to persist.`
+            : 'No rows were imported from the file.'
+        )
+      },
+    },
   })
 
-  const onSubmit = async (e: FormEvent) => {
+  const setSupplier = (key: string, index: number, value: number | '') => {
+    setEditRows((rows) =>
+      rows.map((row) => {
+        if (row.key !== key) return row
+        const supplier_ids = [...row.supplier_ids]
+        supplier_ids[index] = value
+        return { ...row, supplier_ids }
+      })
+    )
+  }
+
+  const renderSupplierCell = (row: EditItemRow, index: number) => (
+    <select
+      className={`erp-grid-input${row.supplier_ids[index] === '' ? ' erp-input-empty' : ''}`}
+      value={row.supplier_ids[index]}
+      aria-label={
+        index === 0 ? 'Main Supplier' : index === 1 ? 'Supplier 2' : 'Supplier 3'
+      }
+      onChange={(e) =>
+        setSupplier(row.key, index, e.target.value === '' ? '' : Number(e.target.value))
+      }
+    >
+      <option value="" />
+      {suppliers.map((s) => (
+        <option key={s.suppliers_id} value={s.suppliers_id}>
+          {s.suppliers_nm}
+        </option>
+      ))}
+    </select>
+  )
+
+  const updateRow = (key: string, patch: Partial<EditItemRow>) => {
+    setEditRows((rows) =>
+      updateRowWithTrailingBlank(
+        rows,
+        key,
+        patch,
+        isBlankItemRow,
+        () => emptyEditItemRow(trailingRowItemtypId())
+      )
+    )
+  }
+
+  const focusItemCell = (rowKey: string, col: 'code' | 'name' | 'type') => {
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-item-grid-cell="${rowKey}:${col}"]`)
+        ?.focus()
+    })
+  }
+
+  const commitSentinelRowOnEnter = (row: EditItemRow) => {
+    if (editRows[editRows.length - 1]?.key !== row.key) return
+    if (isBlankItemRow(row)) return
+
+    const newBlank = emptyEditItemRow(trailingRowItemtypId())
+    setEditRows((rows) =>
+      ensureTrailingBlankRow(rows, isBlankItemRow, () => newBlank)
+    )
+    focusItemCell(newBlank.key, 'code')
+  }
+
+  const handleItemCellKeyDown = (e: React.KeyboardEvent, row: EditItemRow) => {
+    if (e.key !== 'Enter') return
     e.preventDefault()
+    if (editRows[editRows.length - 1]?.key !== row.key) return
+    commitSentinelRowOnEnter(row)
+  }
+
+  const deleteSelected = async () => {
+    if (selectedKeys.size === 0) return
+    if (!confirm('Delete selected item(s)?')) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
-      const payload = buildPayload()
-      if (editId) {
-        await api.updateItem(editId, payload)
-        setSuccess('Item updated.')
-      } else {
-        await api.createItem(payload)
-        setSuccess('Item created.')
+      const selected = editRows.filter((row) => selectedKeys.has(row.key))
+      const toDelete = selected.filter((row) => row.item_id != null)
+      const toDrop = new Set(selected.map((row) => row.key))
+      for (const row of toDelete) {
+        await api.deleteItem(row.item_id!)
       }
-      resetForm()
+      setEditRows((rows) =>
+        ensureTrailingBlankRow(
+          rows.filter((row) => !toDrop.has(row.key)),
+          isBlankItemRow,
+          () => emptyEditItemRow(trailingRowItemtypId())
+        )
+      )
+      setSelectedKeys(new Set())
+      setSuccess(
+        toDelete.length > 0 ? 'Item(s) deleted.' : 'Row(s) removed.'
+      )
+      if (toDelete.length > 0) {
+        await load()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  deleteRowsRef.current = () => void deleteSelected()
+
+  const handleSave = async () => {
+    const active = editRows.filter(isActiveItemRow)
+    const incomplete = editRows.filter(
+      (row) =>
+        !isBlankItemRow(row) &&
+        !isActiveItemRow(row) &&
+        (row.item_cd.trim() || row.item_nm.trim() || row.itemtyp_id !== '')
+    )
+    if (incomplete.length > 0) {
+      setRowError('Enter Code, Name, and Type for each row, or clear empty rows.')
+      return
+    }
+    if (active.length === 0) {
+      setRowError('Add at least one item row.')
+      return
+    }
+    const codes = active.map((row) => row.item_cd.trim().toLowerCase())
+    if (new Set(codes).size !== codes.length) {
+      setRowError('Duplicate item codes in the grid.')
+      return
+    }
+
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    setRowError(null)
+    try {
+      for (const row of active) {
+        const payload = buildItemPayload(row)
+        if (row.item_id != null) {
+          await api.updateItem(row.item_id, payload)
+        } else {
+          await api.createItem(payload)
+        }
+      }
+      setSuccess('Items saved.')
       await load()
+      await reloadItemTypColors()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -107,159 +376,203 @@ export function ItemsPage() {
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete?')) return
-    setError(null)
-    setSuccess(null)
-    try {
-      await api.deleteItem(id)
-      if (editId === id) resetForm()
-      setSuccess('Item deleted.')
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
-    }
-  }
-
-  const setSupplier = (index: number, value: string) => {
-    setSupplierIds((prev) => {
-      const next = [...prev]
-      next[index] = value
-      return next
-    })
-  }
+  const toolbar = (
+    <div className="erp-detail-toolbar">
+      <div className="erp-toolbar-left">
+        <button
+          type="button"
+          className={`erp-tab${activeFilter === 'ALL' ? ' active' : ''}`}
+          onClick={() => setActiveFilter('ALL')}
+        >
+          All
+        </button>
+        {itemtyps.map((t) => (
+          <button
+            key={t.itemtyp_id}
+            type="button"
+            className={`erp-tab${activeFilter === t.itemtyp_id ? ' active' : ''}`}
+            onClick={() => setActiveFilter(t.itemtyp_id)}
+          >
+            {itemTypTabLabel(t)}
+          </button>
+        ))}
+      </div>
+      <div className="erp-check-toggle-group">
+        <button
+          type="button"
+          className="erp-check-toggle-btn"
+          title="Select all rows"
+          aria-label="Select all rows"
+          disabled={grid.displayRows.length === 0}
+          onClick={() => setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))}
+        >
+          <span className="erp-check-toggle-icon checked" aria-hidden />
+        </button>
+        <button
+          type="button"
+          className="erp-check-toggle-btn"
+          title="Clear selection"
+          aria-label="Clear selection"
+          disabled={grid.displayRows.length === 0}
+          onClick={() => setSelectedKeys(new Set())}
+        >
+          <span className="erp-check-toggle-icon unchecked" aria-hidden />
+        </button>
+      </div>
+      <button
+        type="button"
+        className="btn erp-btn erp-btn-search btn-sm"
+        disabled={submitting}
+        onClick={() => void handleSave()}
+      >
+        {submitting ? 'Saving…' : 'Save'}
+      </button>
+      {rowError && <span className="alert-inline error">{rowError}</span>}
+    </div>
+  )
 
   return (
     <ErpScreen error={error} success={success}>
-      <ErpSearchPanel className="erp-panel-master-form">
-        <form onSubmit={onSubmit} className="erp-search-form">
-          <label className="erp-search-field erp-search-field-grow">
-            <input
-              className="erp-input"
-              value={itemCd}
-              onChange={(e) => setItemCd(e.target.value)}
-              placeholder="Item Code"
-              aria-label="Item Code"
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-grow">
-            <input
-              className="erp-input"
-              value={itemNm}
-              onChange={(e) => setItemNm(e.target.value)}
-              placeholder="Item Name"
-              aria-label="Item Name"
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-supplier">
-            <select
-              className={`erp-input${itemtypId === '' ? ' erp-input-empty' : ''}`}
-              value={itemtypId}
-              aria-label="Item Type"
-              onChange={(e) => setItemtypId(e.target.value)}
-              required
-            >
-              <option value="">Item Type</option>
-              {itemtyps.map((t) => (
-                <option key={t.itemtyp_id} value={t.itemtyp_id}>
-                  {t.itemtyp_nm}
-                </option>
-              ))}
-            </select>
-          </label>
-          {[1, 2, 3, 4, 5].map((n) => (
-            <label key={n} className="erp-search-field erp-search-field-supplier">
-              <select
-                className={`erp-input${supplierIds[n - 1] === '' ? ' erp-input-empty' : ''}`}
-                value={supplierIds[n - 1]}
-                aria-label={n === 1 ? 'Main Supplier' : `Supplier ${n}`}
-                onChange={(e) => setSupplier(n - 1, e.target.value)}
-              >
-                <option value="">{n === 1 ? 'Main Supplier' : `Supplier ${n}`}</option>
-                {suppliers.map((s) => (
-                  <option key={s.suppliers_id} value={s.suppliers_id}>
-                    {s.suppliers_nm}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
-          <div className="erp-search-actions">
-            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
-              {submitting ? 'Saving…' : editId ? 'Update' : 'Save'}
-            </button>
-            {editId && (
-              <button type="button" className="btn erp-btn erp-btn-clear" onClick={resetForm}>
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
-      </ErpSearchPanel>
-
+      {grid.filterMenuElement}
+      {grid.contextMenuElement}
       <ErpGridPanel
-        gridId="masters-items-v1"
+        gridId="masters-items-edit-v5"
         title="Items"
-        columns={masterItemColumns}
+        columns={masterItemEditColumns}
         loading={loading}
-        isEmpty={!loading && rows.length === 0}
-        onRefresh={load}
+        isEmpty={false}
+        onRefresh={() => void load()}
+        toolbarLeft={toolbar}
+        showSaveGridButton
+        panelClassName="erp-panel-grow"
+        onLayoutReady={grid.onLayoutReady}
+        onGridContextMenu={grid.openContextMenu}
+        layoutOptions={{ pinFirst: ['rownum', 'select'] }}
+        rowCount={grid.displayRows.length}
+        {...grid.tableProps}
       >
         {(layout) => (
           <tbody>
-            {rows.map((row, index) => (
-              <tr
-                key={row.item_id}
-                className={erpRowClass(index, editId === row.item_id)}
-                onClick={() => void startEdit(row.item_id)}
-              >
-                {layout.orderedColumns.map((col) => {
-                  switch (col.key) {
-                    case 'id':
-                      return <td key={col.key}>{row.item_id}</td>
-                    case 'code':
-                      return (
-                        <td key={col.key}>
-                          <code>{row.item_cd}</code>
-                        </td>
-                      )
-                    case 'name':
-                      return <td key={col.key}>{row.item_nm}</td>
-                    case 'type':
-                      return <td key={col.key}>{row.itemtyp_nm}</td>
-                    case 'supplier':
-                      return <td key={col.key}>{row.supplier1_nm ?? '—'}</td>
-                    case 'actions':
-                      return (
-                        <td
-                          key={col.key}
-                          className="erp-col-actions"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="btn erp-btn erp-btn-search"
-                            onClick={() => void startEdit(row.item_id)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn erp-btn erp-btn-cancel"
-                            onClick={() => void handleDelete(row.item_id)}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      )
-                    default:
-                      return <td key={col.key} />
-                  }
-                })}
-              </tr>
-            ))}
+            {grid.displayRows.map((row, index) => {
+              const isSentinel = isBlankItemRow(row)
+              return (
+                <tr
+                  key={row.key}
+                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
+                    selectedKeys.has(row.key) ? ' selected' : ''
+                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                >
+                  {layout.orderedColumns.map((col) => {
+                    switch (col.key) {
+                      case 'rownum':
+                        return <GridRowNumCell key={col.key} index={index} />
+                      case 'select':
+                        return (
+                          <td key={col.key} className="erp-col-check">
+                            <input
+                              type="checkbox"
+                              checked={selectedKeys.has(row.key)}
+                              aria-label={`Select ${row.item_cd || 'row'}`}
+                              onChange={(e) => {
+                                setSelectedKeys((prev) => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(row.key)
+                                  else next.delete(row.key)
+                                  return next
+                                })
+                              }}
+                            />
+                          </td>
+                        )
+                      case 'code':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <input
+                              className="erp-grid-input"
+                              value={row.item_cd}
+                              placeholder={isSentinel ? '' : 'Item Code'}
+                              data-item-grid-cell={`${row.key}:code`}
+                              style={itemTextColorStyle(
+                                colorForItemRef({
+                                  itemtypId:
+                                    row.itemtyp_id === '' ? undefined : row.itemtyp_id,
+                                  itemCd: row.item_cd,
+                                })
+                              )}
+                              onChange={(e) => updateRow(row.key, { item_cd: e.target.value })}
+                              onKeyDown={(e) => handleItemCellKeyDown(e, row)}
+                            />
+                          </td>
+                        )
+                      case 'name':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <input
+                              className="erp-grid-input"
+                              value={row.item_nm}
+                              placeholder={isSentinel ? '' : 'Item Name'}
+                              data-item-grid-cell={`${row.key}:name`}
+                              style={itemTextColorStyle(
+                                colorForItemRef({
+                                  itemtypId:
+                                    row.itemtyp_id === '' ? undefined : row.itemtyp_id,
+                                  itemCd: row.item_cd,
+                                })
+                              )}
+                              onChange={(e) => updateRow(row.key, { item_nm: e.target.value })}
+                              onKeyDown={(e) => handleItemCellKeyDown(e, row)}
+                            />
+                          </td>
+                        )
+                      case 'type':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <select
+                              className={`erp-grid-input${row.itemtyp_id === '' ? ' erp-input-empty' : ''}`}
+                              value={row.itemtyp_id}
+                              data-item-grid-cell={`${row.key}:type`}
+                              onChange={(e) =>
+                                updateRow(row.key, {
+                                  itemtyp_id:
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              onKeyDown={(e) => handleItemCellKeyDown(e, row)}
+                            >
+                              <option value="">{isSentinel ? '' : 'Type'}</option>
+                              {itemtyps.map((t) => (
+                                <option key={t.itemtyp_id} value={t.itemtyp_id}>
+                                  {itemTypDropdownLabel(t)}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )
+                      case 'supplier1':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
+                            {renderSupplierCell(row, 0)}
+                          </td>
+                        )
+                      case 'supplier2':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
+                            {renderSupplierCell(row, 1)}
+                          </td>
+                        )
+                      case 'supplier3':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
+                            {renderSupplierCell(row, 2)}
+                          </td>
+                        )
+                      default:
+                        return <td key={col.key} />
+                    }
+                  })}
+                </tr>
+              )
+            })}
           </tbody>
         )}
       </ErpGridPanel>

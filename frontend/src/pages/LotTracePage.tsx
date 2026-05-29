@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
@@ -10,8 +10,11 @@ import {
   traceCurrentColumns,
   traceHistoryColumns,
 } from '../components/erp/masterGridColumns'
+import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import type { LotTraceResult } from '../types/inventory'
 import { formatDateTime, formatQty } from '../utils/format'
+import { ColoredItemName } from '../components/ColoredItemText'
+import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { resolveLocationIdFromText, suggestCurrentLots, suggestLocations } from '../utils/searchSuggest'
 
 export function LotTracePage() {
@@ -75,8 +78,144 @@ export function LotTracePage() {
 
   const lotTitle = result?.lot ?? lot
 
+  const currentRows = result?.current ?? []
+  const historyRows = result?.history ?? []
+  const balanceRows = result?.balances ?? []
+
+  const currentFilter = useCallback(
+    (row: (typeof currentRows)[number], col: string) => {
+      switch (col) {
+        case 'item':
+          return toFilterCellValue(row.item_nm)
+        case 'location':
+          return toFilterCellValue(`${row.location_cd} ${row.location_nm}`)
+        case 'qty':
+          return toFilterCellValue(row.qty)
+        default:
+          return toFilterCellValue('')
+      }
+    },
+    []
+  )
+
+  const historyFilter = useCallback(
+    (row: (typeof historyRows)[number], col: string) => {
+      switch (col) {
+        case 'type':
+          return toFilterCellValue(row.movetyps_cd)
+        case 'move_qty':
+          return toFilterCellValue(row.move_qty)
+        case 'qty':
+          return toFilterCellValue(row.qty)
+        case 'actual_at':
+          return toFilterCellValue(formatDateTime(row.actual_at))
+        default:
+          return toFilterCellValue('')
+      }
+    },
+    []
+  )
+
+  const balanceFilter = useCallback(
+    (row: (typeof balanceRows)[number], col: string) => {
+      switch (col) {
+        case 'period':
+          return toFilterCellValue(row.period_year_month)
+        case 'item':
+          return toFilterCellValue(row.item_nm)
+        case 'location':
+          return toFilterCellValue(`${row.location_cd} ${row.location_nm}`)
+        case 'beg_qty':
+          return toFilterCellValue(row.beg_qty)
+        case 'qty':
+          return toFilterCellValue(row.qty)
+        default:
+          return toFilterCellValue('')
+      }
+    },
+    []
+  )
+
+  const currentGrid = useExcelLikeGrid({
+    columns: traceCurrentColumns,
+    rows: currentRows,
+    getFilterValue: currentFilter,
+    excelExport: {
+      sheetName: 'Current',
+      filenamePrefix: 'trace_current',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'item':
+            return row.item_nm
+          case 'location':
+            return `${row.location_cd} ${row.location_nm}`
+          case 'qty':
+            return row.qty
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
+  const historyGrid = useExcelLikeGrid({
+    columns: traceHistoryColumns,
+    rows: historyRows,
+    getFilterValue: historyFilter,
+    excelExport: {
+      sheetName: 'History',
+      filenamePrefix: 'trace_history',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'type':
+            return row.movetyps_nm ? `${row.movetyps_cd} / ${row.movetyps_nm}` : row.movetyps_cd
+          case 'move_qty':
+            return row.move_qty
+          case 'qty':
+            return row.qty
+          case 'actual_at':
+            return formatDateTime(row.actual_at)
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
+  const balanceGrid = useExcelLikeGrid({
+    columns: traceBalanceColumns,
+    rows: balanceRows,
+    getFilterValue: balanceFilter,
+    excelExport: {
+      sheetName: 'Balances',
+      filenamePrefix: 'trace_balances',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'period':
+            return row.period_year_month
+          case 'item':
+            return row.item_nm
+          case 'location':
+            return `${row.location_cd} ${row.location_nm}`
+          case 'beg_qty':
+            return row.beg_qty
+          case 'qty':
+            return row.qty
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
   return (
     <ErpScreen error={error} className="erp-screen-stacked">
+      {currentGrid.filterMenuElement}
+      {currentGrid.contextMenuElement}
+      {historyGrid.filterMenuElement}
+      {historyGrid.contextMenuElement}
+      {balanceGrid.filterMenuElement}
+      {balanceGrid.contextMenuElement}
       <ErpSearchPanel>
         <form onSubmit={onSubmit} className="erp-search-form erp-search-form-suggest">
           <ErpSuggestInput
@@ -109,17 +248,27 @@ export function LotTracePage() {
             gridId="trace-current-v1"
             title={`Current Stock — Lot ${lotTitle}`}
             columns={traceCurrentColumns}
-            isEmpty={result.current.length === 0}
+            isEmpty={currentRows.length === 0}
             emptyText="No current stock for this lot"
+            onLayoutReady={currentGrid.onLayoutReady}
+            onGridContextMenu={currentGrid.openContextMenu}
+            showSaveGridButton
+            {...currentGrid.tableProps}
           >
             {(layout) => (
               <tbody>
-                {result.current.map((r, index) => (
+                {currentGrid.displayRows.map((r, index) => (
                   <tr key={`${r.location_id}-${r.item_id}`} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
                         case 'item':
-                          return <td key={col.key}>{r.item_nm}</td>
+                          return (
+                            <td key={col.key}>
+                              <ColoredItemName itemtypId={r.itemtyp_id} itemId={r.item_id}>
+                                {r.item_nm}
+                              </ColoredItemName>
+                            </td>
+                          )
                         case 'location':
                           return (
                             <td key={col.key}>
@@ -142,17 +291,31 @@ export function LotTracePage() {
             gridId="trace-history-v1"
             title="GR/GI History"
             columns={traceHistoryColumns}
-            isEmpty={result.history.length === 0}
+            isEmpty={historyRows.length === 0}
             emptyText="No movements"
+            onLayoutReady={historyGrid.onLayoutReady}
+            onGridContextMenu={historyGrid.openContextMenu}
+            showSaveGridButton
+            {...historyGrid.tableProps}
           >
             {(layout) => (
               <tbody>
-                {result.history.map((h, index) => (
+                {historyGrid.displayRows.map((h, index) => (
                   <tr key={h.inv_grgi_id} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
+                        case 'item':
+                          return (
+                            <td key={col.key}>
+                              <ColoredItemName itemId={h.item_id}>{h.item_nm}</ColoredItemName>
+                            </td>
+                          )
                         case 'type':
-                          return <td key={col.key}>{h.movetyps_nm}</td>
+                          return (
+                            <td key={col.key}>
+                              {h.movetyps_nm ? `${h.movetyps_cd} / ${h.movetyps_nm}` : h.movetyps_cd}
+                            </td>
+                          )
                         case 'move_qty':
                           return <td key={col.key}>{formatQty(h.move_qty)}</td>
                         case 'qty':
@@ -173,19 +336,27 @@ export function LotTracePage() {
             gridId="trace-balance-v1"
             title="Period Balances"
             columns={traceBalanceColumns}
-            isEmpty={result.balances.length === 0}
+            isEmpty={balanceRows.length === 0}
             emptyText="No balance snapshots"
+            onLayoutReady={balanceGrid.onLayoutReady}
+            onGridContextMenu={balanceGrid.openContextMenu}
+            showSaveGridButton
+            {...balanceGrid.tableProps}
           >
             {(layout) => (
               <tbody>
-                {result.balances.map((b, index) => (
+                {balanceGrid.displayRows.map((b, index) => (
                   <tr key={b.inv_balance_id} className={erpRowClass(index)}>
                     {layout.orderedColumns.map((col) => {
                       switch (col.key) {
                         case 'period':
                           return <td key={col.key}>{b.period_year_month}</td>
                         case 'item':
-                          return <td key={col.key}>{b.item_nm}</td>
+                          return (
+                            <td key={col.key}>
+                              <ColoredItemName itemId={b.item_id}>{b.item_nm}</ColoredItemName>
+                            </td>
+                          )
                         case 'location':
                           return (
                             <td key={col.key}>

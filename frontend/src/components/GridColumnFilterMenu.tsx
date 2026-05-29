@@ -11,7 +11,6 @@ type Props = {
   anchorRect: DOMRect
   searchPlaceholder?: string
   selectAllLabel?: string
-  clearFilterLabel?: string
 }
 
 export function GridColumnFilterMenu({
@@ -19,14 +18,13 @@ export function GridColumnFilterMenu({
   options,
   selected,
   onApply,
-  onClear,
   onClose,
   anchorRect,
   searchPlaceholder = 'Search',
-  selectAllLabel = 'Select All',
-  clearFilterLabel = 'Clear Filter',
+  selectAllLabel = '(Select All)',
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
+  const selectAllRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState<Set<string>>(() => new Set(selected))
 
@@ -59,8 +57,20 @@ export function GridColumnFilterMenu({
     return options.filter((opt) => opt.toLowerCase().includes(q))
   }, [options, search])
 
+  const visibleSelectedCount = useMemo(
+    () => visibleOptions.filter((opt) => draft.has(opt)).length,
+    [visibleOptions, draft]
+  )
+
   const allVisibleSelected =
-    visibleOptions.length > 0 && visibleOptions.every((opt) => draft.has(opt))
+    visibleOptions.length > 0 && visibleSelectedCount === visibleOptions.length
+  const someVisibleSelected =
+    visibleSelectedCount > 0 && visibleSelectedCount < visibleOptions.length
+
+  useEffect(() => {
+    const el = selectAllRef.current
+    if (el) el.indeterminate = someVisibleSelected
+  }, [someVisibleSelected, visibleOptions, draft])
 
   const toggleValue = (value: string) => {
     setDraft((prev) => {
@@ -84,18 +94,20 @@ export function GridColumnFilterMenu({
   }
 
   const style = useMemo(() => {
-    const width = 220
+    const width = 260
     let left = anchorRect.left
     let top = anchorRect.bottom + 2
     if (left + width > window.innerWidth - 8) {
       left = Math.max(8, window.innerWidth - width - 8)
     }
-    const maxHeight = 280
+    const maxHeight = 300
     if (top + maxHeight > window.innerHeight - 8) {
       top = Math.max(8, anchorRect.top - maxHeight - 2)
     }
     return { left, top, width, maxHeight }
   }, [anchorRect])
+
+  const listMaxHeight = style.maxHeight - 108
 
   return createPortal(
     <div
@@ -105,7 +117,6 @@ export function GridColumnFilterMenu({
       role="dialog"
       aria-label={`Filter ${columnLabel}`}
     >
-      <div className="erp-col-filter-title">{columnLabel}</div>
       <input
         type="text"
         className="erp-input erp-col-filter-search"
@@ -113,48 +124,40 @@ export function GridColumnFilterMenu({
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
-      <div className="erp-col-filter-actions">
-        <button type="button" className="erp-col-filter-link" onClick={toggleVisibleAll}>
-          {selectAllLabel}
-        </button>
-        <button
-          type="button"
-          className="erp-col-filter-link"
-          onClick={() => {
-            onClear()
-            onClose()
-          }}
-        >
-          {clearFilterLabel}
-        </button>
-      </div>
-      <div className="erp-col-filter-list" style={{ maxHeight: style.maxHeight - 120 }}>
+      <div className="erp-col-filter-list" style={{ maxHeight: listMaxHeight }}>
         {visibleOptions.length === 0 ? (
           <p className="muted erp-col-filter-empty">No matches</p>
         ) : (
-          visibleOptions.map((opt) => (
-            <label key={opt} className="erp-col-filter-item">
+          <>
+            <label className="erp-col-filter-item erp-col-filter-item-select-all">
               <input
+                ref={selectAllRef}
                 type="checkbox"
-                checked={draft.has(opt)}
-                onChange={() => toggleValue(opt)}
+                checked={allVisibleSelected}
+                onChange={toggleVisibleAll}
               />
-              <span title={opt}>{opt}</span>
+              <span>{selectAllLabel}</span>
             </label>
-          ))
+            {visibleOptions.map((opt) => (
+              <label key={opt} className="erp-col-filter-item">
+                <input
+                  type="checkbox"
+                  checked={draft.has(opt)}
+                  onChange={() => toggleValue(opt)}
+                />
+                <span title={opt}>{opt}</span>
+              </label>
+            ))}
+          </>
         )}
       </div>
       <div className="erp-col-filter-footer">
-        <button
-          type="button"
-          className="btn erp-btn erp-btn-clear btn-sm"
-          onClick={onClose}
-        >
+        <button type="button" className="erp-col-filter-btn" onClick={onClose}>
           Cancel
         </button>
         <button
           type="button"
-          className="btn erp-btn erp-btn-search btn-sm"
+          className="erp-col-filter-btn erp-col-filter-btn-ok"
           onClick={() => {
             onApply(new Set(draft))
             onClose()

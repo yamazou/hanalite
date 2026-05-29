@@ -4,13 +4,25 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ProductionStatus = Literal["registered", "approved", "cancelled"]
+ProductionStatus = Literal["registered", "approved", "started", "completed", "cancelled"]
 ProductionLineStatus = Literal["planned", "completed"]
+ProductionSourceType = Literal["manual", "excel"]
+
+
+class ProductionOrderLineWrite(BaseModel):
+    prd_order_line_id: int | None = None
+    line_no: int | None = Field(default=None, gt=0)
+    rm_location_id: int = Field(gt=0)
+    wip_location_id: int = Field(gt=0)
+    output_item_id: int = Field(gt=0)
+    planned_qty: Decimal = Field(gt=0)
+    actual_qty: Decimal | None = Field(default=None, gt=0)
 
 
 class ProductionOrderInputWrite(BaseModel):
     prd_order_input_id: int | None = None
     item_id: int = Field(gt=0)
+    from_location_id: int = Field(gt=0)
     req_qty: Decimal = Field(gt=0)
     consume_qty: Decimal = Field(gt=0)
     lot: str | None = Field(default=None, max_length=50)
@@ -34,6 +46,7 @@ class ProductionOrderUpdate(BaseModel):
     lot: str | None = Field(default=None, min_length=1, max_length=50)
     notes: str | None = None
     status: ProductionStatus | None = None
+    lines: list[ProductionOrderLineWrite] | None = None
     inputs: list[ProductionOrderInputWrite] | None = None
 
 
@@ -53,6 +66,9 @@ class ProductionOrderInputRead(BaseModel):
     item_id: int
     item_cd: str
     item_nm: str
+    from_location_id: int | None
+    from_location_cd: str | None
+    from_location_nm: str | None
     req_qty: Decimal
     consume_qty: Decimal
     lot: str | None
@@ -63,7 +79,10 @@ class ProductionOrderLineRead(BaseModel):
     line_no: int
     process_no: int
     process_nm: str
+    output_item_id: int | None
     output_item_cd: str | None
+    output_item_nm: str | None
+    planned_qty: Decimal | None
     rm_location_id: int
     rm_location_cd: str
     wip_location_id: int
@@ -92,6 +111,7 @@ class ProductionOrderListItem(BaseModel):
     status: ProductionStatus
     production_date: date
     reference_no: str | None
+    source_type: ProductionSourceType
     parent_item_id: int
     parent_item_cd: str
     parent_item_nm: str

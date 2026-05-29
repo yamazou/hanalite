@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from 'react'
+import type { MouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 
 export type GridColumnDef = {
@@ -32,18 +32,41 @@ export function ResizableGridTable({
   isColumnFilterActive,
   onFilterClick,
 }: Props) {
-  const { orderedColumns, widths, dragIndex, dropIndex, handleResizeStart, handleColumnDragStart } =
-    layout
+  const {
+    orderedColumns,
+    widths,
+    dragIndex,
+    dropIndex,
+    resizeIndex,
+    handleResizeStart,
+    handleColumnDragStart,
+  } = layout
+
+  const tableWidth = widths.reduce((sum, width) => sum + width, 0)
 
   const handleHeaderDoubleClick = (colKey: string, event: MouseEvent) => {
     const target = event.target as HTMLElement
-    if (target.closest('.erp-th-drag-handle, .erp-col-resizer, .erp-th-filter-btn')) return
+    if (target.closest('.erp-col-resizer, .erp-th-filter-btn')) return
     if (!isColumnSortable(colKey)) return
     onHeaderDoubleClick?.(colKey)
   }
 
+  const handleHeaderPointerDown = (
+    columnIndex: number,
+    event: ReactPointerEvent<HTMLTableCellElement>
+  ) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('.erp-col-resizer, .erp-th-filter-btn')) return
+    event.preventDefault()
+    handleColumnDragStart(columnIndex, event)
+  }
+
   return (
-    <table className={`erp-grid erp-grid-resizable ${className ?? ''}`.trim()}>
+    <table
+      className={`erp-grid erp-grid-resizable erp-grid-width-from-cols ${className ?? ''}`.trim()}
+      style={{ width: tableWidth, minWidth: tableWidth }}
+    >
       <colgroup>
         {widths.map((width, index) => (
           <col key={orderedColumns[index].key} style={{ width: `${width}px` }} />
@@ -62,8 +85,10 @@ export function ResizableGridTable({
                   col.className,
                   isColumnSortable(col.key) ? 'erp-th-sortable' : '',
                   filterActive ? 'erp-th-filtered' : '',
+                  !filterable ? 'erp-th-compact' : '',
                   dragIndex === index ? 'erp-th-dragging' : '',
                   dropIndex === index ? 'erp-th-drop-target' : '',
+                  resizeIndex === index ? 'erp-th-resizing' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -71,6 +96,7 @@ export function ResizableGridTable({
                   isColumnSortable(col.key) ? `${col.label} — double-click to sort` : col.label
                 }
                 onDoubleClick={(event) => handleHeaderDoubleClick(col.key, event)}
+                onPointerDown={(event) => handleHeaderPointerDown(index, event)}
               >
                 {filterable && (
                   <button
@@ -83,31 +109,28 @@ export function ResizableGridTable({
                       onFilterClick?.(col.key, event.currentTarget)
                     }}
                   >
-                    ▾
+                    ▼
                   </button>
                 )}
-                <span
-                  className="erp-th-drag-handle"
-                  title="Drag to reorder column"
-                  aria-label={`Reorder ${col.label}`}
-                  onPointerDown={(event) => handleColumnDragStart(index, event)}
-                >
+                <span className="erp-th-drag-handle" aria-hidden>
                   ⋮⋮
                 </span>
                 <span className="erp-th-text">
                   {col.label}
                   {sortMark?.(col.key) ?? ''}
                 </span>
-                <button
-                  type="button"
-                  className="erp-col-resizer"
-                  aria-label={`Resize ${col.label}`}
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    handleResizeStart(index, event.clientX)
-                  }}
-                />
+                {col.key !== 'rownum' && (
+                  <button
+                    type="button"
+                    className="erp-col-resizer"
+                    aria-label={`Resize ${col.label}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      handleResizeStart(index, event.clientX)
+                    }}
+                  />
+                )}
               </th>
             )
           })}

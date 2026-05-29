@@ -19,7 +19,10 @@ from app.schemas.masters import (
     ItemTypOut,
     LocationCreate,
     LocationOut,
+    ItemTypUpdate,
+    MoveTypUpdate,
     LocationUpdate,
+    SupplierUpdate,
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
@@ -52,7 +55,13 @@ def list_itemtyps(db: Session) -> list[ItemTypOut]:
 
 def create_itemtyp(db: Session, payload: ItemTypCreate) -> ItemTypOut:
     now = _now()
-    row = ItemTyp(itemtyp_nm=payload.itemtyp_nm.strip(), created_at=now, updated_at=now)
+    row = ItemTyp(
+        itemtyp_cd=payload.itemtyp_cd.strip(),
+        itemtyp_nm=payload.itemtyp_nm.strip(),
+        itemtyp_color=payload.itemtyp_color,
+        created_at=now,
+        updated_at=now,
+    )
     db.add(row)
     db.flush()
     return ItemTypOut.model_validate(row)
@@ -63,6 +72,18 @@ def delete_itemtyp(db: Session, itemtyp_id: int) -> None:
     if not row or row.deleted_at is not None:
         raise MasterError("Item type not found.")
     _soft_delete(row)
+
+
+def update_itemtyp(db: Session, itemtyp_id: int, payload: ItemTypUpdate) -> ItemTypOut:
+    row = db.get(ItemTyp, itemtyp_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Item type not found.")
+    row.itemtyp_cd = payload.itemtyp_cd.strip()
+    row.itemtyp_nm = payload.itemtyp_nm.strip()
+    row.itemtyp_color = payload.itemtyp_color
+    row.updated_at = _now()
+    db.flush()
+    return ItemTypOut.model_validate(row)
 
 
 def list_suppliers(db: Session) -> list[SupplierOut]:
@@ -87,6 +108,16 @@ def delete_supplier(db: Session, suppliers_id: int) -> None:
     _soft_delete(row)
 
 
+def update_supplier(db: Session, suppliers_id: int, payload: SupplierUpdate) -> SupplierOut:
+    row = db.get(Supplier, suppliers_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Supplier not found.")
+    row.suppliers_nm = payload.suppliers_nm.strip()
+    row.updated_at = _now()
+    db.flush()
+    return SupplierOut.model_validate(row)
+
+
 def list_movetyps(db: Session) -> list[MoveTypMasterOut]:
     rows = db.scalars(
         select(MoveTyp).where(MoveTyp.deleted_at.is_(None)).order_by(MoveTyp.movetyps_id)
@@ -96,12 +127,17 @@ def list_movetyps(db: Session) -> list[MoveTypMasterOut]:
 
 def create_movetyp(db: Session, payload: MoveTypCreate) -> MoveTypMasterOut:
     now = _now()
-    row = MoveTyp(movetyps_nm=payload.movetyps_nm.strip(), created_at=now, updated_at=now)
+    row = MoveTyp(
+        movetyps_cd=payload.movetyps_cd.strip(),
+        movetyps_nm=(payload.movetyps_nm or "").strip() or None,
+        created_at=now,
+        updated_at=now,
+    )
     db.add(row)
     try:
         db.flush()
     except IntegrityError as e:
-        raise MasterError("Move type name already exists.") from e
+        raise MasterError("Move type code already exists.") from e
     return MoveTypMasterOut.model_validate(row)
 
 
@@ -110,6 +146,17 @@ def delete_movetyp(db: Session, movetyps_id: int) -> None:
     if not row or row.deleted_at is not None:
         raise MasterError("Move type not found.")
     _soft_delete(row)
+
+
+def update_movetyp(db: Session, movetyps_id: int, payload: MoveTypUpdate) -> MoveTypMasterOut:
+    row = db.get(MoveTyp, movetyps_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Move type not found.")
+    row.movetyps_cd = payload.movetyps_cd.strip()
+    row.movetyps_nm = (payload.movetyps_nm or "").strip() or None
+    row.updated_at = _now()
+    db.flush()
+    return MoveTypMasterOut.model_validate(row)
 
 
 def list_locations(db: Session) -> list[LocationOut]:
@@ -298,8 +345,6 @@ def _validate_item_refs(db: Session, payload: ItemCreate | ItemUpdate) -> None:
         payload.supplier1_id,
         payload.supplier2_id,
         payload.supplier3_id,
-        payload.supplier4_id,
-        payload.supplier5_id,
     ):
         if sid is None:
             continue
@@ -327,6 +372,8 @@ def list_items(db: Session) -> list[ItemListOut]:
             itemtyp_nm=itemtyp_nm,
             supplier1_id=item.supplier1_id,
             supplier1_nm=supplier1_nm,
+            supplier2_id=item.supplier2_id,
+            supplier3_id=item.supplier3_id,
         )
         for item, itemtyp_nm, supplier1_nm in rows
     ]
@@ -344,8 +391,6 @@ def get_item(db: Session, item_id: int) -> ItemDetailOut:
         supplier1_id=row.supplier1_id,
         supplier2_id=row.supplier2_id,
         supplier3_id=row.supplier3_id,
-        supplier4_id=row.supplier4_id,
-        supplier5_id=row.supplier5_id,
     )
 
 
@@ -360,8 +405,6 @@ def create_item(db: Session, payload: ItemCreate) -> ItemDetailOut:
         supplier1_id=payload.supplier1_id,
         supplier2_id=payload.supplier2_id,
         supplier3_id=payload.supplier3_id,
-        supplier4_id=payload.supplier4_id,
-        supplier5_id=payload.supplier5_id,
         created_at=now,
         updated_at=now,
     )
@@ -385,8 +428,6 @@ def update_item(db: Session, item_id: int, payload: ItemUpdate) -> ItemDetailOut
     row.supplier1_id = payload.supplier1_id
     row.supplier2_id = payload.supplier2_id
     row.supplier3_id = payload.supplier3_id
-    row.supplier4_id = payload.supplier4_id
-    row.supplier5_id = payload.supplier5_id
     row.updated_at = _now()
     db.flush()
     return get_item(db, item_id)

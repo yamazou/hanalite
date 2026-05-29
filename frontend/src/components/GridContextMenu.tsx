@@ -8,8 +8,10 @@ export type GridContextMenuState = {
 
 type Props = {
   menu: GridContextMenuState
-  excelLabel: string
-  onExcel: () => void
+  excelLabel?: string
+  onExcel?: () => void
+  importLabel?: string
+  onImport?: () => void
   onClose: () => void
   items?: Array<{
     label: string
@@ -17,7 +19,15 @@ type Props = {
   }>
 }
 
-export function GridContextMenu({ menu, excelLabel, onExcel, onClose, items = [] }: Props) {
+export function GridContextMenu({
+  menu,
+  excelLabel = 'Export',
+  onExcel,
+  importLabel = 'Import',
+  onImport,
+  onClose,
+  items = [],
+}: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -45,7 +55,7 @@ export function GridContextMenu({ menu, excelLabel, onExcel, onClose, items = []
   if (left + width > window.innerWidth - 8) {
     left = Math.max(8, window.innerWidth - width - 8)
   }
-  const itemCount = 1 + items.length
+  const itemCount = (onExcel ? 1 : 0) + (onImport ? 1 : 0) + items.length
   const estimatedHeight = itemCount * 32 + 8
   if (top + estimatedHeight > window.innerHeight - 8) {
     top = Math.max(8, window.innerHeight - estimatedHeight - 8)
@@ -58,17 +68,32 @@ export function GridContextMenu({ menu, excelLabel, onExcel, onClose, items = []
       style={{ left, top }}
       role="menu"
     >
-      <button
-        type="button"
-        className="erp-grid-context-item"
-        role="menuitem"
-        onClick={() => {
-          onExcel()
-          onClose()
-        }}
-      >
-        {excelLabel}
-      </button>
+      {onExcel && (
+        <button
+          type="button"
+          className="erp-grid-context-item"
+          role="menuitem"
+          onClick={() => {
+            onExcel()
+            onClose()
+          }}
+        >
+          {excelLabel}
+        </button>
+      )}
+      {onImport && (
+        <button
+          type="button"
+          className="erp-grid-context-item"
+          role="menuitem"
+          onClick={() => {
+            onImport()
+            onClose()
+          }}
+        >
+          {importLabel}
+        </button>
+      )}
       {items.map((item) => (
         <button
           key={item.label}

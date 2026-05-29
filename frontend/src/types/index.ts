@@ -7,6 +7,7 @@ export interface DraftLine {
   item_id: number | null
   item_cd?: string | null
   item_nm: string | null
+  itemtyp_id?: number | null
   location_id?: number
   location_cd?: string | null
   location_nm?: string | null

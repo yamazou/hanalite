@@ -15,14 +15,16 @@ import {
   pinKeysFirst,
   type StoredGridLayout,
 } from '../utils/gridLayoutStorage'
+import {
+  GRID_ABS_MIN_COL_WIDTH,
+  GRID_ROWNUM_COLUMN_KEY,
+  resolveColumnMinWidth,
+  rowNumColumnWidthForRowCount,
+} from '../utils/gridColumnWidth'
+import type { GridColumnLayoutOptions } from './useGridColumnLayoutOptions'
 
-export const GRID_MIN_COL_WIDTH = 16
-
-type Options = {
-  onLayoutChange?: () => void
-  /** Column keys that always stay leftmost (in this order). */
-  pinFirst?: string[]
-}
+export { GRID_ABS_MIN_COL_WIDTH as GRID_MIN_COL_WIDTH } from '../utils/gridColumnWidth'
+export type { GridColumnLayoutOptions } from './useGridColumnLayoutOptions'
 
 function columnKeys(columns: GridColumnDef[]): string[] {
   return columns.map((col) => col.key)
@@ -31,18 +33,34 @@ function columnKeys(columns: GridColumnDef[]): string[] {
 export function useGridColumnLayout(
   gridId: string,
   columns: GridColumnDef[],
-  options?: Options
+  options?: GridColumnLayoutOptions
 ) {
   const storageKey = gridStorageKey(gridId)
-  const minWidths = useMemo(() => columns.map((col) => col.minWidth ?? GRID_MIN_COL_WIDTH), [columns])
   const keysSignature = columnKeys(columns).join('|')
   const onLayoutChange = options?.onLayoutChange
   const pinFirst = options?.pinFirst
+  const rowCount = options?.rowCount
+  const pinFirstSignature = pinFirst?.join('|') ?? ''
+  const isColumnHeaderFilterable = options?.isColumnHeaderFilterable
+  const headerFilterableDefault = options?.headerFilterable !== false
+
+  const isHeaderFilterable = useCallback(
+    (columnKey: string) => {
+      if (isColumnHeaderFilterable) return isColumnHeaderFilterable(columnKey)
+      return headerFilterableDefault
+    },
+    [isColumnHeaderFilterable, headerFilterableDefault]
+  )
+
+  const minWidths = useMemo(
+    () => columns.map((col) => resolveColumnMinWidth(col, isHeaderFilterable(col.key))),
+    [columns, isHeaderFilterable]
+  )
 
   const initial = useMemo(
     () => loadGridLayout(storageKey, columns, minWidths, pinFirst),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per gridId + column set
-    [storageKey, keysSignature, pinFirst]
+    [storageKey, keysSignature, pinFirstSignature]
   )
 
   const [order, setOrder] = useState<string[]>(initial.order)
@@ -51,8 +69,42 @@ export function useGridColumnLayout(
 
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [resizeIndex, setResizeIndex] = useState<number | null>(null)
   const dragFromRef = useRef<number | null>(null)
   const dropIndexRef = useRef<number | null>(null)
+  const dragTableRef = useRef<HTMLTableElement | null>(null)
+
+  const resolveDropIndex = useCallback((clientX: number, clientY: number): number | null => {
+    const el = document.elementFromPoint(clientX, clientY)
+    const thFromPoint = el?.closest<HTMLElement>('th[data-col-index]')
+    if (thFromPoint) {
+      const index = Number(thFromPoint.dataset.colIndex)
+      if (!Number.isNaN(index)) return index
+    }
+
+    const table = dragTableRef.current
+    if (!table) return null
+
+    const headers = table.querySelectorAll<HTMLElement>('thead th[data-col-index]')
+    for (const th of headers) {
+      const rect = th.getBoundingClientRect()
+      if (clientX >= rect.left && clientX < rect.right) {
+        const index = Number(th.dataset.colIndex)
+        if (!Number.isNaN(index)) return index
+      }
+    }
+
+    if (headers.length === 0) return null
+    const first = headers[0].getBoundingClientRect()
+    const last = headers[headers.length - 1].getBoundingClientRect()
+    if (clientX < first.left) {
+      return Number(headers[0].dataset.colIndex)
+    }
+    if (clientX >= last.right) {
+      return Number(headers[headers.length - 1].dataset.colIndex)
+    }
+    return null
+  }, [])
 
   const currentLayout = useMemo(
     (): StoredGridLayout => ({ order, widths: widthsByKey }),
@@ -64,18 +116,32 @@ export function useGridColumnLayout(
     [currentLayout, savedSnapshot]
   )
 
+  const layoutIdentityRef = useRef<string | null>(null)
+
   useEffect(() => {
+    const identity = `${storageKey}|${keysSignature}|${pinFirstSignature}`
+    if (layoutIdentityRef.current === identity) return
+    layoutIdentityRef.current = identity
+
     const loaded = loadGridLayout(storageKey, columns, minWidths, pinFirst)
     setSavedSnapshot(loaded)
     setOrder(loaded.order)
     setWidthsByKey(loaded.widths)
-  }, [storageKey, keysSignature, columns, minWidths, pinFirst])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, keysSignature, pinFirstSignature])
 
   useEffect(() => {
     const keys = columnKeys(columns)
     setOrder((prev) => mergeOrderInHook(prev, keys, pinFirst))
     setWidthsByKey((prev) => mergeWidthsInHook(columns, minWidths, prev))
-  }, [keysSignature, columns, minWidths, pinFirst])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keysSignature, pinFirstSignature])
+
+  useEffect(() => {
+    if (rowCount == null) return
+    const w = rowNumColumnWidthForRowCount(rowCount)
+    setWidthsByKey((prev) => (prev[GRID_ROWNUM_COLUMN_KEY] === w ? prev : { ...prev, rownum: w }))
+  }, [rowCount])
 
   const notifyChange = useCallback(() => {
     onLayoutChange?.()
@@ -106,9 +172,9 @@ export function useGridColumnLayout(
   const handleResizeStart = useCallback(
     (columnIndex: number, startX: number) => {
       const col = orderedColumns[columnIndex]
-      if (!col) return
+      if (!col || col.key === GRID_ROWNUM_COLUMN_KEY) return
       const startWidth = widthsRef.current[columnIndex] ?? col.defaultWidth
-      const minWidth = minWidths[columns.findIndex((c) => c.key === col.key)] ?? GRID_MIN_COL_WIDTH
+      const minWidth = minWidths[columns.findIndex((c) => c.key === col.key)] ?? GRID_ABS_MIN_COL_WIDTH
 
       const onMove = (event: MouseEvent) => {
         const nextWidth = Math.max(minWidth, startWidth + event.clientX - startX)
@@ -119,9 +185,11 @@ export function useGridColumnLayout(
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
         document.body.classList.remove('erp-col-resizing')
+        setResizeIndex(null)
         notifyChange()
       }
 
+      setResizeIndex(columnIndex)
       document.body.classList.add('erp-col-resizing')
       document.addEventListener('mousemove', onMove)
       document.addEventListener('mouseup', onUp)
@@ -132,28 +200,31 @@ export function useGridColumnLayout(
   const reorderColumn = useCallback(
     (fromIndex: number, toIndex: number) => {
       if (fromIndex === toIndex) return
+      const pinSet = new Set(pinFirst ?? [])
       setOrder((prev) => {
-        const next = [...prev]
+        const keys = pinFirst?.length ? pinKeysFirst([...prev], pinFirst) : [...prev]
+        const movedKey = keys[fromIndex]
+        if (!movedKey || pinSet.has(movedKey)) return prev
+        const next = [...keys]
         const [moved] = next.splice(fromIndex, 1)
-        next.splice(toIndex, 0, moved)
-        return next
+        if (!moved) return prev
+        let insertAt = toIndex
+        if (fromIndex < toIndex) insertAt -= 1
+        if (pinFirst?.length) {
+          insertAt = Math.max(insertAt, pinFirst.length)
+        }
+        next.splice(insertAt, 0, moved)
+        return pinFirst?.length ? pinKeysFirst(next, pinFirst) : next
       })
       notifyChange()
     },
-    [notifyChange]
+    [notifyChange, pinFirst]
   )
-
-  const resolveDropIndex = useCallback((clientX: number, clientY: number): number | null => {
-    const el = document.elementFromPoint(clientX, clientY)
-    const th = el?.closest<HTMLElement>('th[data-col-index]')
-    if (!th) return null
-    const index = Number(th.dataset.colIndex)
-    return Number.isNaN(index) ? null : index
-  }, [])
 
   const endColumnDrag = useCallback(() => {
     dragFromRef.current = null
     dropIndexRef.current = null
+    dragTableRef.current = null
     setDragIndex(null)
     setDropIndex(null)
     document.body.classList.remove('erp-col-dragging')
@@ -164,31 +235,43 @@ export function useGridColumnLayout(
       if (event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
+      dragTableRef.current = event.currentTarget.closest('table')
       dragFromRef.current = fromIndex
       dropIndexRef.current = fromIndex
       setDragIndex(fromIndex)
       setDropIndex(fromIndex)
       document.body.classList.add('erp-col-dragging')
 
-      const onMove = (e: PointerEvent) => {
-        const toIndex = resolveDropIndex(e.clientX, e.clientY)
+      const onMove = (clientX: number, clientY: number) => {
+        const toIndex = resolveDropIndex(clientX, clientY)
         if (toIndex != null) {
           dropIndexRef.current = toIndex
           setDropIndex(toIndex)
         }
       }
 
-      const onUp = (e: PointerEvent) => {
+      const finish = (clientX: number, clientY: number) => {
         const from = dragFromRef.current
-        const toIndex = resolveDropIndex(e.clientX, e.clientY) ?? dropIndexRef.current
+        const toIndex = resolveDropIndex(clientX, clientY) ?? dropIndexRef.current
         if (from != null && toIndex != null) reorderColumn(from, toIndex)
         endColumnDrag()
-        document.removeEventListener('pointermove', onMove)
-        document.removeEventListener('pointerup', onUp)
+        document.removeEventListener('pointermove', onPointerMove)
+        document.removeEventListener('pointerup', onPointerUp)
+        document.removeEventListener('pointercancel', onPointerUp)
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
       }
 
-      document.addEventListener('pointermove', onMove)
-      document.addEventListener('pointerup', onUp)
+      const onPointerMove = (e: PointerEvent) => onMove(e.clientX, e.clientY)
+      const onPointerUp = (e: PointerEvent) => finish(e.clientX, e.clientY)
+      const onMouseMove = (e: MouseEvent) => onMove(e.clientX, e.clientY)
+      const onMouseUp = (e: MouseEvent) => finish(e.clientX, e.clientY)
+
+      document.addEventListener('pointermove', onPointerMove)
+      document.addEventListener('pointerup', onPointerUp)
+      document.addEventListener('pointercancel', onPointerUp)
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
     },
     [endColumnDrag, reorderColumn, resolveDropIndex]
   )
@@ -198,6 +281,7 @@ export function useGridColumnLayout(
     widths,
     dragIndex,
     dropIndex,
+    resizeIndex,
     isDirty,
     saveLayout,
     handleResizeStart,
@@ -226,8 +310,11 @@ function mergeWidthsInHook(
 ): Record<string, number> {
   const result: Record<string, number> = {}
   columns.forEach((col, index) => {
-    const min = minWidths[index] ?? GRID_MIN_COL_WIDTH
-    const raw = saved[col.key] ?? col.defaultWidth
+    const min = minWidths[index] ?? GRID_ABS_MIN_COL_WIDTH
+    const raw =
+      col.key === GRID_ROWNUM_COLUMN_KEY
+        ? col.defaultWidth
+        : (saved[col.key] ?? col.defaultWidth)
     result[col.key] = Math.max(min, raw)
   })
   return result

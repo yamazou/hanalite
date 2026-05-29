@@ -60,6 +60,34 @@ function toOptions(labels: string[]): SuggestOption[] {
   return labels.map((label) => ({ label, value: label }))
 }
 
+export async function suggestItemCodes(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
+  const term = query.trim()
+  const rows = term ? await api.searchItems(term, limit) : (await getItemCatalog()).slice(0, limit)
+  const seen = new Set<string>()
+  const options: SuggestOption[] = []
+  for (const row of rows) {
+    const cd = row.item_cd?.trim()
+    if (!cd || seen.has(cd)) continue
+    seen.add(cd)
+    options.push({ label: cd, value: cd })
+  }
+  return options
+}
+
+export async function suggestItemNames(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
+  const term = query.trim()
+  const rows = term ? await api.searchItems(term, limit) : (await getItemCatalog()).slice(0, limit)
+  const seen = new Set<string>()
+  const options: SuggestOption[] = []
+  for (const row of rows) {
+    const nm = row.item_nm?.trim()
+    if (!nm || seen.has(nm)) continue
+    seen.add(nm)
+    options.push({ label: nm, value: nm })
+  }
+  return options
+}
+
 export async function suggestItems(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
   const term = query.trim()
   if (term) {
@@ -129,6 +157,11 @@ export async function suggestSuppliers(query: string, limit = MAX_SUGGESTIONS): 
 export async function suggestCurrentLots(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
   const lots = await api.suggestCurrentStockLots(query, limit)
   return toOptions(lots)
+}
+
+export async function suggestProductionLots(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
+  const rows = await api.suggestProductionLots(query, limit)
+  return rows.map((lot) => ({ label: lot, value: lot }))
 }
 
 export async function suggestDraftLots(

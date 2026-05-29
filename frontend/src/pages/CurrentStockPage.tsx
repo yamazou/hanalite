@@ -7,7 +7,10 @@ import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { currentStockColumns } from '../components/erp/masterGridColumns'
 import type { CurrentStock } from '../types/inventory'
-import { formatDateTime, formatQty } from '../utils/format'
+import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import { formatDate, formatDateTime, formatQty } from '../utils/format'
+import { ColoredItemCode, ColoredItemName } from '../components/ColoredItemText'
+import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { suggestCurrentLots, suggestItems, suggestLocations } from '../utils/searchSuggest'
 
 type SearchFilters = {
@@ -65,8 +68,65 @@ export function CurrentStockPage() {
 
   const searchFormClass = useMemo(() => 'erp-search-form erp-search-form-suggest', [])
 
+  const getFilterValue = useCallback((row: CurrentStock, col: string) => {
+    switch (col) {
+      case 'item_cd':
+        return toFilterCellValue(row.item_cd)
+      case 'item_nm':
+        return toFilterCellValue(row.item_nm)
+      case 'location':
+        return toFilterCellValue(`${row.location_cd} ${row.location_nm}`)
+      case 'type':
+        return toFilterCellValue(row.itemtyp_nm)
+      case 'lot':
+        return toFilterCellValue(row.lot)
+      case 'gr_date':
+        return toFilterCellValue(row.gr_date ? formatDate(row.gr_date) : null)
+      case 'qty':
+        return toFilterCellValue(row.qty)
+      case 'updated':
+        return toFilterCellValue(formatDateTime(row.updated_at))
+      default:
+        return toFilterCellValue('')
+    }
+  }, [])
+
+  const grid = useExcelLikeGrid({
+    columns: currentStockColumns,
+    rows,
+    getFilterValue,
+    excelExport: {
+      sheetName: 'Current Stock',
+      filenamePrefix: 'current_stock',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'item_cd':
+            return row.item_cd
+          case 'item_nm':
+            return row.item_nm
+          case 'location':
+            return `${row.location_cd} ${row.location_nm}`
+          case 'type':
+            return row.itemtyp_nm
+          case 'lot':
+            return row.lot
+          case 'gr_date':
+            return row.gr_date ? formatDate(row.gr_date) : ''
+          case 'qty':
+            return row.qty
+          case 'updated':
+            return formatDateTime(row.updated_at)
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
   return (
     <ErpScreen error={error}>
+      {grid.filterMenuElement}
+      {grid.contextMenuElement}
       <ErpSearchPanel>
         <form onSubmit={onSearch} className={searchFormClass}>
           <ErpSuggestInput
@@ -118,27 +178,39 @@ export function CurrentStockPage() {
       </ErpSearchPanel>
 
       <ErpGridPanel
-        gridId="inventory-current-v2"
+        gridId="inventory-current-v3"
         title="Current Stock"
         columns={currentStockColumns}
         loading={loading}
         isEmpty={!loading && rows.length === 0}
         onRefresh={load}
+        onLayoutReady={grid.onLayoutReady}
+        onGridContextMenu={grid.openContextMenu}
+        showSaveGridButton
+        {...grid.tableProps}
       >
         {(layout) => (
           <tbody>
-            {rows.map((r, index) => (
+            {grid.displayRows.map((r, index) => (
               <tr key={r.inv_current_id} className={erpRowClass(index)}>
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
                     case 'item_cd':
                       return (
                         <td key={col.key}>
-                          <code>{r.item_cd}</code>
+                          <ColoredItemCode itemtypId={r.itemtyp_id} itemId={r.item_id}>
+                            {r.item_cd}
+                          </ColoredItemCode>
                         </td>
                       )
                     case 'item_nm':
-                      return <td key={col.key}>{r.item_nm}</td>
+                      return (
+                        <td key={col.key}>
+                          <ColoredItemName itemtypId={r.itemtyp_id} itemId={r.item_id}>
+                            {r.item_nm}
+                          </ColoredItemName>
+                        </td>
+                      )
                     case 'location':
                       return (
                         <td key={col.key}>
@@ -152,6 +224,10 @@ export function CurrentStockPage() {
                         <td key={col.key}>
                           <code>{r.lot}</code>
                         </td>
+                      )
+                    case 'gr_date':
+                      return (
+                        <td key={col.key}>{r.gr_date ? formatDate(r.gr_date) : '-'}</td>
                       )
                     case 'qty':
                       return <td key={col.key}>{formatQty(r.qty)}</td>

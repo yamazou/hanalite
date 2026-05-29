@@ -1,18 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Alert } from './Alert'
-import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
-import { useGridColumnLayout, type GridColumnLayout } from '../hooks/useGridColumnLayout'
-import { useGridSort } from '../hooks/useGridSort'
-import { GridColumnFilterMenu } from './GridColumnFilterMenu'
-import { GridContextMenu, type GridContextMenuState } from './GridContextMenu'
-import { downloadExcelSheet, exportFilename } from '../utils/exportExcel'
-import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
-import { applyColumnFilters, collectUniqueFilterValues } from '../utils/gridColumnFilter'
-import { compareDraftLines, getDraftLineFilterValue } from '../utils/draftGridSort'
+import { ExcelLikeGridTable } from './ExcelLikeGridTable'
+import type { GridColumnDef } from './ResizableGridTable'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
+import { ColoredItemCode, ColoredItemName } from './ColoredItemText'
 import type { useDraftEdit } from '../hooks/useDraftEdit'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { DraftLine } from '../types'
 import { editRowToDraftLine } from '../utils/draftEdit'
+import { getDraftLineFilterValue } from '../utils/draftGridSort'
 import { formatQty } from '../utils/format'
 import { DraftEditableLineGrid } from './DraftEditableLineGrid'
 
@@ -25,6 +21,8 @@ type Props = {
   variant?: DraftVariant
   edit: DraftEdit
   onSaved?: () => void
+  onSaveLines?: () => void
+  saving?: boolean
   onLineGridLayout?: (api: LineGridLayoutApi) => void
   onLineGridLayoutChange?: () => void
 }
@@ -33,27 +31,25 @@ export function DraftDetailPanel({
   draftId,
   variant = 'receipt',
   edit,
-  onSaved,
   onLineGridLayout,
   onLineGridLayoutChange,
+  onSaveLines,
+  saving = false,
 }: Props) {
   const copy = getDraftPageCopy(variant)
   const {
     draft,
     loading,
     error,
-    rowError,
     message,
     canEdit,
     editLines,
     updateLine,
-    addRow,
     removeRows,
+    importLines,
     items,
     locations,
   } = edit
-
-  const [lineGridMenu, setLineGridMenu] = useState<GridContextMenuState>(null)
 
   const lineColumns = useMemo((): GridColumnDef[] => {
     return [
@@ -66,80 +62,36 @@ export function DraftDetailPanel({
   }, [copy.itemCdLabel, copy.itemNmLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
 
   const lineGridId = `${variant}-lines-readonly-v2`
-  const lineLayout = useGridColumnLayout(lineGridId, lineColumns, {
-    onLayoutChange: onLineGridLayoutChange,
-  })
-
-  useEffect(() => {
-    if (canEdit) return
-    onLineGridLayout?.({
-      saveLayout: lineLayout.saveLayout,
-      isDirty: lineLayout.isDirty,
-    })
-  }, [canEdit, lineLayout.saveLayout, lineLayout.isDirty, onLineGridLayout])
-
-  const lineSort = useGridSort()
-  const lineFilters = useGridColumnFilters()
-  const [lineFilterMenu, setLineFilterMenu] = useState<{
-    key: string
-    label: string
-    rect: DOMRect
-  } | null>(null)
 
   const displayLines: DraftLine[] = useMemo(() => {
     if (canEdit) return editLines.map(editRowToDraftLine)
     return draft?.lines ?? []
   }, [canEdit, editLines, draft?.lines])
 
-  const lineFilterOptions = useMemo(() => {
-    if (!lineFilterMenu || displayLines.length === 0) return []
-    return collectUniqueFilterValues(displayLines, lineFilterMenu.key, getDraftLineFilterValue)
-  }, [lineFilterMenu, displayLines])
-
-  const filteredLines = useMemo(() => {
-    return applyColumnFilters(displayLines, lineFilters.filters, getDraftLineFilterValue)
-  }, [displayLines, lineFilters.filters])
-
-  const sortedLines = useMemo(() => {
-    if (!lineSort.sort) return filteredLines
-    const { key, dir } = lineSort.sort
-    return [...filteredLines].sort((a, b) => compareDraftLines(a, b, key, dir))
-  }, [filteredLines, lineSort.sort])
-
-  const isLineColumnSortable = (_key: string) => !canEdit
-  const isLineColumnFilterable = isLineColumnSortable
-
-  const lineFilterColumnLabel =
-    lineColumns.find((c) => c.key === lineFilterMenu?.key)?.label ?? lineFilterMenu?.label ?? ''
-
-  const exportLinesGridToExcel = () => {
-    const columns = lineLayout.orderedColumns.filter((col) => col.key !== 'select')
-    const headers = columns.map((col) => col.label)
-    const rows = sortedLines.map((line) =>
-      columns.map((col) => getDraftLineFilterValue(line, col.key))
-    )
-    const prefix =
-      variant === 'delivery'
-        ? `delivery_draft_${draftId ?? 'rows'}_lines`
-        : `receipt_draft_${draftId ?? 'rows'}_lines`
-    downloadExcelSheet(copy.exportLinesSheet, headers, rows, exportFilename(prefix))
-  }
-
   const renderReadOnlyLineCell = (colKey: string, line: DraftLine) => {
     switch (colKey) {
       case 'item_cd':
         return (
           <td key={colKey} title={line.item_cd ?? ''}>
-            <code>{line.item_cd ?? '-'}</code>
+            <ColoredItemCode
+              itemtypId={line.itemtyp_id}
+              itemId={line.item_id}
+              itemCd={line.item_cd}
+            >
+              {line.item_cd ?? '-'}
+            </ColoredItemCode>
           </td>
         )
       case 'item_nm':
         return (
           <td key={colKey} title={line.item_nm ?? ''}>
-            <span className="erp-item-name">{line.item_nm ?? '-'}</span>
-            {line.item_id != null && (
-              <span className="muted small"> (ID:{line.item_id})</span>
-            )}
+            <ColoredItemName
+              itemtypId={line.itemtyp_id}
+              itemId={line.item_id}
+              itemCd={line.item_cd}
+            >
+              {line.item_nm ?? '-'}
+            </ColoredItemName>
           </td>
         )
       case 'location':
@@ -155,7 +107,7 @@ export function DraftDetailPanel({
       case 'lot':
         return (
           <td key={colKey} title={line.lot}>
-            <code>{line.lot}</code>
+            {line.lot}
           </td>
         )
       case 'qty':
@@ -188,25 +140,6 @@ export function DraftDetailPanel({
 
   return (
     <div className="erp-detail-content">
-      <GridContextMenu
-        menu={lineGridMenu}
-        excelLabel={copy.exportExcelLabel}
-        onExcel={exportLinesGridToExcel}
-        onClose={() => setLineGridMenu(null)}
-      />
-      {lineFilterMenu && (
-        <GridColumnFilterMenu
-          columnLabel={lineFilterColumnLabel}
-          options={lineFilterOptions}
-          selected={lineFilters.getSelected(lineFilterMenu.key, lineFilterOptions)}
-          anchorRect={lineFilterMenu.rect}
-          onApply={(selected) =>
-            lineFilters.applySelection(lineFilterMenu.key, selected, lineFilterOptions)
-          }
-          onClear={() => lineFilters.clearColumn(lineFilterMenu.key)}
-          onClose={() => setLineFilterMenu(null)}
-        />
-      )}
       {error && <Alert type="error" message={error} />}
       {message && <Alert type="success" message={message} />}
 
@@ -219,56 +152,46 @@ export function DraftDetailPanel({
           items={items}
           locations={locations}
           onUpdateLine={updateLine}
-          onAddRow={addRow}
           onRemoveRows={removeRows}
-          rowError={rowError}
+          onImportParsed={importLines}
+          rowError={edit.rowError}
           copy={copy}
           onLayoutChange={onLineGridLayoutChange}
           onLayoutApi={onLineGridLayout}
+          onSaveLines={onSaveLines}
+          saving={saving}
         />
       ) : (
-        (displayLines.length > 0 || canEdit) && (
-          <div
-            className="erp-grid-wrap erp-grid-wrap-detail"
-            onContextMenu={(event) => {
-              event.preventDefault()
-              setLineGridMenu({ x: event.clientX, y: event.clientY })
-            }}
-          >
-            <ResizableGridTable
-              layout={lineLayout}
-              sortMark={lineSort.sortMark}
-              onHeaderDoubleClick={(key) => lineSort.toggleSort(key, isLineColumnSortable(key))}
-              isColumnSortable={isLineColumnSortable}
-              isColumnFilterable={isLineColumnFilterable}
-              isColumnFilterActive={lineFilters.isActive}
-              onFilterClick={(key, anchor) => {
-                const col = lineColumns.find((c) => c.key === key)
-                setLineFilterMenu({
-                  key,
-                  label: col?.label ?? key,
-                  rect: anchor.getBoundingClientRect(),
-                })
-              }}
-            >
-              <tbody>
-                {sortedLines.map((line, index) => (
-                  <tr
-                    key={line.inv_receipt_draft_line_id}
-                    className={index % 2 === 1 ? 'row-alt' : undefined}
-                  >
-                    {lineLayout.orderedColumns.map((col) => renderReadOnlyLineCell(col.key, line))}
-                  </tr>
-                ))}
-              </tbody>
-            </ResizableGridTable>
-          </div>
-        )
+        <ExcelLikeGridTable
+          gridId={lineGridId}
+          columns={lineColumns}
+          rows={displayLines}
+          getFilterValue={getDraftLineFilterValue}
+          layoutOptions={{ onLayoutChange: onLineGridLayoutChange, headerFilterable: true }}
+          onLayoutApi={onLineGridLayout}
+          excelLabel={copy.exportExcelLabel}
+          excelExport={{
+            sheetName: copy.exportLinesSheet,
+            filenamePrefix:
+              variant === 'delivery'
+                ? `delivery_draft_${draftId}_lines`
+                : `receipt_draft_${draftId}_lines`,
+            getExportValue: (line, col) => getDraftLineFilterValue(line, col),
+          }}
+        >
+          {({ layout, displayRows }) => (
+            <tbody>
+              {displayRows.map((line, index) => (
+                <tr key={line.inv_receipt_draft_line_id} className={index % 2 === 1 ? 'row-alt' : undefined}>
+                  {layout.orderedColumns.map((col) => renderReadOnlyLineCell(col.key, line))}
+                </tr>
+              ))}
+            </tbody>
+          )}
+        </ExcelLikeGridTable>
       )}
 
-      {canEdit && draft.lines.length > 0 && (
-        <p className="muted erp-detail-hint">{copy.nextStepHint}</p>
-      )}
+      {canEdit && <p className="muted erp-detail-hint">{copy.listLinesEditHint}</p>}
     </div>
   )
 }

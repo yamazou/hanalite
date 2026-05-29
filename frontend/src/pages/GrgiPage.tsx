@@ -8,7 +8,10 @@ import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { grgiHistoryColumns } from '../components/erp/masterGridColumns'
 import type { ItemSearchRow } from '../types/masters'
 import type { GrgiHistory, MoveTyp } from '../types/inventory'
+import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import { datetimeLocalToIso, formatDateTime, formatQty, toDatetimeLocalValue } from '../utils/format'
+import { ColoredItemName } from '../components/ColoredItemText'
+import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { resolveLocationIdFromText, suggestCurrentLots, suggestLocations } from '../utils/searchSuggest'
 
 export function GrgiPage() {
@@ -29,7 +32,7 @@ export function GrgiPage() {
   const [moveQtyMv, setMoveQtyMv] = useState('')
   const [actualAt, setActualAt] = useState(toDatetimeLocalValue())
   const [submitting, setSubmitting] = useState(false)
-  const grgiMovetyps = movetyps.filter((m) => m.movetyps_nm === 'GR' || m.movetyps_nm === 'GI')
+  const grgiMovetyps = movetyps.filter((m) => m.movetyps_cd === 'GR' || m.movetyps_cd === 'GI')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -137,6 +140,61 @@ export function GrgiPage() {
     </span>
   )
 
+  const getFilterValue = useCallback((row: GrgiHistory, col: string) => {
+    switch (col) {
+      case 'id':
+        return toFilterCellValue(row.inv_grgi_id)
+      case 'item':
+        return toFilterCellValue(row.item_nm)
+      case 'location':
+        return toFilterCellValue(`${row.location_cd} ${row.location_nm}`)
+      case 'lot':
+        return toFilterCellValue(row.lot)
+      case 'type':
+        return toFilterCellValue(row.movetyps_cd)
+      case 'move_qty':
+        return toFilterCellValue(row.move_qty)
+      case 'qty':
+        return toFilterCellValue(row.qty)
+      case 'actual_at':
+        return toFilterCellValue(formatDateTime(row.actual_at))
+      default:
+        return toFilterCellValue('')
+    }
+  }, [])
+
+  const grid = useExcelLikeGrid({
+    columns: grgiHistoryColumns,
+    rows: history,
+    getFilterValue,
+    excelExport: {
+      sheetName: 'GR/GI History',
+      filenamePrefix: 'grgi_history',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'id':
+            return row.inv_grgi_id
+          case 'item':
+            return row.item_nm
+          case 'location':
+            return `${row.location_cd} ${row.location_nm}`
+          case 'lot':
+            return row.lot
+          case 'type':
+            return row.movetyps_cd
+          case 'move_qty':
+            return row.move_qty
+          case 'qty':
+            return row.qty
+          case 'actual_at':
+            return formatDateTime(row.actual_at)
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
   const renderActualAtInput = (form: 'grgi' | 'mv') => (
     <label className="erp-search-field erp-search-field-date" key={form}>
       <input
@@ -152,6 +210,8 @@ export function GrgiPage() {
 
   return (
     <ErpScreen error={error} success={success} className="erp-screen-stacked">
+      {grid.filterMenuElement}
+      {grid.contextMenuElement}
       <ErpSearchPanel>
         <form onSubmit={onSubmit} className="erp-search-form erp-search-form-suggest">
           <span className="erp-search-section-label">GR/GI</span>
@@ -182,7 +242,7 @@ export function GrgiPage() {
             >
               {grgiMovetyps.map((m) => (
                 <option key={m.movetyps_id} value={m.movetyps_id}>
-                  {m.movetyps_nm}
+                  {m.movetyps_nm ? `${m.movetyps_cd} / ${m.movetyps_nm}` : m.movetyps_cd}
                 </option>
               ))}
             </select>
@@ -268,17 +328,25 @@ export function GrgiPage() {
         emptyText="No history"
         onRefresh={load}
         panelClassName="erp-panel-grow-main"
+        onLayoutReady={grid.onLayoutReady}
+        onGridContextMenu={grid.openContextMenu}
+        showSaveGridButton
+        {...grid.tableProps}
       >
         {(layout) => (
           <tbody>
-            {history.map((h, index) => (
+            {grid.displayRows.map((h, index) => (
               <tr key={h.inv_grgi_id} className={erpRowClass(index)}>
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
                     case 'id':
                       return <td key={col.key}>{h.inv_grgi_id}</td>
                     case 'item':
-                      return <td key={col.key}>{h.item_nm}</td>
+                      return (
+                        <td key={col.key}>
+                          <ColoredItemName itemId={h.item_id}>{h.item_nm}</ColoredItemName>
+                        </td>
+                      )
                     case 'location':
                       return (
                         <td key={col.key}>
@@ -292,7 +360,11 @@ export function GrgiPage() {
                         </td>
                       )
                     case 'type':
-                      return <td key={col.key}>{h.movetyps_nm}</td>
+                      return (
+                        <td key={col.key}>
+                          {h.movetyps_nm ? `${h.movetyps_cd} / ${h.movetyps_nm}` : h.movetyps_cd}
+                        </td>
+                      )
                     case 'move_qty':
                       return <td key={col.key}>{formatQty(h.move_qty)}</td>
                     case 'qty':

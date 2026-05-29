@@ -2,10 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useRoutes } from 'react-router-dom'
 import { appRouteObjects } from '../appRoutes'
 import { AppShellProvider } from '../context/AppNavigateContext'
-import { normalizeTabPath, parseAppRoute } from '../utils/appRoute'
+import { ItemTypColorProvider } from '../context/ItemTypColorContext'
+import { formatAppRoute, normalizeTabPath, parseAppRoute } from '../utils/appRoute'
 
 type NavLink = { to: string; label: string }
-type OpenTab = { to: string; label: string; pinned?: boolean }
+/** `to` = pathname (tab key); `search` = query string including `?` when set. */
+type OpenTab = { to: string; search: string; label: string; pinned?: boolean }
+
+function tabRoute(tab: OpenTab): string {
+  return formatAppRoute(tab.to, tab.search)
+}
 
 const TAB_STORAGE_KEY = 'hanalite.openTabs.v1'
 
@@ -117,17 +123,22 @@ function moduleHasActive(pathname: string, mod: NavModule): boolean {
   return mod.items.some((item) => isActive(pathname, item.to))
 }
 
-function normalizeAndDedupeTabs(rawTabs: Array<{ to: string; label: string; pinned?: boolean }>): OpenTab[] {
+function normalizeAndDedupeTabs(
+  rawTabs: Array<{ to: string; search?: string; label: string; pinned?: boolean }>
+): OpenTab[] {
   const deduped = new Map<string, OpenTab>()
   for (const tab of rawTabs) {
-    const to = normalizeTabPath(tab.to)
+    const parsed = parseAppRoute(tab.to)
+    const to = parsed.pathname
+    const search = tab.search ?? parsed.search
     const existing = deduped.get(to)
     if (!existing) {
-      deduped.set(to, { to, label: tab.label, pinned: tab.pinned === true })
+      deduped.set(to, { to, search, label: tab.label, pinned: tab.pinned === true })
       continue
     }
     deduped.set(to, {
       to,
+      search: existing.search || search,
       label: existing.label || tab.label,
       pinned: existing.pinned === true || tab.pinned === true,
     })
@@ -157,19 +168,29 @@ export function Layout() {
             .filter((t): t is { to: string; label: string; pinned?: boolean } =>
               !!t && typeof t.to === 'string' && typeof t.label === 'string'
             )
-            .map((t) => ({
-              to: normalizeTabPath(t.to),
-              label: t.label,
-              // Only true boolean should be treated as pinned.
-              pinned: (t as OpenTab).pinned === true,
-            }))
+            .map((t) => {
+              const parsed = parseAppRoute(t.to)
+              return {
+                to: parsed.pathname,
+                search: (t as OpenTab).search ?? parsed.search,
+                label: t.label,
+                pinned: (t as OpenTab).pinned === true,
+              }
+            })
           return normalizeAndDedupeTabs(normalized)
         }
       }
     } catch {
       // ignore bad localStorage
     }
-    return [{ to: currentPath, label: labelForPath(currentPath), pinned: false }]
+    return [
+      {
+        to: currentPath,
+        search: location.search,
+        label: labelForPath(currentPath),
+        pinned: false,
+      },
+    ]
   })
 
   const activeTab = useMemo(() => tabs.find((t) => t.to === currentPath), [tabs, currentPath])
@@ -177,8 +198,16 @@ export function Layout() {
   useEffect(() => {
     if (activeTab) return
     if (closingPathRef.current === currentPath) return
-    setTabs((prev) => [...prev, { to: currentPath, label: labelForPath(currentPath), pinned: false }])
-  }, [currentPath, activeTab])
+    setTabs((prev) => [
+      ...prev,
+      {
+        to: currentPath,
+        search: viewRoute.search,
+        label: labelForPath(currentPath),
+        pinned: false,
+      },
+    ])
+  }, [currentPath, activeTab, viewRoute.search])
 
   useEffect(() => {
     localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs))
@@ -201,12 +230,18 @@ export function Layout() {
 
   useEffect(() => {
     setViewRoute({ pathname: routerPath, search: location.search })
+    setTabs((prev) =>
+      prev.map((t) => (t.to === routerPath ? { ...t, search: location.search } : t))
+    )
   }, [routerPath, location.search])
 
   const appNavigate = useCallback(
     (to: string, options?: { replace?: boolean }) => {
       const next = parseAppRoute(to)
       setViewRoute(next)
+      setTabs((prev) =>
+        prev.map((t) => (t.to === next.pathname ? { ...t, search: next.search } : t))
+      )
       if (routerPath !== next.pathname || location.search !== next.search) {
         navigate({ pathname: next.pathname, search: next.search }, options)
       }
@@ -230,8 +265,8 @@ export function Layout() {
   const routeElement = useRoutes(appRouteObjects, displayLocation)
 
   const requestRoute = (to: string) => {
-    const normalizedTo = normalizeTabPath(to)
-    if (currentPath === normalizedTo && viewRoute.search === '') return
+    const next = parseAppRoute(to)
+    if (currentPath === next.pathname && viewRoute.search === next.search) return
     appNavigate(to)
   }
 
@@ -245,12 +280,24 @@ export function Layout() {
   }
 
   const openTab = (to: string, label?: string) => {
-    const normalizedTo = normalizeTabPath(to)
+    const parsed = parseAppRoute(to)
     setTabs((prev) => {
-      if (prev.some((t) => t.to === normalizedTo)) return prev
-      return [...prev, { to: normalizedTo, label: label ?? labelForPath(normalizedTo), pinned: false }]
+      const existing = prev.find((t) => t.to === parsed.pathname)
+      if (existing) {
+        requestRoute(tabRoute(existing))
+        return prev
+      }
+      requestRoute(formatAppRoute(parsed.pathname, parsed.search))
+      return [
+        ...prev,
+        {
+          to: parsed.pathname,
+          search: parsed.search,
+          label: label ?? labelForPath(parsed.pathname),
+          pinned: false,
+        },
+      ]
     })
-    requestRoute(normalizedTo)
   }
 
   const closeTab = (to: string) => {
@@ -261,7 +308,7 @@ export function Layout() {
     if (currentPath === normalizedTo) {
       closingPathRef.current = normalizedTo
       const fallback = nextTabs[Math.max(0, idx - 1)] ?? nextTabs[0] ?? null
-      if (fallback) requestRoute(fallback.to)
+      if (fallback) requestRoute(tabRoute(fallback))
     }
     setTabs(nextTabs)
   }
@@ -300,6 +347,7 @@ export function Layout() {
   }
 
   return (
+    <ItemTypColorProvider>
     <AppShellProvider navigate={appNavigate} viewRoute={viewRoute}>
     <div className="app">
       <aside className="sidebar">
@@ -424,8 +472,8 @@ export function Layout() {
               key={tab.to}
               type="button"
               className={`main-tab ${tab.to === currentPath ? 'active' : ''}`}
-              onClick={() => requestRoute(tab.to)}
-              title={tab.to}
+              onClick={() => requestRoute(tabRoute(tab))}
+              title={tabRoute(tab)}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/tab-to', tab.to)
@@ -478,6 +526,7 @@ export function Layout() {
       </main>
     </div>
     </AppShellProvider>
+    </ItemTypColorProvider>
   )
 }
 

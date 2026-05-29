@@ -1,13 +1,27 @@
 export interface ItemTyp {
   itemtyp_id: number
+  itemtyp_cd: string
   itemtyp_nm: string
+  itemtyp_color?: string | null
   created_at?: string | null
+}
+
+export interface ItemTypPayload {
+  itemtyp_cd: string
+  itemtyp_nm: string
+  itemtyp_color?: string | null
 }
 
 export interface MoveTypMaster {
   movetyps_id: number
-  movetyps_nm: string
+  movetyps_cd: string
+  movetyps_nm?: string | null
   created_at?: string | null
+}
+
+export interface MoveTypPayload {
+  movetyps_cd: string
+  movetyps_nm?: string | null
 }
 
 export interface ItemListRow {
@@ -18,6 +32,8 @@ export interface ItemListRow {
   itemtyp_nm: string
   supplier1_id: number | null
   supplier1_nm: string | null
+  supplier2_id: number | null
+  supplier3_id: number | null
 }
 
 export interface ItemSearchRow {
@@ -36,8 +52,6 @@ export interface ItemDetail {
   supplier1_id: number | null
   supplier2_id: number | null
   supplier3_id: number | null
-  supplier4_id: number | null
-  supplier5_id: number | null
 }
 
 export interface ItemPayload {
@@ -47,8 +61,6 @@ export interface ItemPayload {
   supplier1_id?: number | null
   supplier2_id?: number | null
   supplier3_id?: number | null
-  supplier4_id?: number | null
-  supplier5_id?: number | null
 }
 
 export interface SupplierMaster {

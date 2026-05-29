@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
@@ -6,15 +6,13 @@ import { Alert } from '../components/Alert'
 import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
 import { DraftHeaderEditCell } from '../components/DraftHeaderEditCells'
 import { useDraftEdit } from '../hooks/useDraftEdit'
+import { GRID_ROWNUM_COLUMN, GridRowNumCell } from '../components/GridRowNumCell'
+import { SaveGridButton } from '../components/erp/SaveGridButton'
+import { SearchDateInput, SearchFilterField } from '../components/erp/SearchFilterField'
 import { ResizableGridTable, type GridColumnDef } from '../components/ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
-import { useGridSort } from '../hooks/useGridSort'
-import { GridColumnFilterMenu } from '../components/GridColumnFilterMenu'
-import { GridContextMenu, type GridContextMenuState } from '../components/GridContextMenu'
-import { downloadExcelSheet, exportFilename } from '../utils/exportExcel'
-import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
-import { applyColumnFilters, collectUniqueFilterValues } from '../utils/gridColumnFilter'
-import { compareDraftListItems, getDraftListFilterValue } from '../utils/draftGridSort'
+import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import { getDraftListFilterValue } from '../utils/draftGridSort'
 import {
   APPROVE_ITEM_CD_REQUIRED_MSG,
   findDraftLineMissingItemCd,
@@ -24,7 +22,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { DraftListItem, DraftStatus } from '../types'
 import { formatDate, formatDateTime } from '../utils/format'
-import { suggestDraftLots, suggestItems, suggestSuppliers } from '../utils/searchSuggest'
+import { suggestDraftLots, suggestItems } from '../utils/searchSuggest'
 
 const sourceLabelByVariant = {
   receipt: { manual: 'Manual', excel: 'Excel', pdf: 'PDF' },
@@ -58,33 +56,10 @@ function cellText(value: string | null | undefined): string {
   return trimmed ? trimmed : '-'
 }
 
-function SearchDateInput({
-  value,
-  placeholder,
-  onChange,
-  className,
-}: {
-  value: string
-  placeholder: string
-  onChange: (value: string) => void
-  className?: string
-}) {
-  return (
-    <span className={`erp-input-wrap${value ? '' : ' is-empty'}`}>
-      <input
-        type="date"
-        className={className}
-        value={value}
-        aria-label={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      {!value && <span className="erp-input-ghost">{placeholder}</span>}
-    </span>
-  )
-}
-
 export function DraftListPage({ variant = 'receipt' }: Props) {
   const copy = getDraftPageCopy(variant)
+  /** List screen: header read-only; edit header on Entry only. */
+  const listSavesLinesOnly = true
   const sourceLabel = sourceLabelByVariant[variant]
   const navigate = useAppNavigate()
   const { search } = useAppViewRoute()
@@ -97,7 +72,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   const [message, setMessage] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
   const [detailRefresh, setDetailRefresh] = useState(0)
-  const [headerGridMenu, setHeaderGridMenu] = useState<GridContextMenuState>(null)
   const [, setGridLayoutTick] = useState(0)
   const [lineGridLayoutApi, setLineGridLayoutApi] = useState<LineGridLayoutApi | null>(null)
 
@@ -115,7 +89,9 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     [drafts, selectedId]
   )
 
-  const draftEdit = useDraftEdit(selectedId, variant, detailRefresh)
+  const draftEdit = useDraftEdit(selectedId, variant, detailRefresh, {
+    listLinesOnly: listSavesLinesOnly,
+  })
 
   const filters: { value: '' | DraftStatus; label: string }[] = [
     { value: '', label: copy.filterAll },
@@ -125,7 +101,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   ]
 
   const fetchItemSuggestions = useCallback((q: string) => suggestItems(q), [])
-  const fetchSupplierSuggestions = useCallback((q: string) => suggestSuppliers(q), [])
   const fetchLotSuggestions = useCallback((q: string) => suggestDraftLots(q, variant), [variant])
 
   useEffect(() => {
@@ -145,8 +120,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           status: status || undefined,
           date_from: appliedSearch.dateFrom || undefined,
           date_to: appliedSearch.dateTo || undefined,
-          supplier_q: appliedSearch.supplier.trim() || undefined,
-          reference_no: appliedSearch.referenceNo.trim() || undefined,
           item_q: appliedSearch.item.trim() || undefined,
           lot: appliedSearch.lot.trim() || undefined,
         },
@@ -174,20 +147,33 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     void load()
   }
 
-  const applySearchFilters = () => {
-    if (searchInput.dateFrom && searchInput.dateTo && searchInput.dateFrom > searchInput.dateTo) {
-      setError(copy.filterDateRangeError)
-      return
-    }
-    setError(null)
-    setAppliedSearch(searchInput)
-  }
+  const applySearchField = useCallback(
+    (...keys: (keyof SearchFilters)[]) => {
+      if (keys.includes('dateFrom') || keys.includes('dateTo')) {
+        if (
+          searchInput.dateFrom &&
+          searchInput.dateTo &&
+          searchInput.dateFrom > searchInput.dateTo
+        ) {
+          setError(copy.filterDateRangeError)
+          return
+        }
+      }
+      setError(null)
+      setAppliedSearch((prev) => {
+        const next = { ...prev }
+        for (const key of keys) next[key] = searchInput[key]
+        return next
+      })
+    },
+    [searchInput, copy.filterDateRangeError]
+  )
 
-  const clearSearchFilters = () => {
-    setSearchInput(emptySearchFilters)
-    setAppliedSearch(emptySearchFilters)
+  const clearSearchField = useCallback((patch: Partial<SearchFilters>) => {
+    setSearchInput((prev) => ({ ...prev, ...patch }))
+    setAppliedSearch((prev) => ({ ...prev, ...patch }))
     setError(null)
-  }
+  }, [])
 
   async function handleApprove() {
     if (!selectedId || !selectedDraft) return
@@ -206,7 +192,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     setMessage(null)
     try {
       if (draftEdit.canEdit) {
-        const saved = await draftEdit.save()
+        const saved = await draftEdit.save({ linesOnly: true })
         if (!saved) return
       }
       await api.approveDraft(selectedId, variant)
@@ -282,11 +268,12 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
 
   const headerColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
+      GRID_ROWNUM_COLUMN,
       { key: 'date', label: copy.dateColumn, defaultWidth: 128 },
-      { key: 'supplier', label: copy.supplierCol, defaultWidth: 96 },
       { key: 'reference', label: copy.referenceCol, defaultWidth: 96 },
       { key: 'source', label: copy.sourceCol, defaultWidth: 72 },
       { key: 'status', label: copy.statusCol, defaultWidth: 88 },
+      { key: 'supplier', label: copy.supplierCol, defaultWidth: 96 },
       { key: 'notes', label: copy.notesLabel, defaultWidth: 120 },
       { key: 'lines', label: copy.linesCol, defaultWidth: 52, className: 'erp-col-num' },
       { key: 'created', label: copy.createdCol, defaultWidth: 128 },
@@ -299,24 +286,18 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     return cols
   }, [copy])
 
-  const headerGridId = `${variant}-header-v3`
-  const headerLayout = useGridColumnLayout(headerGridId, headerColumns, {
-    onLayoutChange: bumpGridLayout,
-  })
-
-  const gridLayoutDirty = headerLayout.isDirty || (lineGridLayoutApi?.isDirty ?? false)
+  const headerGridId = `${variant}-header-v5`
 
   const handleSaveGrid = () => {
     headerLayout.saveLayout()
     lineGridLayoutApi?.saveLayout()
-    setMessage(copy.saveGridSuccessMsg)
     setGridLayoutTick((n) => n + 1)
   }
 
   const handleSaveDraft = async () => {
     setError(null)
     setMessage(null)
-    const ok = await draftEdit.save()
+    const ok = await draftEdit.save(listSavesLinesOnly ? { linesOnly: true } : undefined)
     if (ok) {
       setMessage(copy.saveSuccessMsg)
       refreshDetail()
@@ -324,56 +305,72 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
       setError(draftEdit.error)
     }
   }
-  const headerSort = useGridSort()
-  const headerFilters = useGridColumnFilters()
-  const [headerFilterMenu, setHeaderFilterMenu] = useState<{
-    key: string
-    label: string
-    rect: DOMRect
-  } | null>(null)
-
   const getHeaderFilterValue = useCallback(
     (row: DraftListItem, col: string) =>
       getDraftListFilterValue(row, col, sourceLabel, copy.openPdfBtn ?? 'PDF'),
     [sourceLabel, copy.openPdfBtn]
   )
 
-  const headerFilterOptions = useMemo(() => {
-    if (!headerFilterMenu) return []
-    return collectUniqueFilterValues(drafts, headerFilterMenu.key, getHeaderFilterValue)
-  }, [headerFilterMenu, drafts, getHeaderFilterValue])
-
-  const filteredDrafts = useMemo(
-    () => applyColumnFilters(drafts, headerFilters.filters, getHeaderFilterValue),
-    [drafts, headerFilters.filters, getHeaderFilterValue]
+  const getHeaderSortValue = useCallback(
+    (row: DraftListItem, col: string): unknown => {
+      switch (col) {
+        case 'source':
+          return sourceLabel[row.source_type] ?? row.source_type
+        case 'status':
+          return row.status
+        case 'date':
+          return row.receipt_at
+        case 'reference':
+          return row.reference_no
+        case 'supplier':
+          return row.supplier_nm
+        case 'notes':
+          return row.notes
+        case 'lines':
+          return row.line_count
+        case 'created':
+          return row.created_at
+        case 'approved':
+          return row.approved_at
+        case 'cancelled':
+          return row.cancelled_at
+        case 'pdf':
+          return row.has_attachment ? 1 : 0
+        default:
+          return ''
+      }
+    },
+    [sourceLabel]
   )
 
-  const sortedDrafts = useMemo(() => {
-    if (!headerSort.sort) return filteredDrafts
-    const { key, dir } = headerSort.sort
-    return [...filteredDrafts].sort((a, b) => compareDraftListItems(a, b, key, dir, sourceLabel))
-  }, [filteredDrafts, headerSort.sort, sourceLabel])
+  const headerGrid = useExcelLikeGrid({
+    columns: headerColumns,
+    rows: drafts,
+    getFilterValue: getHeaderFilterValue,
+    getSortValue: getHeaderSortValue,
+    excelLabel: copy.exportExcelLabel,
+    excelExport: {
+      sheetName: copy.exportHeaderSheet,
+      filenamePrefix: variant === 'delivery' ? 'delivery_drafts' : 'receipt_drafts',
+      getExportValue: (row, col) =>
+        getDraftListFilterValue(row, col, sourceLabel, copy.openPdfBtn ?? 'PDF'),
+    },
+  })
 
-  const headerFilterColumnLabel =
-    headerColumns.find((c) => c.key === headerFilterMenu?.key)?.label ?? headerFilterMenu?.label ?? ''
+  const headerLayout = useGridColumnLayout(headerGridId, headerColumns, {
+    onLayoutChange: bumpGridLayout,
+    pinFirst: ['rownum'],
+    rowCount: headerGrid.displayRows.length,
+  })
 
-  const exportHeaderGridToExcel = () => {
-    const columns = headerLayout.orderedColumns
-    const headers = columns.map((col) => col.label)
-    const rows = sortedDrafts.map((d) =>
-      columns.map((col) =>
-        getDraftListFilterValue(d, col.key, sourceLabel, copy.openPdfBtn ?? 'PDF')
-      )
-    )
-    downloadExcelSheet(
-      copy.exportHeaderSheet,
-      headers,
-      rows,
-      exportFilename(variant === 'delivery' ? 'delivery_drafts' : 'receipt_drafts')
-    )
-  }
+  const gridLayoutDirty = headerLayout.isDirty || (lineGridLayoutApi?.isDirty ?? false)
+
+  useEffect(() => {
+    headerGrid.onLayoutReady(headerLayout)
+  }, [headerLayout, headerGrid.onLayoutReady])
 
   const isListHeaderEditable = (draftId: number, d: DraftListItem) =>
+    !listSavesLinesOnly &&
     selectedId === draftId &&
     d.status === 'registered' &&
     draftEdit.canEdit &&
@@ -383,7 +380,12 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     const editable = isListHeaderEditable(draftId, d)
     const header = draftEdit.headerEdit
 
-    if (editable && header && (colKey === 'date' || colKey === 'reference' || colKey === 'supplier' || colKey === 'notes')) {
+    if (
+      !listSavesLinesOnly &&
+      editable &&
+      header &&
+      (colKey === 'date' || colKey === 'reference' || colKey === 'supplier' || colKey === 'notes')
+    ) {
       return (
         <td
           key={colKey}
@@ -459,32 +461,26 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
 
   return (
     <div className="erp-screen">
-      <GridContextMenu
-        menu={headerGridMenu}
-        excelLabel={copy.exportExcelLabel}
-        onExcel={exportHeaderGridToExcel}
-        onClose={() => setHeaderGridMenu(null)}
-      />
-      {headerFilterMenu && (
-        <GridColumnFilterMenu
-          columnLabel={headerFilterColumnLabel}
-          options={headerFilterOptions}
-          selected={headerFilters.getSelected(headerFilterMenu.key, headerFilterOptions)}
-          anchorRect={headerFilterMenu.rect}
-          onApply={(selected) =>
-            headerFilters.applySelection(headerFilterMenu.key, selected, headerFilterOptions)
-          }
-          onClear={() => headerFilters.clearColumn(headerFilterMenu.key)}
-          onClose={() => setHeaderFilterMenu(null)}
-        />
-      )}
+      {headerGrid.filterMenuElement}
+      {headerGrid.contextMenuElement}
       {error && <Alert type="error" message={error} />}
       {message && <Alert type="success" message={message} />}
 
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
           <div className="erp-search-row erp-search-form-suggest">
-            <div className="erp-search-field erp-search-field-date">
+            <SearchFilterField
+              className="erp-search-field-date"
+              showApply={
+                searchInput.dateFrom !== appliedSearch.dateFrom ||
+                searchInput.dateTo !== appliedSearch.dateTo
+              }
+              applyLabel={copy.filterApply}
+              onApply={() => applySearchField('dateFrom', 'dateTo')}
+              showClear={Boolean(appliedSearch.dateFrom || appliedSearch.dateTo)}
+              clearLabel={copy.filterClear}
+              onClear={() => clearSearchField({ dateFrom: '', dateTo: '' })}
+            >
               <span className="erp-search-date-range">
                 <SearchDateInput
                   className="erp-input erp-input-date"
@@ -502,51 +498,45 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                   onChange={(dateTo) => setSearchInput((prev) => ({ ...prev, dateTo }))}
                 />
               </span>
-            </div>
-            <ErpSuggestInput
-              value={searchInput.supplier}
-              onChange={(supplier) => setSearchInput((prev) => ({ ...prev, supplier }))}
-              placeholder={copy.supplierLabel}
-              ariaLabel={copy.supplierLabel}
-              fieldClassName="erp-search-field-supplier"
-              fetchSuggestions={fetchSupplierSuggestions}
-            />
-            <label className="erp-search-field erp-search-field-reference">
-              <input
-                type="text"
-                className="erp-input"
-                value={searchInput.referenceNo}
-                placeholder={copy.filterReferencePh}
-                aria-label={copy.filterReferencePh}
-                onChange={(e) =>
-                  setSearchInput((prev) => ({ ...prev, referenceNo: e.target.value }))
-                }
+            </SearchFilterField>
+            <SearchFilterField
+              className="erp-search-field-item"
+              showApply={searchInput.item !== appliedSearch.item}
+              applyLabel={copy.filterApply}
+              onApply={() => applySearchField('item')}
+              showClear={Boolean(appliedSearch.item.trim())}
+              clearLabel={copy.filterClear}
+              onClear={() => clearSearchField({ item: '' })}
+            >
+              <ErpSuggestInput
+                value={searchInput.item}
+                onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
+                placeholder={`${copy.itemCdLabel} - ${copy.itemNmLabel}`}
+                ariaLabel={copy.itemLabel}
+                variant="inline"
+                fieldClassName="erp-suggest-in-filter"
+                fetchSuggestions={fetchItemSuggestions}
               />
-            </label>
-            <ErpSuggestInput
-              value={searchInput.item}
-              onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
-              placeholder={`${copy.itemCdLabel} - ${copy.itemNmLabel}`}
-              ariaLabel={copy.itemLabel}
-              fieldClassName="erp-search-field-item"
-              fetchSuggestions={fetchItemSuggestions}
-            />
-            <ErpSuggestInput
-              value={searchInput.lot}
-              onChange={(lot) => setSearchInput((prev) => ({ ...prev, lot }))}
-              placeholder={copy.filterLotPh}
-              ariaLabel={copy.filterLotPh}
-              fieldClassName="erp-search-field-lot"
-              fetchSuggestions={fetchLotSuggestions}
-            />
-            <div className="erp-search-actions">
-              <button type="button" className="btn erp-btn erp-btn-search" onClick={applySearchFilters}>
-                {copy.filterApply}
-              </button>
-              <button type="button" className="btn erp-btn erp-btn-clear" onClick={clearSearchFilters}>
-                {copy.filterClear}
-              </button>
-            </div>
+            </SearchFilterField>
+            <SearchFilterField
+              className="erp-search-field-lot"
+              showApply={searchInput.lot !== appliedSearch.lot}
+              applyLabel={copy.filterApply}
+              onApply={() => applySearchField('lot')}
+              showClear={Boolean(appliedSearch.lot.trim())}
+              clearLabel={copy.filterClear}
+              onClear={() => clearSearchField({ lot: '' })}
+            >
+              <ErpSuggestInput
+                value={searchInput.lot}
+                onChange={(lot) => setSearchInput((prev) => ({ ...prev, lot }))}
+                placeholder={copy.filterLotPh}
+                ariaLabel={copy.filterLotPh}
+                variant="inline"
+                fieldClassName="erp-suggest-in-filter"
+                fetchSuggestions={fetchLotSuggestions}
+              />
+            </SearchFilterField>
           </div>
         </div>
       </div>
@@ -587,16 +577,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 {copy.cancelActionBtn}
               </button>
             )}
-            {selectedId && draftEdit.canEdit && (
-              <button
-                type="button"
-                className="btn erp-btn erp-btn-search"
-                disabled={acting || draftEdit.saving}
-                onClick={() => void handleSaveDraft()}
-              >
-                {draftEdit.saving ? copy.submittingCreate : copy.detailSaveBtn}
-              </button>
-            )}
             {selectedId && canRestore && (
               <button
                 type="button"
@@ -617,15 +597,13 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 {copy.deleteBtn}
               </button>
             )}
-            <button
-              type="button"
-              className="btn erp-btn erp-btn-search"
+            <SaveGridButton
+              label={copy.saveGridBtn}
+              successMessage={copy.saveGridSuccessMsg}
               disabled={!gridLayoutDirty}
-              title={copy.saveGridBtn}
-              onClick={handleSaveGrid}
-            >
-              {copy.saveGridBtn}
-            </button>
+              isDirty={gridLayoutDirty}
+              onSave={handleSaveGrid}
+            />
             <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
               {copy.refreshBtn}
             </button>
@@ -639,28 +617,18 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
         ) : (
           <div
             className="erp-grid-wrap erp-grid-wrap-header"
-            onContextMenu={(event) => {
+            onContextMenu={(event: MouseEvent) => {
               event.preventDefault()
-              setHeaderGridMenu({ x: event.clientX, y: event.clientY })
+              headerGrid.openContextMenu(event)
             }}
           >
             <ResizableGridTable
               layout={headerLayout}
               className="draft-list-table"
-              sortMark={headerSort.sortMark}
-              onHeaderDoubleClick={headerSort.toggleSort}
-              isColumnFilterActive={headerFilters.isActive}
-              onFilterClick={(key, anchor) => {
-                const col = headerColumns.find((c) => c.key === key)
-                setHeaderFilterMenu({
-                  key,
-                  label: col?.label ?? key,
-                  rect: anchor.getBoundingClientRect(),
-                })
-              }}
+              {...headerGrid.tableProps}
             >
               <tbody>
-                {sortedDrafts.map((d, index) => {
+                {headerGrid.displayRows.map((d, index) => {
                   const id = d.inv_receipt_draft_id
                   const isSelected = selectedId === id
                   const isEditingHeader = isListHeaderEditable(id, d)
@@ -676,11 +644,19 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                       }
                       onClick={() => selectDraft(id)}
                       onDoubleClick={(event) => {
+                        event.preventDefault()
                         event.stopPropagation()
+                        window.getSelection()?.removeAllRanges()
                         navigate(`${copy.newPath}?id=${id}`)
                       }}
                     >
-                      {headerLayout.orderedColumns.map((col) => renderHeaderCell(col.key, d, id))}
+                      {headerLayout.orderedColumns.map((col) =>
+                        col.key === 'rownum' ? (
+                          <GridRowNumCell key={col.key} index={index} />
+                        ) : (
+                          renderHeaderCell(col.key, d, id)
+                        )
+                      )}
                     </tr>
                   )
                 })}
@@ -704,6 +680,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
             variant={variant}
             edit={draftEdit}
             onSaved={refreshDetail}
+            onSaveLines={draftEdit.canEdit ? () => void handleSaveDraft() : undefined}
+            saving={draftEdit.saving}
             onLineGridLayout={setLineGridLayoutApi}
             onLineGridLayoutChange={bumpGridLayout}
           />

@@ -6,7 +6,10 @@ import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { balanceColumns } from '../components/erp/masterGridColumns'
 import type { BalanceItem } from '../types/inventory'
+import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import { formatDateTime, formatQty } from '../utils/format'
+import { ColoredItemName } from '../components/ColoredItemText'
+import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { resolveLocationIdFromText, suggestLocations } from '../utils/searchSuggest'
 
 function currentPeriod(): string {
@@ -47,6 +50,57 @@ export function BalancesPage() {
     load()
   }, [load])
 
+  const getFilterValue = useCallback((row: BalanceItem, col: string) => {
+    switch (col) {
+      case 'period':
+        return toFilterCellValue(row.period_year_month)
+      case 'item':
+        return toFilterCellValue(row.item_nm)
+      case 'location':
+        return toFilterCellValue(`${row.location_cd} ${row.location_nm}`)
+      case 'lot':
+        return toFilterCellValue(row.lot)
+      case 'beg_qty':
+        return toFilterCellValue(row.beg_qty)
+      case 'qty':
+        return toFilterCellValue(row.qty)
+      case 'beg_at':
+        return toFilterCellValue(formatDateTime(row.beg_at))
+      default:
+        return toFilterCellValue('')
+    }
+  }, [])
+
+  const grid = useExcelLikeGrid({
+    columns: balanceColumns,
+    rows,
+    getFilterValue,
+    excelExport: {
+      sheetName: 'Balances',
+      filenamePrefix: 'balances',
+      getExportValue: (row, col) => {
+        switch (col) {
+          case 'period':
+            return row.period_year_month
+          case 'item':
+            return row.item_nm
+          case 'location':
+            return `${row.location_cd} ${row.location_nm}`
+          case 'lot':
+            return row.lot
+          case 'beg_qty':
+            return row.beg_qty
+          case 'qty':
+            return row.qty
+          case 'beg_at':
+            return formatDateTime(row.beg_at)
+          default:
+            return ''
+        }
+      },
+    },
+  })
+
   const onFilter = (e: FormEvent) => {
     e.preventDefault()
     load()
@@ -77,6 +131,8 @@ export function BalancesPage() {
 
   return (
     <ErpScreen error={error} success={success}>
+      {grid.filterMenuElement}
+      {grid.contextMenuElement}
       <ErpSearchPanel>
         <form onSubmit={onCreate} className="erp-search-form erp-search-form-suggest">
           <ErpSuggestInput
@@ -144,17 +200,25 @@ export function BalancesPage() {
         loading={loading}
         isEmpty={!loading && rows.length === 0}
         onRefresh={load}
+        onLayoutReady={grid.onLayoutReady}
+        onGridContextMenu={grid.openContextMenu}
+        showSaveGridButton
+        {...grid.tableProps}
       >
         {(layout) => (
           <tbody>
-            {rows.map((r, index) => (
+            {grid.displayRows.map((r, index) => (
               <tr key={r.inv_balance_id} className={erpRowClass(index)}>
                 {layout.orderedColumns.map((col) => {
                   switch (col.key) {
                     case 'period':
                       return <td key={col.key}>{r.period_year_month}</td>
                     case 'item':
-                      return <td key={col.key}>{r.item_nm}</td>
+                      return (
+                        <td key={col.key}>
+                          <ColoredItemName itemId={r.item_id}>{r.item_nm}</ColoredItemName>
+                        </td>
+                      )
                     case 'location':
                       return (
                         <td key={col.key}>

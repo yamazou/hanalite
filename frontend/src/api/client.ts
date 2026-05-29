@@ -31,7 +31,16 @@ import type {
   ProductionOrderDetail,
   ProductionOrderListItem,
   ProductionOrderUpdatePayload,
+  ProductionStatus,
 } from '../types/production'
+
+export type ProductionOrderListFilters = {
+  status?: ProductionStatus
+  date_from?: string
+  date_to?: string
+  item_q?: string
+  lot?: string
+}
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 const API_PREFIX = '/api/v1'
@@ -93,6 +102,8 @@ function normalizeDetail(kind: DraftKind, row: any): DraftDetail {
       inv_receipt_draft_line_id: ln.sls_delivery_draft_line_id,
       line_no: ln.line_no,
       item_id: ln.item_id,
+      item_cd: ln.item_cd,
+      itemtyp_id: ln.itemtyp_id,
       location_id: ln.location_id,
       location_cd: ln.location_cd,
       location_nm: ln.location_nm,
@@ -101,6 +112,19 @@ function normalizeDetail(kind: DraftKind, row: any): DraftDetail {
       qty: ln.qty,
     })),
   }
+}
+
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (!Array.isArray(detail)) return JSON.stringify(detail)
+  const parts: string[] = []
+  for (const entry of detail) {
+    if (!entry || typeof entry !== 'object') continue
+    const loc = 'loc' in entry && Array.isArray(entry.loc) ? entry.loc.join('.') : ''
+    const msg = 'msg' in entry && typeof entry.msg === 'string' ? entry.msg : String(entry)
+    parts.push(loc ? `${loc}: ${msg}` : msg)
+  }
+  return parts.length > 0 ? parts.join('; ') : JSON.stringify(detail)
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -119,7 +143,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     try {
       const body = await res.json()
       if (body.detail) {
-        detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+        detail = formatApiErrorDetail(body.detail)
       }
     } catch {
       /* ignore */
@@ -215,10 +239,22 @@ export const api = {
   listSuppliers: () => request<Supplier[]>('/masters/suppliers'),
 
   listItemtyps: () => request<ItemTyp[]>('/masters/itemtyps'),
-  createItemTyp: (itemtyp_nm: string) =>
+  createItemTyp: (payload: {
+    itemtyp_cd: string
+    itemtyp_nm: string
+    itemtyp_color?: string | null
+  }) =>
     request<ItemTyp>('/masters/itemtyps', {
       method: 'POST',
-      body: JSON.stringify({ itemtyp_nm }),
+      body: JSON.stringify(payload),
+    }),
+  updateItemTyp: (
+    itemtyp_id: number,
+    payload: { itemtyp_cd: string; itemtyp_nm: string; itemtyp_color?: string | null }
+  ) =>
+    request<ItemTyp>(`/masters/itemtyps/${itemtyp_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
   deleteItemTyp: (itemtyp_id: number) =>
     request<void>(`/masters/itemtyps/${itemtyp_id}`, { method: 'DELETE' }),
@@ -229,14 +265,24 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ suppliers_nm }),
     }),
+  updateSupplier: (suppliers_id: number, suppliers_nm: string) =>
+    request<SupplierMaster>(`/masters/suppliers/${suppliers_id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ suppliers_nm }),
+    }),
   deleteSupplier: (suppliers_id: number) =>
     request<void>(`/masters/suppliers/${suppliers_id}`, { method: 'DELETE' }),
 
   listMovetypsMaster: () => request<MoveTypMaster[]>('/masters/movetyps'),
-  createMoveTyp: (movetyps_nm: string) =>
+  createMoveTyp: (payload: { movetyps_cd: string; movetyps_nm?: string | null }) =>
     request<MoveTypMaster>('/masters/movetyps', {
       method: 'POST',
-      body: JSON.stringify({ movetyps_nm }),
+      body: JSON.stringify(payload),
+    }),
+  updateMoveTyp: (movetyps_id: number, payload: { movetyps_cd: string; movetyps_nm?: string | null }) =>
+    request<MoveTypMaster>(`/masters/movetyps/${movetyps_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
   deleteMoveTyp: (movetyps_id: number) =>
     request<void>(`/masters/movetyps/${movetyps_id}`, { method: 'DELETE' }),
@@ -433,10 +479,21 @@ export const api = {
       { method: 'POST' }
     ),
 
-  listProductionOrders: (status?: string) =>
-    request<ProductionOrderListItem[]>(
-      `/production/orders${status ? `?status=${encodeURIComponent(status)}` : ''}`
-    ),
+  listProductionOrders: (filters: ProductionOrderListFilters = {}) => {
+    const params = new URLSearchParams()
+    if (filters.status) params.set('status', filters.status)
+    if (filters.date_from) params.set('date_from', filters.date_from)
+    if (filters.date_to) params.set('date_to', filters.date_to)
+    if (filters.item_q?.trim()) params.set('item_q', filters.item_q.trim())
+    if (filters.lot?.trim()) params.set('lot', filters.lot.trim())
+    const qs = params.toString()
+    return request<ProductionOrderListItem[]>(`/production/orders${qs ? `?${qs}` : ''}`)
+  },
+  suggestProductionLots: (q: string, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (q.trim()) params.set('q', q.trim())
+    return request<string[]>(`/production/orders/suggest-lots?${params}`)
+  },
   getProductionOrder: (order_id: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}`),
   createProductionOrder: (payload: ProductionOrderCreatePayload) =>
@@ -453,6 +510,10 @@ export const api = {
     request<ProductionOrderDetail>(`/production/orders/${order_id}/recalculate-inputs`, {
       method: 'POST',
       body: JSON.stringify({ basis_qty }),
+    }),
+  reloadProductionOrderFromBom: (order_id: number) =>
+    request<ProductionOrderDetail>(`/production/orders/${order_id}/reload-bom`, {
+      method: 'POST',
     }),
   completeProductionOrder: (order_id: number, actual_qty: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}/complete`, {

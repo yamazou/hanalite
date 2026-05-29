@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
@@ -25,6 +26,8 @@ from app.services.production import (
     get_order,
     list_orders,
     recalculate_inputs,
+    reload_order_from_bom,
+    suggest_production_lots,
     update_order,
 )
 from app.services.production_excel_import import (
@@ -43,8 +46,28 @@ def _handle_error(e: ProductionError) -> HTTPException:
 def api_list_orders(
     db: Annotated[Session, Depends(get_db)],
     status: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    item_q: str | None = Query(default=None, max_length=100),
+    lot: str | None = Query(default=None, max_length=50),
 ):
-    return list_orders(db, status=status)
+    return list_orders(
+        db,
+        status=status,
+        date_from=date_from,
+        date_to=date_to,
+        item_q=item_q,
+        lot=lot,
+    )
+
+
+@router.get("/suggest-lots", response_model=list[str])
+def api_suggest_production_lots(
+    db: Annotated[Session, Depends(get_db)],
+    q: str | None = Query(default=None, max_length=50),
+    limit: int = Query(default=20, ge=1, le=50),
+):
+    return suggest_production_lots(db, q, limit=limit)
 
 
 @router.get("/{order_id}", response_model=ProductionOrderRead)
@@ -79,7 +102,7 @@ async def api_import_order_excel(
         raise HTTPException(status_code=400, detail="Empty file.")
     try:
         payload = parse_excel_to_production_create(db, raw)
-        row = create_order(db, payload)
+        row = create_order(db, payload, source_type="excel")
         db.commit()
         return row
     except (ProductionExcelImportError, ProductionError) as e:
@@ -95,6 +118,20 @@ def api_update_order(
 ):
     try:
         row = update_order(db, order_id, payload)
+        db.commit()
+        return row
+    except ProductionError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.post("/{order_id}/reload-bom", response_model=ProductionOrderRead)
+def api_reload_order_from_bom(
+    order_id: int,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        row = reload_order_from_bom(db, order_id)
         db.commit()
         return row
     except ProductionError as e:

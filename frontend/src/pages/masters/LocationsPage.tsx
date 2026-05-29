@@ -1,28 +1,49 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import { ErpGridPanel, erpRowClass } from '../../components/erp/ErpGridPanel'
+import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
-import { ErpSearchPanel } from '../../components/erp/ErpSearchPanel'
-import { masterLocationColumns } from '../../components/erp/masterGridColumns'
+import { GridRowNumCell } from '../../components/GridRowNumCell'
+import { masterLocationEditColumns } from '../../components/erp/masterGridColumns'
+import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import type { LocationMaster } from '../../types/masters'
+import {
+  buildLocationPayload,
+  emptyEditLocationRow,
+  isActiveLocationRow,
+  isBlankLocationRow,
+  listRowsToEditLocationRows,
+  type EditLocationRow,
+} from '../../utils/locationMasterEdit'
+import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
+import { toFilterCellValue } from '../../utils/gridColumnFilter'
+import { mergeLocationImportRows } from '../../utils/locationExcelImport'
+
+const LOCATION_TYPES: LocationMaster['location_type'][] = ['RM', 'Process', 'NG', 'FG']
 
 export function LocationsPage() {
-  const [rows, setRows] = useState<LocationMaster[]>([])
-  const locationTypes: Array<LocationMaster['location_type']> = ['RM', 'Process', 'NG', 'FG']
-  const [editId, setEditId] = useState<number | null>(null)
-  const [locationCd, setLocationCd] = useState('')
-  const [locationNm, setLocationNm] = useState('')
-  const [locationType, setLocationType] = useState<LocationMaster['location_type']>('Process')
+  const [editRows, setEditRows] = useState<EditLocationRow[]>([])
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [rowError, setRowError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      setRows(await api.listLocationsMaster())
+      const rows = await api.listLocationsMaster()
+      setEditRows(
+        ensureTrailingBlankRow(
+          listRowsToEditLocationRows(rows),
+          isBlankLocationRow,
+          () => emptyEditLocationRow()
+        )
+      )
+      setSelectedKeys(new Set())
+      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -31,28 +52,180 @@ export function LocationsPage() {
   }, [])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
-  const onSubmit = async (e: FormEvent) => {
+  useEffect(() => {
+    const valid = new Set(editRows.map((row) => row.key))
+    setSelectedKeys((prev) => {
+      const next = new Set([...prev].filter((key) => valid.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [editRows])
+
+  const getFilterValue = useCallback((row: EditLocationRow, col: string) => {
+    switch (col) {
+      case 'code':
+        return toFilterCellValue(row.location_cd)
+      case 'name':
+        return toFilterCellValue(row.location_nm)
+      case 'type':
+        return toFilterCellValue(row.location_type)
+      default:
+        return toFilterCellValue('')
+    }
+  }, [])
+
+  const exportValue = useCallback((row: EditLocationRow, col: string) => {
+    switch (col) {
+      case 'code':
+        return row.location_cd
+      case 'name':
+        return row.location_nm
+      case 'type':
+        return row.location_type
+      default:
+        return ''
+    }
+  }, [])
+
+  const deleteRowsRef = useRef<() => void>(() => {})
+
+  const grid = useExcelLikeGrid({
+    columns: masterLocationEditColumns,
+    rows: editRows,
+    getFilterValue,
+    excelExport: {
+      sheetName: 'Locations',
+      filenamePrefix: 'locations',
+      getExportValue: exportValue,
+    },
+    excelImport: {
+      applyParsedRows: async (parsed) => {
+        const { rows, updated, added } = mergeLocationImportRows(parsed, editRows)
+        setEditRows(
+          ensureTrailingBlankRow(rows, isBlankLocationRow, () => emptyEditLocationRow())
+        )
+        if (updated + added > 0) {
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+        } else {
+          setSuccess('No rows were imported from the file.')
+        }
+      },
+    },
+    rowDelete: {
+      label: 'Delete row',
+      getSelectedCount: () => selectedKeys.size,
+      onDelete: () => deleteRowsRef.current(),
+    },
+  })
+
+  const updateRow = (key: string, patch: Partial<EditLocationRow>) => {
+    setEditRows((rows) =>
+      updateRowWithTrailingBlank(rows, key, patch, isBlankLocationRow, () =>
+        emptyEditLocationRow()
+      )
+    )
+  }
+
+  const focusCodeCell = (rowKey: string) => {
+    requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>(`[data-loc-grid-cell="${rowKey}:code"]`)
+        ?.focus()
+    })
+  }
+
+  const commitSentinelRowOnEnter = (row: EditLocationRow) => {
+    if (editRows[editRows.length - 1]?.key !== row.key) return
+    if (isBlankLocationRow(row)) return
+    const newBlank = emptyEditLocationRow()
+    setEditRows((rows) =>
+      ensureTrailingBlankRow(rows, isBlankLocationRow, () => newBlank)
+    )
+    focusCodeCell(newBlank.key)
+  }
+
+  const handleCellKeyDown = (e: React.KeyboardEvent, row: EditLocationRow) => {
+    if (e.key !== 'Enter') return
     e.preventDefault()
-    const cd = locationCd.trim()
-    const nm = locationNm.trim()
-    if (!cd || !nm) return
+    if (editRows[editRows.length - 1]?.key !== row.key) return
+    commitSentinelRowOnEnter(row)
+  }
+
+  const deleteSelected = async () => {
+    if (selectedKeys.size === 0) return
+    if (!confirm('Delete selected location(s)?')) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     try {
-      if (editId) {
-        await api.updateLocation(editId, cd, nm, locationType)
-      } else {
-        await api.createLocation(cd, nm, locationType)
+      const selected = editRows.filter((row) => selectedKeys.has(row.key))
+      const toDelete = selected.filter((row) => row.location_id != null)
+      const toDrop = new Set(selected.map((row) => row.key))
+      for (const row of toDelete) {
+        await api.deleteLocation(row.location_id!)
       }
-      setEditId(null)
-      setLocationCd('')
-      setLocationNm('')
-      setLocationType('Process')
-      setSuccess('Saved.')
+      setEditRows((rows) =>
+        ensureTrailingBlankRow(
+          rows.filter((row) => !toDrop.has(row.key)),
+          isBlankLocationRow,
+          () => emptyEditLocationRow()
+        )
+      )
+      setSelectedKeys(new Set())
+      setSuccess(toDelete.length > 0 ? 'Location(s) deleted.' : 'Row(s) removed.')
+      if (toDelete.length > 0) await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  deleteRowsRef.current = () => void deleteSelected()
+
+  const handleSave = async () => {
+    const active = editRows.filter(isActiveLocationRow)
+    const incomplete = editRows.filter(
+      (row) => !isBlankLocationRow(row) && !isActiveLocationRow(row)
+    )
+    if (incomplete.length > 0) {
+      setRowError('Enter Code, Name, and Type for each row, or clear empty rows.')
+      return
+    }
+    if (active.length === 0) {
+      setRowError('Add at least one location row.')
+      return
+    }
+    const codes = active.map((row) => row.location_cd.trim().toLowerCase())
+    if (new Set(codes).size !== codes.length) {
+      setRowError('Duplicate location codes in the grid.')
+      return
+    }
+
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    setRowError(null)
+    try {
+      for (const row of active) {
+        const payload = buildLocationPayload(row)
+        if (row.location_id != null) {
+          await api.updateLocation(
+            row.location_id,
+            payload.location_cd,
+            payload.location_nm,
+            payload.location_type
+          )
+        } else {
+          await api.createLocation(
+            payload.location_cd,
+            payload.location_nm,
+            payload.location_type
+          )
+        }
+      }
+      setSuccess('Locations saved.')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -61,152 +234,131 @@ export function LocationsPage() {
     }
   }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('Delete?')) return
-    setError(null)
-    setSuccess(null)
-    try {
-      await api.deleteLocation(id)
-      if (editId === id) {
-        setEditId(null)
-        setLocationCd('')
-        setLocationNm('')
-        setLocationType('Process')
-      }
-      setSuccess('Deleted.')
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete')
-    }
-  }
-
-  const startEdit = (row: LocationMaster) => {
-    setEditId(row.location_id)
-    setLocationCd(row.location_cd)
-    setLocationNm(row.location_nm)
-    setLocationType(row.location_type)
-    setError(null)
-    setSuccess(null)
-  }
-
-  const cancelEdit = () => {
-    setEditId(null)
-    setLocationCd('')
-    setLocationNm('')
-    setLocationType('Process')
-  }
-
   return (
     <ErpScreen error={error} success={success}>
-      <ErpSearchPanel>
-        <form onSubmit={onSubmit} className="erp-search-form">
-          <label className="erp-search-field erp-search-field-grow">
-            <input
-              className="erp-input"
-              value={locationCd}
-              onChange={(e) => setLocationCd(e.target.value)}
-              placeholder="Location Code"
-              aria-label="Location Code"
-              required
-            />
-          </label>
-          <label className="erp-search-field erp-search-field-grow">
-            <input
-              className="erp-input"
-              value={locationNm}
-              onChange={(e) => setLocationNm(e.target.value)}
-              placeholder="Location Name"
-              aria-label="Location Name"
-              required
-            />
-          </label>
-          <label className="erp-search-field">
-            <select
-              className="erp-input"
-              value={locationType}
-              onChange={(e) => setLocationType(e.target.value as LocationMaster['location_type'])}
-              aria-label="Location Type"
-              required
-            >
-              {locationTypes.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="erp-search-actions">
-            <button type="submit" className="btn erp-btn erp-btn-search" disabled={submitting}>
-              {submitting ? 'Saving…' : editId ? 'Update' : 'Save'}
-            </button>
-            {editId && (
-              <button type="button" className="btn erp-btn erp-btn-clear" onClick={cancelEdit}>
-                Cancel
-              </button>
-            )}
-          </div>
-        </form>
-      </ErpSearchPanel>
-
+      {grid.filterMenuElement}
+      {grid.contextMenuElement}
       <ErpGridPanel
-        gridId="masters-locations-v1"
+        gridId="masters-locations-edit-v1"
         title="Locations"
-        columns={masterLocationColumns}
+        columns={masterLocationEditColumns}
         loading={loading}
-        isEmpty={!loading && rows.length === 0}
-        onRefresh={load}
+        isEmpty={false}
+        onRefresh={() => void load()}
+        toolbarLeft={
+          <MasterGridToolbar
+            displayRowCount={grid.displayRows.length}
+            submitting={submitting}
+            rowError={rowError}
+            onSelectAll={() =>
+              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
+            }
+            onClearSelection={() => setSelectedKeys(new Set())}
+            onSave={() => void handleSave()}
+          />
+        }
+        showSaveGridButton
+        panelClassName="erp-panel-grow"
+        onLayoutReady={grid.onLayoutReady}
+        onGridContextMenu={grid.openContextMenu}
+        layoutOptions={{ pinFirst: ['rownum', 'select'] }}
+        rowCount={grid.displayRows.length}
+        {...grid.tableProps}
       >
         {(layout) => (
           <tbody>
-            {rows.map((row, index) => (
-              <tr
-                key={row.location_id}
-                className={erpRowClass(index, editId === row.location_id)}
-                onClick={() => startEdit(row)}
-              >
-                {layout.orderedColumns.map((col) => {
-                  switch (col.key) {
-                    case 'id':
-                      return <td key={col.key}>{row.location_id}</td>
-                    case 'code':
-                      return (
-                        <td key={col.key}>
-                          <code>{row.location_cd}</code>
-                        </td>
-                      )
-                    case 'name':
-                      return <td key={col.key}>{row.location_nm}</td>
-                    case 'type':
-                      return <td key={col.key}>{row.location_type}</td>
-                    case 'actions':
-                      return (
-                        <td
-                          key={col.key}
-                          className="erp-col-actions"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="btn erp-btn erp-btn-search"
-                            onClick={() => startEdit(row)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn erp-btn erp-btn-cancel"
-                            onClick={() => handleDelete(row.location_id)}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      )
-                    default:
-                      return <td key={col.key} />
-                  }
-                })}
-              </tr>
-            ))}
+            {grid.displayRows.map((row, index) => {
+              const isSentinel = isBlankLocationRow(row)
+              return (
+                <tr
+                  key={row.key}
+                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
+                    selectedKeys.has(row.key) ? ' selected' : ''
+                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                >
+                  {layout.orderedColumns.map((col) => {
+                    switch (col.key) {
+                      case 'rownum':
+                        return <GridRowNumCell key={col.key} index={index} />
+                      case 'select':
+                        return (
+                          <td key={col.key} className="erp-col-check">
+                            <input
+                              type="checkbox"
+                              checked={selectedKeys.has(row.key)}
+                              aria-label={`Select ${row.location_cd || 'row'}`}
+                              onChange={(e) => {
+                                setSelectedKeys((prev) => {
+                                  const next = new Set(prev)
+                                  if (e.target.checked) next.add(row.key)
+                                  else next.delete(row.key)
+                                  return next
+                                })
+                              }}
+                            />
+                          </td>
+                        )
+                      case 'code':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <input
+                              className="erp-grid-input"
+                              value={row.location_cd}
+                              placeholder={isSentinel ? '' : 'Location Code'}
+                              data-loc-grid-cell={`${row.key}:code`}
+                              onChange={(e) =>
+                                updateRow(row.key, { location_cd: e.target.value })
+                              }
+                              onKeyDown={(e) => handleCellKeyDown(e, row)}
+                            />
+                          </td>
+                        )
+                      case 'name':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <input
+                              className="erp-grid-input"
+                              value={row.location_nm}
+                              placeholder={isSentinel ? '' : 'Location Name'}
+                              data-loc-grid-cell={`${row.key}:name`}
+                              onChange={(e) =>
+                                updateRow(row.key, { location_nm: e.target.value })
+                              }
+                              onKeyDown={(e) => handleCellKeyDown(e, row)}
+                            />
+                          </td>
+                        )
+                      case 'type':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <select
+                              className={`erp-grid-input${row.location_type === '' ? ' erp-input-empty' : ''}`}
+                              value={row.location_type}
+                              data-loc-grid-cell={`${row.key}:type`}
+                              onChange={(e) =>
+                                updateRow(row.key, {
+                                  location_type: e.target
+                                    .value as LocationMaster['location_type'],
+                                })
+                              }
+                              onKeyDown={(e) => handleCellKeyDown(e, row)}
+                            >
+                              <option value="" />
+                              {LOCATION_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {type}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )
+                      default:
+                        return <td key={col.key} />
+                    }
+                  })}
+                </tr>
+              )
+            })}
           </tbody>
         )}
       </ErpGridPanel>

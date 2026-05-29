@@ -1,6 +1,8 @@
-export type ProductionStatus = 'registered' | 'approved' | 'cancelled'
+export type ProductionStatus = 'registered' | 'approved' | 'started' | 'completed' | 'cancelled'
 
 export type ProductionLineStatus = 'planned' | 'completed'
+
+export type ProductionSourceType = 'manual' | 'excel'
 
 
 
@@ -14,7 +16,13 @@ export interface ProductionOrderLine {
 
   process_nm: string
 
+  output_item_id: number | null
+
   output_item_cd: string | null
+
+  output_item_nm: string | null
+
+  planned_qty: string | number | null
 
   rm_location_id: number
 
@@ -49,6 +57,12 @@ export interface ProductionOrderInput {
   item_cd: string
 
   item_nm: string
+
+  from_location_id: number | null
+
+  from_location_cd: string | null
+
+  from_location_nm: string | null
 
   req_qty: string | number
 
@@ -97,6 +111,8 @@ export interface ProductionOrderListItem {
   production_date: string
 
   reference_no: string | null
+
+  source_type: ProductionSourceType
 
   parent_item_id: number
 
@@ -158,20 +174,24 @@ export interface ProductionOrderCreatePayload {
 
 
 
-export interface ProductionOrderInputWritePayload {
-
-  prd_order_input_id?: number
-
-  item_id: number
-
-  req_qty: number
-
-  consume_qty: number
-
-  lot?: string | null
-
+export interface ProductionOrderLineWritePayload {
+  prd_order_line_id?: number
   line_no?: number
+  rm_location_id: number
+  wip_location_id: number
+  output_item_id: number
+  planned_qty: number
+  actual_qty?: number | null
+}
 
+export interface ProductionOrderInputWritePayload {
+  prd_order_input_id?: number
+  item_id: number
+  from_location_id: number
+  req_qty: number
+  consume_qty: number
+  lot?: string | null
+  line_no?: number
 }
 
 
@@ -191,6 +211,8 @@ export interface ProductionOrderUpdatePayload {
   notes?: string | null
 
   status?: ProductionStatus
+
+  lines?: ProductionOrderLineWritePayload[]
 
   inputs?: ProductionOrderInputWritePayload[]
 

@@ -20,6 +20,9 @@ export type DraftPageCopy = {
   entryReadOnlyMsg: string
   saveSuccessMsg: string
   detailSaveBtn: string
+  /** Receipt List: save lines only (header edited on Entry). */
+  detailSaveLinesBtn: string
+  listLinesEditHint: string
   searchPanelTitle: string
   headerGridTitle: string
   dateColumn: string
@@ -150,6 +153,9 @@ const receiptCopy: DraftPageCopy = {
   entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
   saveSuccessMsg: 'Saved.',
   detailSaveBtn: 'Save Data',
+  detailSaveLinesBtn: 'Save lines',
+  listLinesEditHint:
+    'Edit lines below, then Save. Double-click a row above to change receipt date, supplier, reference, or notes.',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Receipt Date',
@@ -157,7 +163,7 @@ const receiptCopy: DraftPageCopy = {
   createDesc: 'Enter header and rows, then save as Registered.',
   backToList: '← Back to list',
   dateTimeLabel: 'Receipt Date',
-  referenceLabel: 'Reference No. (PO / delivery note)',
+  referenceLabel: 'Reference No. (Receipt Note)',
   referencePlaceholder: 'PO-2026-001',
   supplierLabel: 'Supplier',
   notesLabel: 'Notes',
@@ -204,7 +210,8 @@ const receiptCopy: DraftPageCopy = {
   headerTitle: 'Header',
   linesReviewTitle: 'Rows (review)',
   noLinesMsg: 'No lines yet. Click Add row to enter a line.',
-  nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
+  nextStepHint:
+    'Save lines, then Approve to post to inventory. Double-click a row in the list to change header fields on Entry.',
   approveFail: 'Approval failed',
   cancelFail: 'Cancel failed',
   restoreBtn: 'Restore',
@@ -245,7 +252,7 @@ const receiptCopy: DraftPageCopy = {
   noDataText: 'No data',
   sourceCol: 'Source',
   statusCol: 'Status',
-  referenceCol: 'Reference',
+  referenceCol: 'Reference No.',
   supplierCol: 'Supplier',
   linesCol: 'Rows',
   createdCol: 'Created',
@@ -279,6 +286,9 @@ const deliveryCopy: DraftPageCopy = {
   entryReadOnlyMsg: 'This draft cannot be edited (not Registered).',
   saveSuccessMsg: 'Saved.',
   detailSaveBtn: 'Save Data',
+  detailSaveLinesBtn: 'Save lines',
+  listLinesEditHint:
+    'Edit lines below, then Save. Double-click a row above to change delivery date, customer, reference, or notes.',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Delivery Date',
@@ -286,9 +296,9 @@ const deliveryCopy: DraftPageCopy = {
   createDesc: 'Enter header and rows, then save as Registered.',
   backToList: '← Back to list',
   dateTimeLabel: 'Delivery Date',
-  referenceLabel: 'Reference No. (PO / delivery note)',
+  referenceLabel: 'Reference No. (Delivery Note)',
   referencePlaceholder: 'DN-2026-001',
-  supplierLabel: 'Supplier',
+  supplierLabel: 'Customer',
   notesLabel: 'Notes',
   linesTitle: 'Rows',
   itemLabel: 'Item',
@@ -331,7 +341,8 @@ const deliveryCopy: DraftPageCopy = {
   headerTitle: 'Header',
   linesReviewTitle: 'Rows (review)',
   noLinesMsg: 'No lines yet. Click Add row to enter a line.',
-  nextStepHint: 'Next: review lines, then click Approve to post to inventory.',
+  nextStepHint:
+    'Save header and lines on Delivery Entry, then Approve to post to inventory.',
   approveFail: 'Approval failed',
   cancelFail: 'Cancel failed',
   restoreBtn: 'Restore',
@@ -372,8 +383,8 @@ const deliveryCopy: DraftPageCopy = {
   noDataText: 'No data',
   sourceCol: 'Source',
   statusCol: 'Status',
-  referenceCol: 'Reference',
-  supplierCol: 'Supplier',
+  referenceCol: 'Reference No.',
+  supplierCol: 'Customer',
   linesCol: 'Rows',
   createdCol: 'Created',
   idCol: 'ID',

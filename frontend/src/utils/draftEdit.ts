@@ -4,6 +4,17 @@ import { parseDateInputValue } from './format'
 export const APPROVE_ITEM_CD_REQUIRED_MSG =
   'Please enter the item code. This code will be used to generate the master.'
 
+export function isBlankDraftLine(row: EditLineRow): boolean {
+  return (
+    row.item_id === '' &&
+    !row.item_cd.trim() &&
+    !row.item_nm.trim() &&
+    row.location_id === '' &&
+    !row.lot.trim() &&
+    !row.qty.trim()
+  )
+}
+
 export function isActiveEditLine(row: EditLineRow): boolean {
   return (
     (row.item_id !== '' || Boolean(row.item_cd.trim()) || Boolean(row.item_nm.trim())) &&
@@ -15,6 +26,46 @@ export function isActiveEditLine(row: EditLineRow): boolean {
 
 export function activeEditLines(rows: EditLineRow[]): EditLineRow[] {
   return rows.filter(isActiveEditLine)
+}
+
+/** First validation problem on partially filled lines, or null if save can proceed. */
+export function draftLinesSaveError(rows: EditLineRow[], fallback: string): string | null {
+  const active = activeEditLines(rows)
+  if (active.length > 0) {
+    for (const row of active) {
+      const qtyNum = Number(row.qty)
+      if (!row.qty.trim() || Number.isNaN(qtyNum)) {
+        return `Line ${row.line_no}: enter a valid quantity.`
+      }
+      if (qtyNum <= 0) {
+        return `Line ${row.line_no}: quantity must be greater than zero.`
+      }
+    }
+    return null
+  }
+
+  const partial = rows.filter((r) => !isBlankDraftLine(r) && !isActiveEditLine(r))
+  if (partial.length > 0) {
+    const row = partial[0]
+    if (row.item_id === '' && !row.item_cd.trim() && !row.item_nm.trim()) {
+      return `Line ${row.line_no}: enter item code or name.`
+    }
+    if (row.location_id === '') {
+      return `Line ${row.line_no}: select a location.`
+    }
+    if (!row.lot.trim()) {
+      return `Line ${row.line_no}: enter a lot.`
+    }
+    const qtyNum = Number(row.qty)
+    if (!row.qty.trim() || Number.isNaN(qtyNum)) {
+      return `Line ${row.line_no}: enter a valid quantity.`
+    }
+    if (qtyNum <= 0) {
+      return `Line ${row.line_no}: quantity must be greater than zero.`
+    }
+  }
+
+  return fallback
 }
 
 export function findLineMissingItemCd(rows: EditLineRow[]): EditLineRow | undefined {
@@ -41,23 +92,33 @@ export function findItemByNm(items: Item[], nm: string): Item | undefined {
 export function itemCdFieldPatch(
   items: Item[],
   value: string
-): Pick<EditLineRow, 'item_id' | 'item_cd' | 'item_nm'> {
-  const match = findItemByCd(items, value)
+): Pick<EditLineRow, 'item_id' | 'itemtyp_id' | 'item_cd' | 'item_nm'> {
+  const match = findItemByCd(items, value.trim())
   if (match) {
-    return { item_id: match.item_id, item_cd: match.item_cd, item_nm: match.item_nm }
+    return {
+      item_id: match.item_id,
+      itemtyp_id: match.itemtyp_id,
+      item_cd: match.item_cd,
+      item_nm: match.item_nm,
+    }
   }
-  return { item_id: '', item_cd: value }
+  return { item_id: '', itemtyp_id: '', item_cd: value.trim() }
 }
 
 export function itemNmFieldPatch(
   items: Item[],
   value: string
-): Pick<EditLineRow, 'item_id' | 'item_cd' | 'item_nm'> {
+): Pick<EditLineRow, 'item_id' | 'itemtyp_id' | 'item_cd' | 'item_nm'> {
   const match = findItemByNm(items, value)
   if (match) {
-    return { item_id: match.item_id, item_cd: match.item_cd, item_nm: match.item_nm }
+    return {
+      item_id: match.item_id,
+      itemtyp_id: match.itemtyp_id,
+      item_cd: match.item_cd,
+      item_nm: match.item_nm,
+    }
   }
-  return { item_id: '', item_nm: value }
+  return { item_id: '', itemtyp_id: '', item_nm: value }
 }
 
 export type HeaderEdit = {
@@ -71,6 +132,7 @@ export type EditLineRow = {
   key: string
   inv_receipt_draft_line_id?: number
   item_id: number | ''
+  itemtyp_id: number | ''
   item_cd: string
   item_nm: string
   location_id: number | ''
@@ -83,6 +145,7 @@ export function emptyEditLine(lineNo: number): EditLineRow {
   return {
     key: crypto.randomUUID(),
     item_id: '',
+    itemtyp_id: '',
     item_cd: '',
     item_nm: '',
     location_id: '',
@@ -99,6 +162,7 @@ export function lineToEditRow(ln: DraftLine): EditLineRow {
     key: `line-${ln.inv_receipt_draft_line_id}`,
     inv_receipt_draft_line_id: ln.inv_receipt_draft_line_id,
     item_id: ln.item_id ?? '',
+    itemtyp_id: ln.itemtyp_id ?? '',
     item_cd: itemCd,
     item_nm: itemNm,
     location_id: ln.location_id ?? '',

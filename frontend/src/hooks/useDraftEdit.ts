@@ -7,17 +7,30 @@ import {
   type EditLineRow,
   type HeaderEdit,
   activeEditLines,
+  draftLinesSaveError,
   emptyEditLine,
+  findItemByCd,
+  findItemByNm,
   headerEditFromDraft,
+  isBlankDraftLine,
   lineToEditRow,
 } from '../utils/draftEdit'
+import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
+import { mergeDraftLineImportRows } from '../utils/draftLineExcelImport'
 import { dateInputToIso } from '../utils/format'
+
+type UseDraftEditOptions = {
+  /** Receipt List: do not track or patch header fields in the list UI. */
+  listLinesOnly?: boolean
+}
 
 export function useDraftEdit(
   draftId: number | null,
   variant: DraftVariant,
-  refreshToken: number
+  refreshToken: number,
+  options?: UseDraftEditOptions
 ) {
+  const listLinesOnly = options?.listLinesOnly === true
   const [draft, setDraft] = useState<DraftDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,8 +60,14 @@ export function useDraftEdit(
       const data = await api.getDraft(draftId, variant)
       setDraft(data)
       if (data.status === 'registered') {
-        setHeaderEdit(headerEditFromDraft(data))
-        setEditLines(data.lines.map(lineToEditRow))
+        setHeaderEdit(listLinesOnly ? null : headerEditFromDraft(data))
+        setEditLines(
+          ensureTrailingBlankRow(
+            data.lines.map(lineToEditRow),
+            isBlankDraftLine,
+            (rows) => emptyEditLine(rows.length + 1)
+          )
+        )
       } else {
         setHeaderEdit(null)
         setEditLines([])
@@ -62,7 +81,7 @@ export function useDraftEdit(
     } finally {
       setLoading(false)
     }
-  }, [draftId, variant])
+  }, [draftId, variant, listLinesOnly])
 
   useEffect(() => {
     void load()
@@ -71,12 +90,19 @@ export function useDraftEdit(
   useEffect(() => {
     if (!canEdit) return
     Promise.all([
-      api.listItems(),
+      api.listItemsMaster(),
       api.listSuppliers(),
       api.listLocationsMaster(),
     ])
       .then(([i, s, l]) => {
-        setItems(i)
+        setItems(
+          i.map((row) => ({
+            item_id: row.item_id,
+            item_cd: row.item_cd,
+            item_nm: row.item_nm,
+            itemtyp_id: row.itemtyp_id,
+          }))
+        )
         setSuppliers(s)
         setLocations(l)
       })
@@ -87,30 +113,82 @@ export function useDraftEdit(
       })
   }, [canEdit])
 
+  useEffect(() => {
+    if (!canEdit || items.length === 0 || editLines.length === 0) return
+    setEditLines((prev) => {
+      let changed = false
+      const next = prev.map((row) => {
+        if (row.itemtyp_id !== '') return row
+        const item =
+          findItemByCd(items, row.item_cd) ?? findItemByNm(items, row.item_nm)
+        if (!item) return row
+        changed = true
+        return {
+          ...row,
+          item_id: row.item_id === '' ? item.item_id : row.item_id,
+          itemtyp_id: item.itemtyp_id,
+          item_cd: row.item_cd.trim() ? row.item_cd : item.item_cd,
+          item_nm: row.item_nm.trim() ? row.item_nm : item.item_nm,
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [canEdit, items, draft?.inv_receipt_draft_id])
+
   const patchHeader = (patch: Partial<HeaderEdit>) => {
+    if (listLinesOnly) return
     setHeaderEdit((prev) => (prev ? { ...prev, ...patch } : prev))
   }
 
   const updateLine = (key: string, patch: Partial<EditLineRow>) => {
-    setEditLines((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  }
-
-  const addRow = () => {
     setRowError(null)
-    setEditLines((prev) => [...prev, emptyEditLine(prev.length + 1)])
+    setEditLines((prev) =>
+      updateRowWithTrailingBlank(
+        prev,
+        key,
+        patch,
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      ).map((row, index) => ({ ...row, line_no: index + 1 }))
+    )
   }
 
   const removeRows = (keys: string[]) => {
     if (keys.length === 0) return
     const drop = new Set(keys)
     setEditLines((prev) =>
-      prev.filter((row) => !drop.has(row.key)).map((row, index) => ({ ...row, line_no: index + 1 }))
+      ensureTrailingBlankRow(
+        prev
+          .filter((row) => !drop.has(row.key))
+          .map((row, index) => ({ ...row, line_no: index + 1 })),
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      )
     )
     setRowError(null)
   }
 
   const removeRow = (key: string) => {
     removeRows([key])
+  }
+
+  const importLines = (parsed: Record<string, string>[]) => {
+    setRowError(null)
+    let added = 0
+    setEditLines((prev) => {
+      const result = mergeDraftLineImportRows(parsed, prev, items, locations)
+      added = result.added
+      return ensureTrailingBlankRow(
+        result.rows.map((row, index) => ({ ...row, line_no: index + 1 })),
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      )
+    })
+    setMessage(
+      added > 0
+        ? `Imported ${added} line(s) from Excel. Review and save.`
+        : 'No lines were added from the file.'
+    )
   }
 
   const buildPayloadLines = () => {
@@ -128,33 +206,53 @@ export function useDraftEdit(
     }))
   }
 
-  const save = async () => {
-    if (!draft || !canEdit || !headerEdit) return false
+  type SaveDraftOptions = {
+    /** Keep header from loaded draft; update lines only (Receipt List policy). */
+    linesOnly?: boolean
+  }
+
+  const save = async (options?: SaveDraftOptions) => {
+    if (!draft || !canEdit) return false
+    const headerForSave =
+      options?.linesOnly ? headerEditFromDraft(draft) : headerEdit
+    if (!headerForSave) return false
     setError(null)
     setMessage(null)
     setRowError(null)
-    const payloadLines = buildPayloadLines()
-    if (payloadLines.length === 0) {
-      setRowError('line_validation')
+    const lineError = draftLinesSaveError(
+      editLines,
+      'Enter at least one line with item code or name, location, lot, and quantity.'
+    )
+    if (lineError) {
+      setRowError(lineError)
       return false
     }
+    const payloadLines = buildPayloadLines()
     setSaving(true)
     try {
       const updated = await api.updateDraft(
         draft.inv_receipt_draft_id,
         {
-          receipt_at: dateInputToIso(headerEdit.receiptAt),
-          suppliers_id: headerEdit.suppliersId === '' ? null : headerEdit.suppliersId,
-          reference_no: headerEdit.referenceNo.trim() || null,
-          notes: headerEdit.notes.trim() || null,
+          receipt_at: dateInputToIso(headerForSave.receiptAt),
+          suppliers_id: headerForSave.suppliersId === '' ? null : headerForSave.suppliersId,
+          reference_no: headerForSave.referenceNo.trim() || null,
+          notes: headerForSave.notes.trim() || null,
           lines: payloadLines,
         },
         variant
       )
       setDraft(updated)
       if (updated.status === 'registered') {
-        setHeaderEdit(headerEditFromDraft(updated))
-        setEditLines(updated.lines.map(lineToEditRow))
+        if (!listLinesOnly) {
+          setHeaderEdit(headerEditFromDraft(updated))
+        }
+        setEditLines(
+          ensureTrailingBlankRow(
+            updated.lines.map(lineToEditRow),
+            isBlankDraftLine,
+            (rows) => emptyEditLine(rows.length + 1)
+          )
+        )
       }
       setMessage('Saved.')
       return true
@@ -178,9 +276,9 @@ export function useDraftEdit(
     patchHeader,
     editLines,
     updateLine,
-    addRow,
     removeRow,
     removeRows,
+    importLines,
     items,
     suppliers,
     locations,

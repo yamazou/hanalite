@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS prd_orders (
   status VARCHAR(20) NOT NULL DEFAULT 'registered',
   production_date DATE NOT NULL,
   reference_no VARCHAR(100) NULL,
+  source_type ENUM('manual', 'excel') NOT NULL DEFAULT 'manual',
   parent_item_id INT UNSIGNED NOT NULL,
   planned_qty DECIMAL(15, 3) NOT NULL,
   actual_qty DECIMAL(15, 3) NULL,
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS prd_order_lines (
   line_no INT NOT NULL DEFAULT 1,
   rm_location_id INT UNSIGNED NOT NULL,
   wip_location_id INT UNSIGNED NOT NULL,
+  output_item_id INT UNSIGNED NULL,
+  planned_qty DECIMAL(15, 3) NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'planned',
   actual_qty DECIMAL(15, 3) NULL,
   completed_at DATETIME NULL DEFAULT NULL,
@@ -40,9 +43,11 @@ CREATE TABLE IF NOT EXISTS prd_order_lines (
   deleted_at DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (prd_order_line_id),
   KEY idx_prd_order_lines_order (production_order_id),
+  KEY idx_prd_order_lines_output_item (output_item_id),
   CONSTRAINT fk_prd_order_lines_order FOREIGN KEY (production_order_id) REFERENCES prd_orders (production_order_id),
   CONSTRAINT fk_prd_order_lines_rm_loc FOREIGN KEY (rm_location_id) REFERENCES m_locations (location_id),
-  CONSTRAINT fk_prd_order_lines_wip_loc FOREIGN KEY (wip_location_id) REFERENCES m_locations (location_id)
+  CONSTRAINT fk_prd_order_lines_wip_loc FOREIGN KEY (wip_location_id) REFERENCES m_locations (location_id),
+  CONSTRAINT fk_prd_order_lines_output_item FOREIGN KEY (output_item_id) REFERENCES m_items (item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prd_order_inputs (
@@ -50,6 +55,7 @@ CREATE TABLE IF NOT EXISTS prd_order_inputs (
   production_order_id INT UNSIGNED NOT NULL,
   line_no INT NOT NULL DEFAULT 1,
   item_id INT UNSIGNED NOT NULL,
+  from_location_id INT UNSIGNED NULL,
   req_qty DECIMAL(15, 3) NOT NULL,
   consume_qty DECIMAL(15, 3) NOT NULL,
   lot VARCHAR(50) NULL,
@@ -58,8 +64,10 @@ CREATE TABLE IF NOT EXISTS prd_order_inputs (
   deleted_at DATETIME NULL DEFAULT NULL,
   PRIMARY KEY (prd_order_input_id),
   KEY idx_prd_order_inputs_order (production_order_id),
+  KEY idx_prd_order_inputs_from_loc (from_location_id),
   CONSTRAINT fk_prd_order_inputs_order FOREIGN KEY (production_order_id) REFERENCES prd_orders (production_order_id),
-  CONSTRAINT fk_prd_order_inputs_item FOREIGN KEY (item_id) REFERENCES m_items (item_id)
+  CONSTRAINT fk_prd_order_inputs_item FOREIGN KEY (item_id) REFERENCES m_items (item_id),
+  CONSTRAINT fk_prd_order_inputs_from_loc FOREIGN KEY (from_location_id) REFERENCES m_locations (location_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS prd_order_outputs (

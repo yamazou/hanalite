@@ -21,3 +21,8 @@ export function parseAppRoute(to: string): AppRouteTarget {
     search: withoutHash.slice(qIdx),
   }
 }
+
+/** Full in-app route for navigation (pathname + query). */
+export function formatAppRoute(pathname: string, search = ''): string {
+  return pathname + search
+}

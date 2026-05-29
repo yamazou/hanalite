@@ -1,6 +1,5 @@
 import type { GridColumnDef } from '../components/ResizableGridTable'
-
-const GRID_MIN_COL_WIDTH = 16
+import { GRID_ABS_MIN_COL_WIDTH } from './gridColumnWidth'
 
 export type StoredGridLayout = {
   order: string[]
@@ -41,8 +40,9 @@ export function mergeColumnWidths(
 ): Record<string, number> {
   const result: Record<string, number> = {}
   columns.forEach((col, index) => {
-    const min = minWidths[index] ?? GRID_MIN_COL_WIDTH
-    const raw = saved?.[col.key] ?? col.defaultWidth
+    const min = minWidths[index] ?? GRID_ABS_MIN_COL_WIDTH
+    const raw =
+      col.key === 'rownum' ? col.defaultWidth : (saved?.[col.key] ?? col.defaultWidth)
     result[col.key] = Math.max(min, raw)
   })
   return result
@@ -66,7 +66,7 @@ export function loadGridLayout(
       parsed.forEach((width, index) => {
         const key = keys[index]
         if (!key) return
-        const min = minWidths[index] ?? GRID_MIN_COL_WIDTH
+        const min = minWidths[index] ?? GRID_ABS_MIN_COL_WIDTH
         widths[key] = Math.max(min, width ?? columns[index].defaultWidth)
       })
       return { order: defaultOrder, widths }
@@ -80,8 +80,14 @@ export function loadGridLayout(
   }
 }
 
+const AUTO_WIDTH_KEYS = new Set(['rownum'])
+
 export function persistGridLayout(storageKey: string, layout: StoredGridLayout): void {
-  localStorage.setItem(storageKey, JSON.stringify(layout))
+  const widths = { ...layout.widths }
+  for (const key of AUTO_WIDTH_KEYS) {
+    delete widths[key]
+  }
+  localStorage.setItem(storageKey, JSON.stringify({ order: layout.order, widths }))
 }
 
 export function layoutsEqual(a: StoredGridLayout, b: StoredGridLayout): boolean {
@@ -91,6 +97,7 @@ export function layoutsEqual(a: StoredGridLayout, b: StoredGridLayout): boolean 
   }
   const keys = new Set([...Object.keys(a.widths), ...Object.keys(b.widths)])
   for (const key of keys) {
+    if (AUTO_WIDTH_KEYS.has(key)) continue
     if (a.widths[key] !== b.widths[key]) return false
   }
   return true

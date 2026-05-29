@@ -16,11 +16,10 @@ if not exist "%FRONTEND%\package.json" (
     exit /b 1
 )
 
-REM Stop stale servers so new API routes (inventory etc.) are loaded.
+REM Stop stale servers (including orphaned uvicorn worker processes).
 echo Stopping any existing hanalite servers on ports 8000 and 5180...
-powershell -NoProfile -Command ^
-  "$ports = 8000,5180; foreach ($port in $ports) { Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }"
-timeout /t 1 /nobreak >nul
+powershell -NoProfile -File "%ROOT%\scripts\kill-ports.ps1"
+timeout /t 2 /nobreak >nul
 
 REM --- FastAPI (port 8000) ---
 start "hanalite api" cmd /k "cd /d %BACKEND% && .venv\Scripts\uvicorn.exe app.main:app --reload --host 127.0.0.1 --port 8000"
@@ -33,7 +32,7 @@ set /a RETRY=0
 
 :wait_api
 timeout /t 2 /nobreak >nul
-powershell -NoProfile -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/v1/health' -TimeoutSec 3; if (-not $h.inventory_api) { Write-Host 'WARNING: API missing inventory routes. Close all uvicorn windows and run this script again.'; exit 2 }; exit 0 } catch { exit 1 }"
+powershell -NoProfile -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/v1/health' -TimeoutSec 3; if (-not $h.inventory_api) { Write-Host 'WARNING: API missing inventory routes. Run stop-hanalite.bat then start again.'; exit 2 }; if (-not $h.itemtyp_color_api) { Write-Host 'WARNING: API missing item type color support (stale server). Run stop-hanalite.bat then start again.'; exit 3 }; exit 0 } catch { exit 1 }"
 if %ERRORLEVEL%==0 goto wait_ui
 set /a RETRY+=1
 if %RETRY% LSS 15 goto wait_api
@@ -56,5 +55,5 @@ echo Check the "hanalite ui" window for npm errors.
 
 :open_browser
 start "" "%URL%"
-echo Done. Close the API and UI windows to stop servers.
+echo Done. To stop servers, run stop-hanalite.bat or close API/UI windows after Ctrl+C.
 pause

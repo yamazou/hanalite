@@ -1,12 +1,28 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { AppLink, useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ProductionProcessInputPanels } from '../components/ProductionProcessInputPanels'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
+import { SaveGridButton } from '../components/erp/SaveGridButton'
 import type { Item } from '../types'
+import type { LocationMaster } from '../types/masters'
 import type { ProductionOrderDetail } from '../types/production'
 import { parseDateInputValue, toDateInputValue } from '../utils/format'
+import { ensureTrailingBlankRow } from '../utils/gridTrailingBlankRow'
+import {
+  buildInputPayload,
+  buildProcessPayload,
+  firstActiveProcessPlannedQty,
+  createBlankProcessRowForDetail,
+  detailToEditInputRows,
+  detailToEditProcessRows,
+  isActiveInputRow,
+  isActiveProcessRow,
+  isBlankProcessRow,
+  type EditInputRow,
+  type EditProcessRow,
+} from '../utils/productionEdit'
 
 const emptyCreate = {
   production_date: toDateInputValue(),
@@ -31,6 +47,16 @@ export function ProductionEntryPage() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [createForm, setCreateForm] = useState(emptyCreate)
+  const [locations, setLocations] = useState<LocationMaster[]>([])
+  const [editProcessRows, setEditProcessRows] = useState<EditProcessRow[]>([])
+  const [editInputRows, setEditInputRows] = useState<EditInputRow[]>([])
+  const [lineRowError, setLineRowError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const processInputLayoutApiRef = useRef<{ saveLayouts: () => void; isDirty: boolean } | null>(
+    null
+  )
+
+  const canEditLines = isEdit && status === 'registered'
 
   const loadDetail = useCallback(async (id: number) => {
     setDetailLoading(true)
@@ -57,8 +83,19 @@ export function ProductionEntryPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const itemRows = await api.listItems()
-        setItems(itemRows)
+        const [itemRows, locationRows] = await Promise.all([
+          api.listItemsMaster(),
+          api.listLocationsMaster(),
+        ])
+        setItems(
+          itemRows.map((row) => ({
+            item_id: row.item_id,
+            item_cd: row.item_cd,
+            item_nm: row.item_nm,
+            itemtyp_id: row.itemtyp_id,
+          }))
+        )
+        setLocations(locationRows)
         if (isEdit && orderId != null) {
           await loadDetail(orderId)
         }
@@ -71,21 +108,91 @@ export function ProductionEntryPage() {
     void load()
   }, [isEdit, orderId, loadDetail])
 
+  useEffect(() => {
+    if (!detail || !canEditLines) {
+      setEditProcessRows([])
+      setEditInputRows([])
+      return
+    }
+    const rmLocationId = locations.find((l) => l.location_type === 'RM')?.location_id ?? ''
+    setEditProcessRows(
+      ensureTrailingBlankRow(
+        detailToEditProcessRows(detail),
+        isBlankProcessRow,
+        (rows) => createBlankProcessRowForDetail(rows)
+      )
+    )
+    setEditInputRows(detailToEditInputRows(detail))
+    setLineRowError(null)
+  }, [detail?.production_order_id, detail?.updated_at, canEditLines])
+
+  const handleProcessInputGridLayoutsReady = useCallback(
+    (api: { saveLayouts: () => void; isDirty: boolean }) => {
+      processInputLayoutApiRef.current = api
+    },
+    []
+  )
+
+  const handleSaveGridLayouts = () => {
+    processInputLayoutApiRef.current?.saveLayouts()
+  }
+
+  const reloadFromBom = async () => {
+    if (!orderId || !canEditLines) return
+    if (!confirm('Reload Process and Input Item from BOM? Unsaved edits will be lost.')) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const row = await api.reloadProductionOrderFromBom(orderId)
+      setDetail(row)
+      setStatus(row.status)
+      setLineRowError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to reload from BOM')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const createOrder = async (e: FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
       if (isEdit && orderId != null) {
+        let linesPayload
+        let inputsPayload
+        if (canEditLines) {
+          const lines = buildProcessPayload(editProcessRows, items)
+          const inputs = buildInputPayload(editInputRows)
+          const processRows = editProcessRows.filter((r) => !isBlankProcessRow(r))
+          if (
+            lines.length === 0 ||
+            inputs.length === 0 ||
+            !processRows.every((r) => isActiveProcessRow(r, editProcessRows, items)) ||
+            !editInputRows.some(isActiveInputRow)
+          ) {
+            setLineRowError('line_validation')
+            setSubmitting(false)
+            return
+          }
+          linesPayload = lines
+          inputsPayload = inputs
+        }
+        const planFromProcess =
+          linesPayload != null ? firstActiveProcessPlannedQty(editProcessRows) : null
         const row = await api.updateProductionOrder(orderId, {
           production_date: createForm.production_date,
           reference_no: createForm.reference_no.trim() || null,
-          planned_qty: Number(createForm.planned_qty),
+          planned_qty: planFromProcess ?? Number(createForm.planned_qty),
           lot: createForm.lot.trim(),
           notes: createForm.notes.trim() || null,
+          ...(linesPayload != null ? { lines: linesPayload } : {}),
+          ...(inputsPayload != null ? { inputs: inputsPayload } : {}),
         })
         setDetail(row)
         setStatus(row.status)
+        setLineRowError(null)
       } else {
         const row = await api.createProductionOrder({
           production_date: createForm.production_date,
@@ -105,7 +212,7 @@ export function ProductionEntryPage() {
   }
 
   return (
-    <ErpScreen error={error} className="erp-screen-stacked">
+    <ErpScreen error={error} success={success} className="erp-screen-stacked">
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to="/production/orders" className="btn erp-btn erp-btn-clear">
@@ -200,6 +307,17 @@ export function ProductionEntryPage() {
                 />
               </label>
               <div className="erp-search-actions">
+                {canEditLines && (
+                  <button
+                    className="btn erp-btn erp-btn-clear"
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => void reloadFromBom()}
+                  >
+                    Reload from BOM
+                  </button>
+                )}
+                {isEdit && <SaveGridButton onSave={handleSaveGridLayouts} />}
                 <button className="btn erp-btn erp-btn-search" type="submit" disabled={submitting}>
                   {submitting ? 'Saving…' : isEdit ? 'Update' : 'Create'}
                 </button>
@@ -215,13 +333,24 @@ export function ProductionEntryPage() {
       <ProductionProcessInputPanels
         detail={detail}
         loading={detailLoading}
+        canEdit={canEditLines}
+        items={items}
+        locations={locations}
+        processRows={editProcessRows}
+        inputRows={editInputRows}
+        onProcessRowsChange={setEditProcessRows}
+        onInputRowsChange={setEditInputRows}
+        rowError={lineRowError}
         emptyMessage={
           isEdit
             ? 'No process and input data.'
-            : 'Create the order to view Process and Input from BOM.'
+            : 'Create the order to view Process and Input Item from BOM.'
         }
-        lineGridId="production-entry-lines-v1"
-        inputGridId="production-entry-inputs-v1"
+        lineGridId="production-entry-lines-v4"
+        inputGridId="production-entry-inputs-v3"
+        processEditGridId="production-entry-process-edit-v2"
+        inputEditGridId="production-entry-input-edit-v2"
+        onGridLayoutsReady={handleProcessInputGridLayoutsReady}
       />
     </ErpScreen>
   )

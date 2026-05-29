@@ -11,14 +11,17 @@ from app.schemas.masters import (
     ItemSearchOut,
     ItemTypCreate,
     ItemTypOut,
+    ItemTypUpdate,
     LocationCreate,
     LocationOut,
     LocationUpdate,
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
+    MoveTypUpdate,
     SupplierCreate,
     SupplierOut,
+    SupplierUpdate,
 )
 from app.services.masters import (
     MasterError,
@@ -40,7 +43,10 @@ from app.services.masters import (
     list_suppliers,
     search_items,
     update_item,
+    update_itemtyp,
     update_location,
+    update_movetyp,
+    update_supplier,
 )
 
 router = APIRouter(prefix="/masters", tags=["masters"])
@@ -59,6 +65,19 @@ def api_list_itemtyps(db: Annotated[Session, Depends(get_db)]):
 def api_create_itemtyp(payload: ItemTypCreate, db: Annotated[Session, Depends(get_db)]):
     try:
         row = create_itemtyp(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/itemtyps/{itemtyp_id}", response_model=ItemTypOut)
+def api_update_itemtyp(
+    itemtyp_id: int, payload: ItemTypUpdate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = update_itemtyp(db, itemtyp_id, payload)
         db.commit()
         return row
     except MasterError as e:
@@ -92,6 +111,19 @@ def api_create_supplier(payload: SupplierCreate, db: Annotated[Session, Depends(
         raise _handle_error(e) from e
 
 
+@router.put("/suppliers/{suppliers_id}", response_model=SupplierOut)
+def api_update_supplier(
+    suppliers_id: int, payload: SupplierUpdate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = update_supplier(db, suppliers_id, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
 @router.delete("/suppliers/{suppliers_id}", status_code=204, response_class=Response)
 def api_delete_supplier(suppliers_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
@@ -111,6 +143,19 @@ def api_list_movetyps(db: Annotated[Session, Depends(get_db)]):
 def api_create_movetyp(payload: MoveTypCreate, db: Annotated[Session, Depends(get_db)]):
     try:
         row = create_movetyp(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/movetyps/{movetyps_id}", response_model=MoveTypMasterOut)
+def api_update_movetyp(
+    movetyps_id: int, payload: MoveTypUpdate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = update_movetyp(db, movetyps_id, payload)
         db.commit()
         return row
     except MasterError as e:

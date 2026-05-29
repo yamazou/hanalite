@@ -6,8 +6,10 @@ export interface CurrentStock {
   location_nm: string
   item_cd: string
   item_nm: string
+  itemtyp_id: number
   itemtyp_nm: string
   lot: string
+  gr_date: string | null
   qty: string | number
   updated_at: string
 }
@@ -22,14 +24,16 @@ export interface GrgiHistory {
   lot: string
   move_qty: string | number
   qty: string | number
-  movetyps_nm: string
+  movetyps_cd: string
+  movetyps_nm?: string | null
   actual_at: string
   created_at?: string | null
 }
 
 export interface MoveTyp {
   movetyps_id: number
-  movetyps_nm: string
+  movetyps_cd: string
+  movetyps_nm?: string | null
 }
 
 export interface GrgiCreatePayload {
@@ -49,6 +53,7 @@ export interface LotTraceResult {
     location_cd: string
     location_nm: string
     item_nm: string
+    itemtyp_id: number
     itemtyp_nm: string
     lot: string
     qty: string | number
@@ -56,11 +61,13 @@ export interface LotTraceResult {
   }[]
   history: {
     inv_grgi_id: number
+    item_id: number
     location_id: number
     location_cd: string
     location_nm: string
     item_nm: string
-    movetyps_nm: string
+    movetyps_cd: string
+    movetyps_nm?: string | null
     move_qty: string | number
     qty: string | number
     actual_at: string
@@ -68,6 +75,7 @@ export interface LotTraceResult {
   }[]
   balances: {
     period_year_month: string
+    item_id: number
     location_id: number
     location_cd: string
     location_nm: string

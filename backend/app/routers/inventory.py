@@ -100,7 +100,8 @@ def api_create_grgi(
             lot=grgi.lot,
             move_qty=grgi.move_qty,
             qty=grgi.qty,
-            movetyps_nm=movetyp.movetyps_nm if movetyp else "",
+            movetyps_cd=movetyp.movetyps_cd if movetyp else "",
+            movetyps_nm=movetyp.movetyps_nm if movetyp else None,
             actual_at=grgi.actual_at,
             created_at=grgi.created_at,
         )

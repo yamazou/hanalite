@@ -209,7 +209,7 @@ def main() -> int:
     code, movetyps = req("GET", "/inventory/movetyps")
     if code == 200 and isinstance(movetyps, list) and len(movetyps) >= 1:
         ok("inventory movetyps")
-        gr_id = next((m["movetyps_id"] for m in movetyps if m.get("movetyps_nm") == "GR"), movetyps[0]["movetyps_id"])
+        gr_id = next((m["movetyps_id"] for m in movetyps if m.get("movetyps_cd") == "GR"), movetyps[0]["movetyps_id"])
         trace_lot = f"LOT-INV-{datetime.now().strftime('%H%M%S')}"
         code, grgi = req(
             "POST",
@@ -337,7 +337,11 @@ def main() -> int:
         fail("masters itemtyps list", str(itemtyps))
 
     suffix = datetime.now().strftime("%H%M%S")
-    code, created_typ = req("POST", "/masters/itemtyps", {"itemtyp_nm": f"VT-{suffix}"})
+    code, created_typ = req(
+        "POST",
+        "/masters/itemtyps",
+        {"itemtyp_cd": f"VT{suffix}", "itemtyp_nm": f"Verify Type {suffix}"},
+    )
     if code == 201 and created_typ.get("itemtyp_id"):
         ok("masters itemtyp create")
         req("DELETE", f"/masters/itemtyps/{created_typ['itemtyp_id']}")

@@ -12,8 +12,10 @@ class CurrentStockItem(BaseModel):
     location_nm: str
     item_cd: str
     item_nm: str
+    itemtyp_id: int
     itemtyp_nm: str
     lot: str
+    gr_date: datetime | None = None
     qty: Decimal
     updated_at: datetime
 
@@ -28,7 +30,8 @@ class GrgiHistoryItem(BaseModel):
     lot: str
     move_qty: Decimal
     qty: Decimal
-    movetyps_nm: str
+    movetyps_cd: str
+    movetyps_nm: str | None = None
     actual_at: datetime
     created_at: datetime | None = None
 
@@ -45,7 +48,8 @@ class GrgiCreate(BaseModel):
 class MoveTypOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     movetyps_id: int
-    movetyps_nm: str
+    movetyps_cd: str
+    movetyps_nm: str | None = None
 
 
 class LotTraceCurrent(BaseModel):
@@ -54,6 +58,7 @@ class LotTraceCurrent(BaseModel):
     location_cd: str
     location_nm: str
     item_nm: str
+    itemtyp_id: int
     itemtyp_nm: str
     lot: str
     qty: Decimal
@@ -62,11 +67,13 @@ class LotTraceCurrent(BaseModel):
 
 class LotTraceHistory(BaseModel):
     inv_grgi_id: int
+    item_id: int
     location_id: int
     location_cd: str
     location_nm: str
     item_nm: str
-    movetyps_nm: str
+    movetyps_cd: str
+    movetyps_nm: str | None = None
     move_qty: Decimal
     qty: Decimal
     actual_at: datetime
@@ -75,6 +82,7 @@ class LotTraceHistory(BaseModel):
 
 class LotTraceBalance(BaseModel):
     period_year_month: str
+    item_id: int
     location_id: int
     location_cd: str
     location_nm: str

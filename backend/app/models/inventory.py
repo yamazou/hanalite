@@ -11,7 +11,8 @@ class MoveTyp(Base):
     __tablename__ = "m_movetyps"
 
     movetyps_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    movetyps_nm: Mapped[str] = mapped_column(String(50))
+    movetyps_cd: Mapped[str] = mapped_column(String(50))
+    movetyps_nm: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

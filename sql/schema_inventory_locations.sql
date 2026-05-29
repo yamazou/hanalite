@@ -6,8 +6,8 @@ SET NAMES utf8mb4;
 INSERT INTO m_locations (location_cd, location_nm) VALUES ('MAIN', 'Main Location')
 ON DUPLICATE KEY UPDATE location_nm = VALUES(location_nm);
 
-INSERT INTO m_movetyps (movetyps_nm) VALUES ('MV')
-ON DUPLICATE KEY UPDATE movetyps_nm = VALUES(movetyps_nm);
+INSERT INTO m_movetyps (movetyps_cd) VALUES ('MV')
+ON DUPLICATE KEY UPDATE movetyps_cd = VALUES(movetyps_cd);
 
 ALTER TABLE inv_currents
     ADD COLUMN IF NOT EXISTS location_id INT UNSIGNED NULL AFTER item_id;

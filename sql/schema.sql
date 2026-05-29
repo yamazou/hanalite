@@ -8,7 +8,9 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 CREATE TABLE IF NOT EXISTS m_itemtyps (
     itemtyp_id   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    itemtyp_cd   VARCHAR(50) NOT NULL,
     itemtyp_nm   VARCHAR(100) NOT NULL,
+    itemtyp_color VARCHAR(7) NULL DEFAULT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
@@ -26,12 +28,13 @@ CREATE TABLE IF NOT EXISTS m_suppliers (
 
 CREATE TABLE IF NOT EXISTS m_movetyps (
     movetyps_id  INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    movetyps_nm  VARCHAR(50)  NOT NULL,
+    movetyps_cd  VARCHAR(50)  NOT NULL,
+    movetyps_nm  VARCHAR(100) NULL DEFAULT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
     PRIMARY KEY (movetyps_id),
-    UNIQUE KEY uk_movetyps_nm (movetyps_nm)
+    UNIQUE KEY uk_movetyps_cd (movetyps_cd)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_locations (
@@ -55,8 +58,6 @@ CREATE TABLE IF NOT EXISTS m_items (
     supplier1_id INT UNSIGNED NULL DEFAULT NULL,
     supplier2_id INT UNSIGNED NULL DEFAULT NULL,
     supplier3_id INT UNSIGNED NULL DEFAULT NULL,
-    supplier4_id INT UNSIGNED NULL DEFAULT NULL,
-    supplier5_id INT UNSIGNED NULL DEFAULT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
@@ -67,9 +68,7 @@ CREATE TABLE IF NOT EXISTS m_items (
     CONSTRAINT fk_items_itemtyp FOREIGN KEY (itemtyp_id) REFERENCES m_itemtyps (itemtyp_id),
     CONSTRAINT fk_items_supplier1 FOREIGN KEY (supplier1_id) REFERENCES m_suppliers (suppliers_id),
     CONSTRAINT fk_items_supplier2 FOREIGN KEY (supplier2_id) REFERENCES m_suppliers (suppliers_id),
-    CONSTRAINT fk_items_supplier3 FOREIGN KEY (supplier3_id) REFERENCES m_suppliers (suppliers_id),
-    CONSTRAINT fk_items_supplier4 FOREIGN KEY (supplier4_id) REFERENCES m_suppliers (suppliers_id),
-    CONSTRAINT fk_items_supplier5 FOREIGN KEY (supplier5_id) REFERENCES m_suppliers (suppliers_id)
+    CONSTRAINT fk_items_supplier3 FOREIGN KEY (supplier3_id) REFERENCES m_suppliers (suppliers_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_boms (
@@ -150,14 +149,19 @@ CREATE TABLE IF NOT EXISTS inv_balances (
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- Seed data
-INSERT INTO m_movetyps (movetyps_nm) VALUES ('GR'), ('GI'), ('MV')
-ON DUPLICATE KEY UPDATE movetyps_nm = VALUES(movetyps_nm);
+INSERT INTO m_movetyps (movetyps_cd) VALUES ('GR'), ('GI'), ('MV')
+ON DUPLICATE KEY UPDATE movetyps_cd = VALUES(movetyps_cd);
 
 INSERT INTO m_locations (location_cd, location_nm, location_type) VALUES ('MAIN', 'Main Location', 'Process')
 ON DUPLICATE KEY UPDATE
     location_nm = VALUES(location_nm),
     location_type = VALUES(location_type);
 
-INSERT INTO m_itemtyps (itemtyp_nm) VALUES
-    ('RM'), ('Purchase parts'), ('WIP'), ('FG')
-ON DUPLICATE KEY UPDATE itemtyp_nm = VALUES(itemtyp_nm);
+INSERT INTO m_itemtyps (itemtyp_cd, itemtyp_nm) VALUES
+    ('RM', 'Raw Material'),
+    ('PURCHASE', 'Purchase parts'),
+    ('WIP', 'Work in Process'),
+    ('FG', 'Finished Goods')
+ON DUPLICATE KEY UPDATE
+    itemtyp_cd = VALUES(itemtyp_cd),
+    itemtyp_nm = VALUES(itemtyp_nm);

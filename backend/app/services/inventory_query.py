@@ -26,6 +26,68 @@ class InventoryQueryError(Exception):
     pass
 
 
+_FAR_FUTURE = datetime(9999, 12, 31, 23, 59, 59)
+
+
+def _gr_dates_by_lot_subquery():
+    """Earliest GR actual_at per item, location, and lot."""
+    return (
+        select(
+            InvGrgi.item_id.label("gr_item_id"),
+            InvGrgi.location_id.label("gr_location_id"),
+            InvGrgi.lot.label("gr_lot"),
+            func.min(InvGrgi.actual_at).label("gr_date"),
+        )
+        .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
+        .where(
+            InvGrgi.deleted_at.is_(None),
+            MoveTyp.deleted_at.is_(None),
+            func.upper(MoveTyp.movetyps_cd) == "GR",
+        )
+        .group_by(InvGrgi.item_id, InvGrgi.location_id, InvGrgi.lot)
+    ).subquery()
+
+
+def pick_oldest_gr_lot_for_item(
+    db: Session,
+    item_id: int,
+    *,
+    location_id: int | None = None,
+) -> str | None:
+    """FIFO lot from current stock (qty > 0) by earliest GR date."""
+    gr_dates = _gr_dates_by_lot_subquery()
+
+    def _pick(*, loc_id: int | None) -> str | None:
+        stmt = (
+            select(InvCurrent.lot)
+            .select_from(InvCurrent)
+            .outerjoin(
+                gr_dates,
+                (gr_dates.c.gr_item_id == InvCurrent.item_id)
+                & (gr_dates.c.gr_location_id == InvCurrent.location_id)
+                & (gr_dates.c.gr_lot == InvCurrent.lot),
+            )
+            .where(
+                InvCurrent.item_id == item_id,
+                InvCurrent.deleted_at.is_(None),
+                InvCurrent.qty > 0,
+            )
+        )
+        if loc_id is not None:
+            stmt = stmt.where(InvCurrent.location_id == loc_id)
+        stmt = stmt.order_by(
+            func.coalesce(gr_dates.c.gr_date, _FAR_FUTURE).asc(),
+            InvCurrent.lot.asc(),
+        ).limit(1)
+        return db.scalar(stmt)
+
+    if location_id is not None:
+        found = _pick(loc_id=location_id)
+        if found:
+            return found
+    return _pick(loc_id=None)
+
+
 def list_current_stock(
     db: Session,
     *,
@@ -34,18 +96,28 @@ def list_current_stock(
     location_q: str | None = None,
     include_zero: bool = False,
 ) -> list[CurrentStockItem]:
+    gr_dates = _gr_dates_by_lot_subquery()
+
     stmt = (
         select(
             InvCurrent,
             Item.item_cd,
             Item.item_nm,
+            Item.itemtyp_id,
             ItemTyp.itemtyp_nm,
             Location.location_cd,
             Location.location_nm,
+            gr_dates.c.gr_date,
         )
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .join(Location, Location.location_id == InvCurrent.location_id)
+        .outerjoin(
+            gr_dates,
+            (gr_dates.c.gr_item_id == InvCurrent.item_id)
+            & (gr_dates.c.gr_location_id == InvCurrent.location_id)
+            & (gr_dates.c.gr_lot == InvCurrent.lot),
+        )
         .where(InvCurrent.deleted_at.is_(None), Item.deleted_at.is_(None))
     )
     if not include_zero:
@@ -88,12 +160,14 @@ def list_current_stock(
             location_nm=location_nm,
             item_cd=item_cd,
             item_nm=item_nm,
+            itemtyp_id=itemtyp_id,
             itemtyp_nm=itemtyp_nm,
             lot=c.lot,
+            gr_date=gr_date,
             qty=c.qty,
             updated_at=c.updated_at,
         )
-        for c, item_cd, item_nm, itemtyp_nm, location_cd, location_nm in rows
+        for c, item_cd, item_nm, itemtyp_id, itemtyp_nm, location_cd, location_nm, gr_date in rows
     ]
 
 
@@ -116,7 +190,14 @@ def list_grgi_history(
     db: Session, limit: int = 50, location_id: int | None = None
 ) -> list[GrgiHistoryItem]:
     stmt = (
-        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm, Location.location_cd, Location.location_nm)
+        select(
+            InvGrgi,
+            Item.item_nm,
+            MoveTyp.movetyps_cd,
+            MoveTyp.movetyps_nm,
+            Location.location_cd,
+            Location.location_nm,
+        )
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
         .join(Location, Location.location_id == InvGrgi.location_id)
@@ -137,11 +218,12 @@ def list_grgi_history(
             lot=g.lot,
             move_qty=g.move_qty,
             qty=g.qty,
+            movetyps_cd=movetyp_cd,
             movetyps_nm=movetyp_nm,
             actual_at=g.actual_at,
             created_at=g.created_at,
         )
-        for g, item_nm, movetyp_nm, location_cd, location_nm in rows
+        for g, item_nm, movetyp_cd, movetyp_nm, location_cd, location_nm in rows
     ]
 
 
@@ -151,7 +233,14 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
         raise InventoryQueryError("Lot number is required.")
 
     current_rows = db.execute(
-        select(InvCurrent, Item.item_nm, ItemTyp.itemtyp_nm, Location.location_cd, Location.location_nm)
+        select(
+            InvCurrent,
+            Item.item_nm,
+            Item.itemtyp_id,
+            ItemTyp.itemtyp_nm,
+            Location.location_cd,
+            Location.location_nm,
+        )
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .join(Location, Location.location_id == InvCurrent.location_id)
@@ -160,7 +249,14 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
     ).all()
 
     history_rows = db.execute(
-        select(InvGrgi, Item.item_nm, MoveTyp.movetyps_nm, Location.location_cd, Location.location_nm)
+        select(
+            InvGrgi,
+            Item.item_nm,
+            MoveTyp.movetyps_cd,
+            MoveTyp.movetyps_nm,
+            Location.location_cd,
+            Location.location_nm,
+        )
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
         .join(Location, Location.location_id == InvGrgi.location_id)
@@ -189,31 +285,35 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
                 location_cd=location_cd,
                 location_nm=location_nm,
                 item_nm=item_nm,
+                itemtyp_id=itemtyp_id,
                 itemtyp_nm=itemtyp_nm,
                 lot=c.lot,
                 qty=c.qty,
                 updated_at=c.updated_at,
             )
-            for c, item_nm, itemtyp_nm, location_cd, location_nm in current_rows
+            for c, item_nm, itemtyp_id, itemtyp_nm, location_cd, location_nm in current_rows
         ],
         history=[
             LotTraceHistory(
                 inv_grgi_id=g.inv_grgi_id,
+                item_id=g.item_id,
                 location_id=g.location_id,
                 location_cd=location_cd,
                 location_nm=location_nm,
                 item_nm=item_nm,
+                movetyps_cd=movetyp_cd,
                 movetyps_nm=movetyp_nm,
                 move_qty=g.move_qty,
                 qty=g.qty,
                 actual_at=g.actual_at,
                 created_at=g.created_at,
             )
-            for g, item_nm, movetyp_nm, location_cd, location_nm in history_rows
+            for g, item_nm, movetyp_cd, movetyp_nm, location_cd, location_nm in history_rows
         ],
         balances=[
             LotTraceBalance(
                 period_year_month=b.period_year_month,
+                item_id=b.item_id,
                 location_id=b.location_id,
                 location_cd=location_cd,
                 location_nm=location_nm,
@@ -328,7 +428,7 @@ def list_movetyps_for_manual(db: Session) -> list[MoveTyp]:
     return list(
         db.scalars(
             select(MoveTyp)
-            .where(MoveTyp.deleted_at.is_(None), MoveTyp.movetyps_nm.in_(["GR", "GI", "MV"]))
+            .where(MoveTyp.deleted_at.is_(None), MoveTyp.movetyps_cd.in_(["GR", "GI", "MV"]))
             .order_by(MoveTyp.movetyps_id)
         ).all()
     )

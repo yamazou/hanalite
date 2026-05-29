@@ -44,6 +44,7 @@ class DraftLineRead(BaseModel):
     item_id: int | None = None
     item_cd: str | None = None
     item_nm: str | None = None
+    itemtyp_id: int | None = None
     location_id: int
     location_cd: str | None = None
     location_nm: str | None = None

@@ -14,7 +14,7 @@ class InventoryError(Exception):
 
 def _get_movetyp(db: Session, name: str) -> MoveTyp:
     row = db.scalar(
-        select(MoveTyp).where(MoveTyp.movetyps_nm == name, MoveTyp.deleted_at.is_(None))
+        select(MoveTyp).where(MoveTyp.movetyps_cd == name, MoveTyp.deleted_at.is_(None))
     )
     if not row:
         raise InventoryError(f"Movement type '{name}' not found.")
@@ -28,16 +28,16 @@ def apply_movement(
     location_id: int,
     lot: str,
     move_qty: Decimal,
-    movetyps_nm: str,
+    movetyps_cd: str,
     actual_at: datetime,
     inv_receipt_draft_id: int | None = None,
 ) -> InvGrgi:
     """
     Record inventory movement in inv_grgi and update inv_currents.
     move_qty: positive for GR, negative for reversal/cancel.
-    movetyps_nm: GR, GI, or CAN
+    movetyps_cd: GR, GI, or CAN
     """
-    movetyp = _get_movetyp(db, movetyps_nm)
+    movetyp = _get_movetyp(db, movetyps_cd)
     move_qty = Decimal(move_qty)
 
     current = db.scalar(
@@ -52,7 +52,7 @@ def apply_movement(
     )
     current_qty = Decimal(current.qty) if current else Decimal("0")
 
-    if movetyps_nm == "GI":
+    if movetyps_cd == "GI":
         stored_move_qty = abs(move_qty)
         new_qty = current_qty - stored_move_qty
     else:
@@ -88,7 +88,7 @@ def apply_movement(
         location_id=location_id,
         qty=new_qty,
         lot=lot,
-        move_qty=stored_move_qty if movetyps_nm == "GI" else move_qty,
+        move_qty=stored_move_qty if movetyps_cd == "GI" else move_qty,
         movetyps_id=movetyp.movetyps_id,
         inv_receipt_draft_id=inv_receipt_draft_id,
         actual_at=actual_at,
@@ -116,7 +116,7 @@ def apply_gr(
         location_id=location_id,
         lot=lot,
         move_qty=Decimal(qty),
-        movetyps_nm="GR",
+        movetyps_cd="GR",
         actual_at=actual_at,
         inv_receipt_draft_id=inv_receipt_draft_id,
     )
@@ -135,15 +135,15 @@ def apply_movement_by_movetyp_id(
     movetyp = db.get(MoveTyp, movetyps_id)
     if not movetyp or movetyp.deleted_at is not None:
         raise InventoryError("Movement type not found.")
-    if movetyp.movetyps_nm not in ("GR", "GI"):
-        raise InventoryError(f"Manual entry not allowed for movement type '{movetyp.movetyps_nm}'.")
+    if movetyp.movetyps_cd not in ("GR", "GI"):
+        raise InventoryError(f"Manual entry not allowed for movement type '{movetyp.movetyps_cd}'.")
     return apply_movement(
         db,
         item_id=item_id,
         location_id=resolve_location_id(db, location_id),
         lot=lot,
         move_qty=Decimal(move_qty),
-        movetyps_nm=movetyp.movetyps_nm,
+        movetyps_cd=movetyp.movetyps_cd,
         actual_at=actual_at,
     )
 
@@ -165,7 +165,7 @@ def apply_cancel_reversal(
         location_id=location_id,
         lot=lot,
         move_qty=-Decimal(qty),
-        movetyps_nm="CAN",
+        movetyps_cd="CAN",
         actual_at=actual_at,
         inv_receipt_draft_id=inv_receipt_draft_id,
     )
@@ -191,7 +191,7 @@ def apply_location_move(
         location_id=resolved_from,
         lot=lot,
         move_qty=-Decimal(qty),
-        movetyps_nm="MV",
+        movetyps_cd="MV",
         actual_at=actual_at,
     )
     in_row = apply_movement(
@@ -200,7 +200,7 @@ def apply_location_move(
         location_id=resolved_to,
         lot=lot,
         move_qty=Decimal(qty),
-        movetyps_nm="MV",
+        movetyps_cd="MV",
         actual_at=actual_at,
     )
     return out_row, in_row

@@ -1,10 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DraftVariant } from '../config/draftPages'
-import { useGridColumnLayout, type GridColumnLayout } from '../hooks/useGridColumnLayout'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
+import { useItemTypColors } from '../context/ItemTypColorContext'
+import { itemTextColorStyle } from '../utils/itemTypColor'
 import type { Item } from '../types'
 import type { LocationMaster } from '../types/masters'
-import { itemCdFieldPatch, itemNmFieldPatch, type EditLineRow } from '../utils/draftEdit'
-import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
+import {
+  editRowToDraftLine,
+  isBlankDraftLine,
+  itemCdFieldPatch,
+  itemNmFieldPatch,
+  type EditLineRow,
+} from '../utils/draftEdit'
+import { getDraftLineFilterValue } from '../utils/draftGridSort'
+import { gridCellPlaceholder } from '../utils/gridPlaceholder'
+import { GRID_ROWNUM_COLUMN, GridRowNumCell } from './GridRowNumCell'
+import { ExcelLikeGridTable } from './ExcelLikeGridTable'
+import type { GridColumnDef } from './ResizableGridTable'
+
+const PIN_LINE_COLUMNS = ['rownum', 'select'] as const
 
 export type DraftLineGridCopy = {
   itemCdLabel: string
@@ -20,6 +34,8 @@ export type DraftLineGridCopy = {
   uncheckAllRowsTitle: string
   addLineValidation: string
   noLinesMsg: string
+  saveRowBtn: string
+  submittingCreate: string
 }
 
 type Props = {
@@ -30,12 +46,14 @@ type Props = {
   items: Item[]
   locations: LocationMaster[]
   onUpdateLine: (key: string, patch: Partial<EditLineRow>) => void
-  onAddRow: () => void
   onRemoveRows: (keys: string[]) => void
+  onImportParsed?: (rows: Record<string, string>[]) => void
   rowError?: string | null
   copy: DraftLineGridCopy
   onLayoutChange?: () => void
   onLayoutApi?: (api: Pick<GridColumnLayout, 'saveLayout' | 'isDirty'>) => void
+  onSaveLines?: () => void
+  saving?: boolean
 }
 
 export function DraftEditableLineGrid({
@@ -46,41 +64,36 @@ export function DraftEditableLineGrid({
   items,
   locations,
   onUpdateLine,
-  onAddRow,
   onRemoveRows,
+  onImportParsed,
   rowError,
   copy,
   onLayoutChange,
   onLayoutApi,
+  onSaveLines,
+  saving = false,
 }: Props) {
+  const { colorForItemRef } = useItemTypColors()
+  /** Row delete only on Entry; List detail is edit-in-place without bulk delete. */
+  const allowRowDelete = scope === 'entry'
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set())
 
   const lineColumns = useMemo((): GridColumnDef[] => {
     const cols: GridColumnDef[] = [
+      GRID_ROWNUM_COLUMN,
       { key: 'item_cd', label: copy.itemCdLabel, defaultWidth: 110 },
       { key: 'item_nm', label: copy.itemNmLabel, defaultWidth: 160 },
       { key: 'lot', label: copy.lotLabel, defaultWidth: 100 },
       { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
       { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' },
     ]
-    if (canEdit) {
+    if (canEdit && allowRowDelete) {
       cols.unshift({ key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' })
     }
     return cols
-  }, [canEdit, copy])
+  }, [canEdit, allowRowDelete, copy])
 
   const lineGridId = `${variant}-${scope}-lines-v6`
-  const lineLayout = useGridColumnLayout(lineGridId, lineColumns, {
-    onLayoutChange,
-    pinFirst: canEdit ? ['select'] : undefined,
-  })
-
-  useEffect(() => {
-    onLayoutApi?.({
-      saveLayout: lineLayout.saveLayout,
-      isDirty: lineLayout.isDirty,
-    })
-  }, [lineLayout.saveLayout, lineLayout.isDirty, onLayoutApi])
 
   const linesSorted = useMemo(
     () => [...lines].sort((a, b) => a.line_no - b.line_no),
@@ -115,10 +128,16 @@ export function DraftEditableLineGrid({
     setSelectedRowKeys(new Set())
   }
 
+  const deleteRowsRef = useRef(deleteSelectedRows)
+  deleteRowsRef.current = deleteSelectedRows
+
   const datalistPrefix = scope === 'entry' ? 'entry' : 'draft'
 
   const renderCell = (colKey: string, row: EditLineRow) => {
+    const blank = isBlankDraftLine(row)
     switch (colKey) {
+      case 'rownum':
+        return null
       case 'select':
         return (
           <td key={colKey} className="erp-col-check">
@@ -135,9 +154,16 @@ export function DraftEditableLineGrid({
           <td key={colKey} className="erp-grid-cell-edit">
             <input
               className="erp-grid-input"
+              style={itemTextColorStyle(
+                colorForItemRef({
+                  itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                  itemId: row.item_id === '' ? null : row.item_id,
+                  itemCd: row.item_cd,
+                })
+              )}
               value={row.item_cd}
               list={`${datalistPrefix}-item-cd-${row.key}`}
-              placeholder={copy.itemCdLabel}
+              placeholder={gridCellPlaceholder(copy.itemCdLabel, blank)}
               onChange={(e) => onUpdateLine(row.key, itemCdFieldPatch(items, e.target.value))}
             />
             <datalist id={`${datalistPrefix}-item-cd-${row.key}`}>
@@ -154,9 +180,16 @@ export function DraftEditableLineGrid({
           <td key={colKey} className="erp-grid-cell-edit">
             <input
               className="erp-grid-input"
+              style={itemTextColorStyle(
+                colorForItemRef({
+                  itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                  itemId: row.item_id === '' ? null : row.item_id,
+                  itemCd: row.item_cd,
+                })
+              )}
               value={row.item_nm}
               list={`${datalistPrefix}-item-nm-${row.key}`}
-              placeholder={copy.itemNmLabel}
+              placeholder={gridCellPlaceholder(copy.itemNmLabel, blank)}
               onChange={(e) => onUpdateLine(row.key, itemNmFieldPatch(items, e.target.value))}
             />
             <datalist id={`${datalistPrefix}-item-nm-${row.key}`}>
@@ -180,7 +213,7 @@ export function DraftEditableLineGrid({
                 })
               }
             >
-              <option value="">{copy.selectOption}</option>
+              <option value="">{gridCellPlaceholder(copy.selectOption, blank)}</option>
               {locations.map((location) => (
                 <option key={location.location_id} value={location.location_id}>
                   {location.location_cd} / {location.location_nm}
@@ -195,7 +228,7 @@ export function DraftEditableLineGrid({
             <input
               className="erp-grid-input"
               value={row.lot}
-              placeholder={copy.lotPlaceholder}
+              placeholder={gridCellPlaceholder(copy.lotPlaceholder, blank)}
               onChange={(e) => onUpdateLine(row.key, { lot: e.target.value })}
             />
           </td>
@@ -220,41 +253,52 @@ export function DraftEditableLineGrid({
 
   return (
     <>
-      {canEdit && (
+      {canEdit && (allowRowDelete || onSaveLines || rowError) && (
         <div className="erp-detail-toolbar">
-          <div className="erp-check-toggle-group">
+          {onSaveLines && (
             <button
               type="button"
-              className="erp-check-toggle-btn"
-              title={copy.checkAllRowsTitle}
-              aria-label={copy.checkAllRowsTitle}
-              disabled={lines.length === 0}
-              onClick={() => setSelectedRowKeys(new Set(lines.map((row) => row.key)))}
+              className="btn erp-btn erp-btn-search btn-sm"
+              disabled={saving}
+              onClick={onSaveLines}
             >
-              <span className="erp-check-toggle-icon checked" aria-hidden />
+              {saving ? copy.submittingCreate : copy.saveRowBtn}
             </button>
-            <button
-              type="button"
-              className="erp-check-toggle-btn"
-              title={copy.uncheckAllRowsTitle}
-              aria-label={copy.uncheckAllRowsTitle}
-              disabled={lines.length === 0}
-              onClick={() => setSelectedRowKeys(new Set())}
-            >
-              <span className="erp-check-toggle-icon unchecked" aria-hidden />
-            </button>
-          </div>
-          <button type="button" className="btn erp-btn erp-btn-new btn-sm" onClick={onAddRow}>
-            {copy.addRowBtn}
-          </button>
-          <button
-            type="button"
-            className="btn erp-btn erp-btn-clear btn-sm"
-            disabled={selectedRowKeys.size === 0}
-            onClick={deleteSelectedRows}
-          >
-            {copy.deleteRowBtn}
-          </button>
+          )}
+          {allowRowDelete && (
+            <>
+              <div className="erp-check-toggle-group">
+                <button
+                  type="button"
+                  className="erp-check-toggle-btn"
+                  title={copy.checkAllRowsTitle}
+                  aria-label={copy.checkAllRowsTitle}
+                  disabled={lines.length === 0}
+                  onClick={() => setSelectedRowKeys(new Set(lines.map((row) => row.key)))}
+                >
+                  <span className="erp-check-toggle-icon checked" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  className="erp-check-toggle-btn"
+                  title={copy.uncheckAllRowsTitle}
+                  aria-label={copy.uncheckAllRowsTitle}
+                  disabled={lines.length === 0}
+                  onClick={() => setSelectedRowKeys(new Set())}
+                >
+                  <span className="erp-check-toggle-icon unchecked" aria-hidden />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="btn erp-btn erp-btn-clear btn-sm"
+                disabled={selectedRowKeys.size === 0}
+                onClick={deleteSelectedRows}
+              >
+                {copy.deleteRowBtn}
+              </button>
+            </>
+          )}
           {rowError && (
             <span className="alert-inline error">
               {rowError === 'line_validation' ? copy.addLineValidation : rowError}
@@ -263,25 +307,60 @@ export function DraftEditableLineGrid({
         </div>
       )}
 
-      {canEdit && lines.length === 0 && (
-        <p className="muted erp-grid-empty">{copy.noLinesMsg}</p>
-      )}
-
-      {(lines.length > 0 || canEdit) && (
-        <div className="erp-grid-wrap erp-grid-wrap-detail">
-          <ResizableGridTable layout={lineLayout} isColumnFilterable={() => false}>
+      {canEdit && (
+        <ExcelLikeGridTable
+          gridId={lineGridId}
+          columns={lineColumns}
+          rows={linesSorted}
+          getFilterValue={(row, col) => getDraftLineFilterValue(editRowToDraftLine(row), col)}
+          layoutOptions={{
+            onLayoutChange,
+            pinFirst: canEdit && allowRowDelete ? [...PIN_LINE_COLUMNS] : ['rownum'],
+            headerFilterable: true,
+          }}
+          onLayoutApi={onLayoutApi}
+          excelExport={{
+            sheetName: `${variant}-${scope}-lines`,
+            filenamePrefix: `${variant}_${scope}_lines`,
+            getExportValue: (row, col) =>
+              getDraftLineFilterValue(editRowToDraftLine(row), col),
+          }}
+          excelImport={
+            canEdit && onImportParsed
+              ? { applyParsedRows: onImportParsed }
+              : undefined
+          }
+          rowDelete={
+            allowRowDelete
+              ? {
+                  label: copy.deleteRowBtn,
+                  getSelectedCount: () => selectedRowKeys.size,
+                  onDelete: () => deleteRowsRef.current(),
+                }
+              : undefined
+          }
+        >
+          {({ layout, displayRows }) => (
             <tbody>
-              {linesSorted.map((row, index) => (
+              {displayRows.map((row, index) => (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing ${index % 2 === 1 ? 'row-alt' : ''}`}
+                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
+                    isBlankDraftLine(row) ? ' erp-grid-row-sentinel' : ''
+                  }`}
                 >
-                  {lineLayout.orderedColumns.map((col) => renderCell(col.key, row))}
+                  {layout.orderedColumns.map((col) =>
+                    col.key === 'rownum' ? (
+                      <GridRowNumCell key={col.key} index={index} />
+                    ) : (
+                      renderCell(col.key, row)
+                    )
+                  )}
                 </tr>
               ))}
             </tbody>
-          </ResizableGridTable>
-        </div>
+          )}
+        </ExcelLikeGridTable>
       )}
     </>
   )

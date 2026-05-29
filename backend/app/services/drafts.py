@@ -20,6 +20,7 @@ from app.services.draft_item_resolve import (
     resolve_draft_line_item_id,
     validate_lines_item_cd_for_approve,
 )
+from app.services.draft_search import draft_line_matches_item_q
 from app.services.inventory import InventoryError, apply_cancel_reversal, apply_gr
 from app.services.masters import MasterError, resolve_location_id
 
@@ -35,7 +36,31 @@ def _item_ref_from_line(line: DraftLineCreate | DraftLineUpsert) -> tuple[int | 
     return item_id, item_cd, item_nm
 
 
-def _draft_to_read(draft: InvReceiptDraft) -> DraftRead:
+def _itemtyp_id_by_item_cd(db: Session, cds: set[str]) -> dict[str, int]:
+    if not cds:
+        return {}
+    rows = db.execute(
+        select(Item.item_cd, Item.itemtyp_id).where(
+            Item.deleted_at.is_(None),
+            Item.item_cd.in_(list(cds)),
+        )
+    ).all()
+    return {cd: itemtyp_id for cd, itemtyp_id in rows}
+
+
+def _line_itemtyp_id(
+    ln: InvReceiptDraftLine, itemtyp_by_cd: dict[str, int]
+) -> int | None:
+    if ln.item is not None:
+        return ln.item.itemtyp_id
+    cd = (ln.item_cd or "").strip()
+    if cd:
+        return itemtyp_by_cd.get(cd)
+    return None
+
+
+def _draft_to_read(draft: InvReceiptDraft, itemtyp_by_cd: dict[str, int] | None = None) -> DraftRead:
+    itemtyp_by_cd = itemtyp_by_cd or {}
     lines = [
         DraftLineRead(
             inv_receipt_draft_line_id=ln.inv_receipt_draft_line_id,
@@ -43,6 +68,7 @@ def _draft_to_read(draft: InvReceiptDraft) -> DraftRead:
             item_id=ln.item_id,
             item_cd=ln.item_cd or (ln.item.item_cd if ln.item else None),
             item_nm=ln.item_nm or (ln.item.item_nm if ln.item else None),
+            itemtyp_id=_line_itemtyp_id(ln, itemtyp_by_cd),
             location_id=ln.location_id,
             location_cd=ln.location.location_cd if ln.location else None,
             location_nm=ln.location.location_nm if ln.location else None,
@@ -284,7 +310,20 @@ def list_drafts(
             & (InvReceiptDraftLine.deleted_at.is_(None)),
         )
         .where(InvReceiptDraft.deleted_at.is_(None))
-        .group_by(InvReceiptDraft.inv_receipt_draft_id)
+        .group_by(
+            InvReceiptDraft.inv_receipt_draft_id,
+            InvReceiptDraft.status,
+            InvReceiptDraft.source_type,
+            InvReceiptDraft.receipt_at,
+            InvReceiptDraft.reference_no,
+            InvReceiptDraft.notes,
+            InvReceiptDraft.approved_at,
+            InvReceiptDraft.cancelled_at,
+            InvReceiptDraft.created_at,
+            InvReceiptDraft.attachment_path,
+            InvReceiptDraft.parse_message,
+            Supplier.suppliers_nm,
+        )
         .order_by(InvReceiptDraft.created_at.desc())
     )
     if status:
@@ -311,26 +350,14 @@ def list_drafts(
                 )
             )
         )
-    item_value = (item_q or "").strip()
-    if item_value:
-        item_pattern = f"%{item_value}%"
-        item_label = func.concat(Item.item_cd, " - ", Item.item_nm)
-        stmt = stmt.where(
-            exists(
-                select(1)
-                .select_from(InvReceiptDraftLine)
-                .join(Item, Item.item_id == InvReceiptDraftLine.item_id)
-                .where(
-                    InvReceiptDraftLine.inv_receipt_draft_id == InvReceiptDraft.inv_receipt_draft_id,
-                    InvReceiptDraftLine.deleted_at.is_(None),
-                    or_(
-                        Item.item_cd.like(item_pattern),
-                        Item.item_nm.like(item_pattern),
-                        item_label.like(item_pattern),
-                    ),
-                )
-            )
-        )
+    item_match = draft_line_matches_item_q(
+        draft_id_col=InvReceiptDraft.inv_receipt_draft_id,
+        line_model=InvReceiptDraftLine,
+        line_draft_id_col=InvReceiptDraftLine.inv_receipt_draft_id,
+        item_q=item_q,
+    )
+    if item_match is not None:
+        stmt = stmt.where(item_match)
     lot_value = (lot or "").strip()
     if lot_value:
         lot_pattern = f"%{lot_value}%"
@@ -380,7 +407,14 @@ def get_draft(db: Session, draft_id: int) -> DraftRead:
     )
     if not draft:
         raise DraftServiceError(f"Draft {draft_id} not found.")
-    return _draft_to_read(draft)
+    active_lines = [ln for ln in draft.lines if ln.deleted_at is None]
+    orphan_cds = {
+        (ln.item_cd or "").strip()
+        for ln in active_lines
+        if ln.item is None and ln.item_cd and (ln.item_cd or "").strip()
+    }
+    itemtyp_by_cd = _itemtyp_id_by_item_cd(db, orphan_cds)
+    return _draft_to_read(draft, itemtyp_by_cd)
 
 
 def approve_draft(db: Session, draft_id: int) -> DraftRead:

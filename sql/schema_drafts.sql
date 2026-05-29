@@ -81,5 +81,5 @@ CREATE TABLE IF NOT EXISTS sls_delivery_draft_lines (
 -- ALTER TABLE inv_grgi ADD COLUMN inv_receipt_draft_id INT UNSIGNED NULL DEFAULT NULL AFTER movetyps_id;
 -- ALTER TABLE inv_grgi ADD KEY idx_inv_grgi_receipt_draft (inv_receipt_draft_id);
 
-INSERT INTO m_movetyps (movetyps_nm) VALUES ('CAN')
-ON DUPLICATE KEY UPDATE movetyps_nm = VALUES(movetyps_nm);
+INSERT INTO m_movetyps (movetyps_cd) VALUES ('CAN')
+ON DUPLICATE KEY UPDATE movetyps_cd = VALUES(movetyps_cd);

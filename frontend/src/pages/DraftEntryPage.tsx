@@ -2,14 +2,25 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AppLink, useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
-import { ResizableGridTable, type GridColumnDef } from '../components/ResizableGridTable'
+import { ColoredItemCode, ColoredItemName } from '../components/ColoredItemText'
+import { ExcelLikeGridTable } from '../components/ExcelLikeGridTable'
+import type { GridColumnDef } from '../components/ResizableGridTable'
 import { DraftEditableLineGrid } from '../components/DraftEditableLineGrid'
 import { StatusBadge } from '../components/StatusBadge'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
-import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
+import {
+  editRowToDraftLine,
+  draftLinesSaveError,
+  emptyEditLine,
+  isBlankDraftLine,
+  lineToEditRow,
+  type EditLineRow,
+} from '../utils/draftEdit'
+import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
+import { getDraftLineFilterValue } from '../utils/draftGridSort'
+import { mergeDraftLineImportRows } from '../utils/draftLineExcelImport'
 import type { DraftDetail, DraftStatus, Item, Supplier } from '../types'
 import type { LocationMaster } from '../types/masters'
-import { emptyEditLine, lineToEditRow, type EditLineRow } from '../utils/draftEdit'
 import {
   dateInputToIso,
   formatItemLabel,
@@ -59,8 +70,7 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     ]
   }, [copy.itemCdLabel, copy.itemNmLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
 
-  const lineGridId = `${variant}-entry-lines-readonly-v1`
-  const lineLayout = useGridColumnLayout(lineGridId, lineColumns)
+  const lineGridId = `${variant}-entry-lines-readonly-v2`
 
   const loadDraft = useCallback(async () => {
     if (!draftId) {
@@ -69,7 +79,7 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
       setSuppliersId('')
       setReferenceNo('')
       setNotes('')
-      setLines([])
+      setLines([emptyEditLine(1)])
       return
     }
     const draft = await api.getDraft(draftId, variant)
@@ -78,7 +88,13 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     setSuppliersId(draft.suppliers_id ?? '')
     setReferenceNo(draft.reference_no ?? '')
     setNotes(draft.notes ?? '')
-    setLines(draft.lines.map(lineToEditRow))
+    setLines(
+      ensureTrailingBlankRow(
+        draft.lines.map(lineToEditRow),
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      )
+    )
   }, [draftId, variant])
 
   useEffect(() => {
@@ -103,19 +119,46 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
   }, [copy.loadFail, loadDraft])
 
   const updateLine = (key: string, patch: Partial<EditLineRow>) => {
-    setLines((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
-  }
-
-  const addRow = () => {
-    setLines((prev) => [...prev, emptyEditLine(prev.length + 1)])
+    setLines((prev) =>
+      updateRowWithTrailingBlank(
+        prev,
+        key,
+        patch,
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      ).map((row, index) => ({ ...row, line_no: index + 1 }))
+    )
   }
 
   const removeRows = (keys: string[]) => {
     if (keys.length === 0) return
     const drop = new Set(keys)
     setLines((prev) =>
-      prev.filter((row) => !drop.has(row.key)).map((row, index) => ({ ...row, line_no: index + 1 }))
+      ensureTrailingBlankRow(
+        prev
+          .filter((row) => !drop.has(row.key))
+          .map((row, index) => ({ ...row, line_no: index + 1 })),
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      )
     )
+  }
+
+  const importLines = (parsed: Record<string, string>[]) => {
+    const { rows, added } = mergeDraftLineImportRows(parsed, lines, items, locations)
+    setLines(
+      ensureTrailingBlankRow(
+        rows.map((row, index) => ({ ...row, line_no: index + 1 })),
+        isBlankDraftLine,
+        (rows) => emptyEditLine(rows.length + 1)
+      )
+    )
+    setMessage(
+      added > 0
+        ? `Imported ${added} line(s) from Excel. Save to apply.`
+        : 'No lines were added from the file.'
+    )
+    setError(null)
   }
 
   const buildPayloadLines = () => {
@@ -144,11 +187,12 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     if (!canEdit) return
     setError(null)
     setMessage(null)
-    const payloadLines = buildPayloadLines()
-    if (payloadLines.length === 0) {
-      setError(copy.lineValidation)
+    const lineError = draftLinesSaveError(lines, copy.lineValidation)
+    if (lineError) {
+      setError(lineError)
       return
     }
+    const payloadLines = buildPayloadLines()
 
     setSubmitting(true)
     try {
@@ -180,19 +224,31 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
       case 'item_cd':
         return (
           <td key={colKey}>
-            <code>{row.item_cd || '-'}</code>
+            <ColoredItemCode
+              itemtypId={row.itemtyp_id === '' ? null : row.itemtyp_id}
+              itemId={row.item_id === '' ? null : row.item_id}
+              itemCd={row.item_cd}
+            >
+              {row.item_cd || '-'}
+            </ColoredItemCode>
           </td>
         )
       case 'item_nm':
         return (
           <td key={colKey}>
-            {row.item_nm ||
-              (row.item_id !== ''
-                ? (() => {
-                    const item = items.find((i) => i.item_id === row.item_id)
-                    return item ? formatItemLabel(item) : String(row.item_id)
-                  })()
-                : '-')}
+            <ColoredItemName
+              itemtypId={row.itemtyp_id === '' ? null : row.itemtyp_id}
+              itemId={row.item_id === '' ? null : row.item_id}
+              itemCd={row.item_cd}
+            >
+              {row.item_nm ||
+                (row.item_id !== ''
+                  ? (() => {
+                      const item = items.find((i) => i.item_id === row.item_id)
+                      return item ? formatItemLabel(item) : String(row.item_id)
+                    })()
+                  : '-')}
+            </ColoredItemName>
           </td>
         )
       case 'location': {
@@ -204,11 +260,7 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
         )
       }
       case 'lot':
-        return (
-          <td key={colKey}>
-            <code>{row.lot}</code>
-          </td>
-        )
+        return <td key={colKey}>{row.lot}</td>
       case 'qty':
         return <td key={colKey} className="erp-col-num">{row.qty}</td>
       default:
@@ -312,24 +364,42 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
               items={items}
               locations={locations}
               onUpdateLine={updateLine}
-              onAddRow={addRow}
               onRemoveRows={removeRows}
+              onImportParsed={importLines}
               copy={copy}
             />
           ) : lines.length === 0 ? (
             <p className="muted erp-grid-empty">{copy.noLinesMsg}</p>
           ) : (
-            <div className="erp-grid-wrap erp-grid-wrap-detail">
-              <ResizableGridTable layout={lineLayout} isColumnFilterable={() => false}>
+            <ExcelLikeGridTable
+              gridId={lineGridId}
+              columns={lineColumns}
+              rows={lines}
+              getFilterValue={(row, col) =>
+                getDraftLineFilterValue(editRowToDraftLine(row), col)
+              }
+              layoutOptions={{ headerFilterable: true }}
+              excelLabel={copy.exportExcelLabel}
+              excelExport={{
+                sheetName: copy.exportLinesSheet,
+                filenamePrefix:
+                  variant === 'delivery'
+                    ? `delivery_draft_${draftId}_lines`
+                    : `receipt_draft_${draftId}_lines`,
+                getExportValue: (row, col) =>
+                  getDraftLineFilterValue(editRowToDraftLine(row), col),
+              }}
+            >
+              {({ layout, displayRows }) => (
                 <tbody>
-                  {lines.map((row, index) => (
+                  {displayRows.map((row, index) => (
                     <tr key={row.key} className={index % 2 === 1 ? 'row-alt' : undefined}>
-                      {lineLayout.orderedColumns.map((col) => renderReadOnlyLineCell(col.key, row))}
+                      {layout.orderedColumns.map((col) => renderReadOnlyLineCell(col.key, row))}
                     </tr>
                   ))}
                 </tbody>
-              </ResizableGridTable>
-            </div>
+              )}
+            </ExcelLikeGridTable>
           )}
         </div>
       </div>

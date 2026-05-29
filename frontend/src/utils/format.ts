@@ -78,3 +78,12 @@ export const statusLabel: Record<string, string> = {
   approved: 'Approved',
   cancelled: 'Cancelled',
 }
+
+/** Production orders: UI label for status `approved` is "Ordered". */
+export const productionStatusLabel: Record<string, string> = {
+  registered: 'Registered',
+  approved: 'Ordered',
+  started: 'Started',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+}
