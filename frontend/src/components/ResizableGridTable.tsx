@@ -12,6 +12,8 @@ export type GridColumnDef = {
 type Props = {
   layout: GridColumnLayout
   className?: string
+  /** Check-all / clear-all controls rendered in the select column header. */
+  selectColumnHeader?: ReactNode
   children: ReactNode
   sortMark?: (columnKey: string) => string
   onHeaderDoubleClick?: (columnKey: string) => void
@@ -24,6 +26,7 @@ type Props = {
 export function ResizableGridTable({
   layout,
   className,
+  selectColumnHeader,
   children,
   sortMark,
   onHeaderDoubleClick,
@@ -77,12 +80,14 @@ export function ResizableGridTable({
           {orderedColumns.map((col, index) => {
             const filterable = isColumnFilterable(col.key)
             const filterActive = isColumnFilterActive?.(col.key) ?? false
+            const isSelectHeader = col.key === 'select' && selectColumnHeader != null
             return (
               <th
                 key={col.key}
                 data-col-index={index}
                 className={[
                   col.className,
+                  isSelectHeader ? 'erp-th-select-header' : '',
                   isColumnSortable(col.key) ? 'erp-th-sortable' : '',
                   filterActive ? 'erp-th-filtered' : '',
                   !filterable ? 'erp-th-compact' : '',
@@ -93,12 +98,27 @@ export function ResizableGridTable({
                   .filter(Boolean)
                   .join(' ')}
                 title={
-                  isColumnSortable(col.key) ? `${col.label} — double-click to sort` : col.label
+                  isSelectHeader
+                    ? undefined
+                    : isColumnSortable(col.key)
+                      ? `${col.label} — double-click to sort`
+                      : col.label
                 }
-                onDoubleClick={(event) => handleHeaderDoubleClick(col.key, event)}
-                onPointerDown={(event) => handleHeaderPointerDown(index, event)}
+                onDoubleClick={
+                  isSelectHeader
+                    ? undefined
+                    : (event) => handleHeaderDoubleClick(col.key, event)
+                }
+                onPointerDown={
+                  isSelectHeader
+                    ? undefined
+                    : (event) => handleHeaderPointerDown(index, event)
+                }
               >
-                {filterable && (
+                {isSelectHeader ? (
+                  <div className="erp-th-select-controls">{selectColumnHeader}</div>
+                ) : null}
+                {!isSelectHeader && filterable && (
                   <button
                     type="button"
                     className={`erp-th-filter-btn${filterActive ? ' active' : ''}`}
@@ -112,13 +132,17 @@ export function ResizableGridTable({
                     ▼
                   </button>
                 )}
-                <span className="erp-th-drag-handle" aria-hidden>
-                  ⋮⋮
-                </span>
-                <span className="erp-th-text">
-                  {col.label}
-                  {sortMark?.(col.key) ?? ''}
-                </span>
+                {!isSelectHeader && (
+                  <span className="erp-th-drag-handle" aria-hidden>
+                    ⋮⋮
+                  </span>
+                )}
+                {!isSelectHeader && (
+                  <span className="erp-th-text">
+                    {col.label}
+                    {sortMark?.(col.key) ?? ''}
+                  </span>
+                )}
                 {col.key !== 'rownum' && (
                   <button
                     type="button"

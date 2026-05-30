@@ -12,6 +12,7 @@ export const GRID_HEADER_MIN_COMPACT = 22
 export function resolveColumnMinWidth(col: GridColumnDef, headerFilterable: boolean): number {
   if (col.minWidth != null) return col.minWidth
   if (col.key === 'rownum') return rowNumColumnWidthForRowCount(1)
+  if (col.key === 'select') return col.minWidth ?? 26
   if (!col.label.trim()) {
     return headerFilterable ? 28 : 20
   }

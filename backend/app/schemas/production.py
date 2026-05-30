@@ -131,3 +131,8 @@ class ProductionOrderRead(ProductionOrderListItem):
     lines: list[ProductionOrderLineRead]
     inputs: list[ProductionOrderInputRead]
     outputs: list[ProductionOrderOutputRead]
+
+
+class ProductionOrderBomPreview(BaseModel):
+    lines: list[ProductionOrderLineRead]
+    inputs: list[ProductionOrderInputRead]

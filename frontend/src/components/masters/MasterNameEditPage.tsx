@@ -14,6 +14,7 @@ import {
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeNameMasterImportRows } from '../../utils/nameMasterExcelImport'
+import { GridRowSelectButtons } from '../GridRowSelectButtons'
 import { MasterGridToolbar } from './MasterGridToolbar'
 
 type NameRecord = { id: number; name: string }
@@ -233,7 +234,7 @@ export function MasterNameEditPage({
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -243,15 +244,21 @@ export function MasterNameEditPage({
         loading={loading}
         isEmpty={false}
         onRefresh={() => void load()}
-        toolbarLeft={
-          <MasterGridToolbar
-            displayRowCount={grid.displayRows.length}
-            submitting={submitting}
-            rowError={rowError}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={grid.displayRows.length}
+            selectedCount={selectedKeys.size}
             onSelectAll={() =>
               setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
+          />
+        }
+        toolbarLeft={
+          <MasterGridToolbar
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
             onSave={() => void handleSave()}
           />
         }

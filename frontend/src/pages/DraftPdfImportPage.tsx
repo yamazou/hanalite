@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useState } from 'react'
 import { AppLink, useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { getDraftPageCopy } from '../config/draftPages'
-import type { Supplier } from '../types'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import { dateInputToIso, toDateInputValue } from '../utils/format'
 
 export function DraftPdfImportPage() {
@@ -15,18 +15,10 @@ export function DraftPdfImportPage() {
   const [suppliersId, setSuppliersId] = useState<number | ''>('')
   const [referenceNo, setReferenceNo] = useState('')
   const [notes, setNotes] = useState('')
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [loading, setLoading] = useState(true)
+  const { suppliers, ready: catalogReady } = useMasterCatalog()
+  const loading = !catalogReady
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .listSuppliers()
-      .then(setSuppliers)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load master data.'))
-      .finally(() => setLoading(false))
-  }, [])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -52,13 +44,12 @@ export function DraftPdfImportPage() {
   }
 
   return (
-    <ErpScreen error={error}>
+    <ErpScreen error={error} title="PDF Receipt Import">
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to="/" className="btn erp-btn erp-btn-clear">
             ← Back to list
           </AppLink>
-          <span className="erp-search-section-label">PDF Receipt Import</span>
         </div>
       </ErpSearchPanel>
 

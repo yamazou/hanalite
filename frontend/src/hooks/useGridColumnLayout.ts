@@ -8,6 +8,7 @@ import {
 } from 'react'
 import type { GridColumnDef } from '../components/ResizableGridTable'
 import {
+  dedupeColumnOrder,
   gridStorageKey,
   layoutsEqual,
   loadGridLayout,
@@ -157,7 +158,8 @@ export function useGridColumnLayout(
 
   const orderedColumns = useMemo(() => {
     const byKey = new Map(columns.map((col) => [col.key, col]))
-    const keys = pinFirst?.length ? pinKeysFirst(order, pinFirst) : order
+    const rawKeys = pinFirst?.length ? pinKeysFirst(order, pinFirst) : order
+    const keys = dedupeColumnOrder(rawKeys)
     return keys.map((key) => byKey.get(key)).filter((col): col is GridColumnDef => col != null)
   }, [order, columns, pinFirst])
 
@@ -295,12 +297,12 @@ function mergeOrderInHook(saved: string[], keys: string[], pinFirst?: string[]):
     next = keys
   } else {
     const keySet = new Set(keys)
-    next = saved.filter((key) => keySet.has(key))
+    next = dedupeColumnOrder(saved.filter((key) => keySet.has(key)))
     for (const key of keys) {
       if (!next.includes(key)) next.push(key)
     }
   }
-  return pinFirst?.length ? pinKeysFirst(next, pinFirst) : next
+  return pinFirst?.length ? pinKeysFirst(dedupeColumnOrder(next), pinFirst) : next
 }
 
 function mergeWidthsInHook(

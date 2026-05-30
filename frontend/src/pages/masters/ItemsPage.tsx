@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
+import { ToolbarFeedback } from '../../components/ToolbarFeedback'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterItemEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
-import type { ItemTyp, SupplierMaster } from '../../types/masters'
+import type { ItemTyp } from '../../types/masters'
 import {
   buildItemPayload,
   emptyEditItemRow,
@@ -18,16 +20,20 @@ import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeItemImportRows } from '../../utils/itemExcelImport'
 import { itemTypDropdownLabel, itemTypTabLabel } from '../../utils/itemTypDisplay'
+import {
+  useMasterCatalog,
+  useRefreshMasterCatalogAfterSave,
+} from '../../context/MasterCatalogContext'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
 
 export type ItemsTabFilter = 'ALL' | number
 
 export function ItemsPage() {
-  const { colorForItemRef, reload: reloadItemTypColors } = useItemTypColors()
+  const { colorForItemRef } = useItemTypColors()
+  const { itemtyps, suppliers, customers } = useMasterCatalog()
+  const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditItemRow[]>([])
-  const [itemtyps, setItemtyps] = useState<ItemTyp[]>([])
-  const [suppliers, setSuppliers] = useState<SupplierMaster[]>([])
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -39,13 +45,7 @@ export function ItemsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [items, types, sups] = await Promise.all([
-        api.listItemsMaster(),
-        api.listItemtyps(),
-        api.listSuppliersMaster(),
-      ])
-      setItemtyps(types)
-      setSuppliers(sups)
+      const items = await api.listItemsMaster()
       setEditRows(
         ensureTrailingBlankRow(
           listRowsToEditItemRows(items),
@@ -130,6 +130,8 @@ export function ItemsPage() {
         case 'supplier1':
         case 'supplier2':
         case 'supplier3':
+        case 'customer1':
+        case 'customer2':
           return toFilterCellValue('')
         default:
           return toFilterCellValue('')
@@ -150,6 +152,8 @@ export function ItemsPage() {
         case 'supplier1':
         case 'supplier2':
         case 'supplier3':
+        case 'customer1':
+        case 'customer2':
           return ''
         default:
           return ''
@@ -238,6 +242,17 @@ export function ItemsPage() {
     )
   }
 
+  const setCustomer = (key: string, index: number, value: number | '') => {
+    setEditRows((rows) =>
+      rows.map((row) => {
+        if (row.key !== key) return row
+        const customer_ids = [...row.customer_ids]
+        customer_ids[index] = value
+        return { ...row, customer_ids }
+      })
+    )
+  }
+
   const renderSupplierCell = (row: EditItemRow, index: number) => (
     <select
       className={`erp-grid-input${row.supplier_ids[index] === '' ? ' erp-input-empty' : ''}`}
@@ -252,7 +267,25 @@ export function ItemsPage() {
       <option value="" />
       {suppliers.map((s) => (
         <option key={s.suppliers_id} value={s.suppliers_id}>
-          {s.suppliers_nm}
+          {s.suppliers_cd} / {s.suppliers_nm}
+        </option>
+      ))}
+    </select>
+  )
+
+  const renderCustomerCell = (row: EditItemRow, index: number) => (
+    <select
+      className={`erp-grid-input${row.customer_ids[index] === '' ? ' erp-input-empty' : ''}`}
+      value={row.customer_ids[index]}
+      aria-label={index === 0 ? 'Customer 1' : 'Customer 2'}
+      onChange={(e) =>
+        setCustomer(row.key, index, e.target.value === '' ? '' : Number(e.target.value))
+      }
+    >
+      <option value="" />
+      {customers.map((c) => (
+        <option key={c.customers_id} value={c.customers_id}>
+          {c.customers_cd} / {c.customers_nm}
         </option>
       ))}
     </select>
@@ -368,7 +401,7 @@ export function ItemsPage() {
       }
       setSuccess('Items saved.')
       await load()
-      await reloadItemTypColors()
+      refreshMasterCatalog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -397,42 +430,23 @@ export function ItemsPage() {
           </button>
         ))}
       </div>
-      <div className="erp-check-toggle-group">
+      <div className="erp-detail-toolbar-actions">
         <button
           type="button"
-          className="erp-check-toggle-btn"
-          title="Select all rows"
-          aria-label="Select all rows"
-          disabled={grid.displayRows.length === 0}
-          onClick={() => setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))}
+          className="btn erp-btn erp-btn-search btn-sm"
+          disabled={submitting}
+          onClick={() => void handleSave()}
         >
-          <span className="erp-check-toggle-icon checked" aria-hidden />
+          {submitting ? 'Updating…' : 'Update'}
         </button>
-        <button
-          type="button"
-          className="erp-check-toggle-btn"
-          title="Clear selection"
-          aria-label="Clear selection"
-          disabled={grid.displayRows.length === 0}
-          onClick={() => setSelectedKeys(new Set())}
-        >
-          <span className="erp-check-toggle-icon unchecked" aria-hidden />
-        </button>
+        <ToolbarFeedback message={success} type="success" />
+        <ToolbarFeedback message={rowError} type="error" />
       </div>
-      <button
-        type="button"
-        className="btn erp-btn erp-btn-search btn-sm"
-        disabled={submitting}
-        onClick={() => void handleSave()}
-      >
-        {submitting ? 'Saving…' : 'Save'}
-      </button>
-      {rowError && <span className="alert-inline error">{rowError}</span>}
     </div>
   )
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -442,6 +456,16 @@ export function ItemsPage() {
         loading={loading}
         isEmpty={false}
         onRefresh={() => void load()}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={grid.displayRows.length}
+            selectedCount={selectedKeys.size}
+            onSelectAll={() =>
+              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
+            }
+            onClearSelection={() => setSelectedKeys(new Set())}
+          />
+        }
         toolbarLeft={toolbar}
         showSaveGridButton
         panelClassName="erp-panel-grow"
@@ -564,6 +588,18 @@ export function ItemsPage() {
                         return (
                           <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
                             {renderSupplierCell(row, 2)}
+                          </td>
+                        )
+                      case 'customer1':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
+                            {renderCustomerCell(row, 0)}
+                          </td>
+                        )
+                      case 'customer2':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit erp-grid-cell-blank">
+                            {renderCustomerCell(row, 1)}
                           </td>
                         )
                       default:

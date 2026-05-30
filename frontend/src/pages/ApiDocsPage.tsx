@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert } from '../components/Alert'
+import { ErpScreen } from '../components/erp/ErpScreen'
 import {
   methodLabel,
   parseOpenApi,
@@ -83,9 +83,12 @@ export function ApiDocsPage() {
   }, [filtered, selectedId])
 
   return (
-    <div className="erp-screen erp-api-docs">
-      {error && <Alert type="error" message={error} />}
-
+    <ErpScreen
+      error={error}
+      className="erp-api-docs"
+      title={info?.title ?? 'API Documentation'}
+      onRefresh={() => void load()}
+    >
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
           <div className="erp-search-row erp-api-search-row">
@@ -130,9 +133,6 @@ export function ApiDocsPage() {
               >
                 Swagger UI
               </a>
-              <button type="button" className="btn erp-btn erp-btn-clear" onClick={() => void load()}>
-                Refresh
-              </button>
             </div>
           </div>
         </div>
@@ -303,6 +303,6 @@ export function ApiDocsPage() {
           )}
         </div>
       </div>
-    </div>
+    </ErpScreen>
   )
 }

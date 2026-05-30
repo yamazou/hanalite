@@ -1,7 +1,9 @@
 export function normalizeTabPath(path: string): string {
-  if (!path) return '/'
-  if (path === '/') return '/'
-  return path.replace(/\/+$/, '')
+  const trimmed = (path ?? '').trim()
+  if (!trimmed || trimmed === '/') return '/'
+  const withoutTrailing = trimmed.replace(/\/+$/, '') || '/'
+  if (withoutTrailing === '/') return '/'
+  return withoutTrailing.startsWith('/') ? withoutTrailing : `/${withoutTrailing}`
 }
 
 export type AppRouteTarget = {
@@ -25,4 +27,8 @@ export function parseAppRoute(to: string): AppRouteTarget {
 /** Full in-app route for navigation (pathname + query). */
 export function formatAppRoute(pathname: string, search = ''): string {
   return pathname + search
+}
+
+export function tabRouteKey(pathname: string, search = ''): string {
+  return formatAppRoute(normalizeTabPath(pathname), search)
 }

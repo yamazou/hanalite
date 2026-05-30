@@ -4,7 +4,9 @@ import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterLocationEditColumns } from '../../components/erp/masterGridColumns'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import type { LocationMaster } from '../../types/masters'
 import {
@@ -22,6 +24,7 @@ import { mergeLocationImportRows } from '../../utils/locationExcelImport'
 const LOCATION_TYPES: LocationMaster['location_type'][] = ['RM', 'Process', 'NG', 'FG']
 
 export function LocationsPage() {
+  const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditLocationRow[]>([])
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
@@ -226,6 +229,7 @@ export function LocationsPage() {
         }
       }
       setSuccess('Locations saved.')
+      refreshMasterCatalog()
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -235,7 +239,7 @@ export function LocationsPage() {
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -245,15 +249,21 @@ export function LocationsPage() {
         loading={loading}
         isEmpty={false}
         onRefresh={() => void load()}
-        toolbarLeft={
-          <MasterGridToolbar
-            displayRowCount={grid.displayRows.length}
-            submitting={submitting}
-            rowError={rowError}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={grid.displayRows.length}
+            selectedCount={selectedKeys.size}
             onSelectAll={() =>
               setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
+          />
+        }
+        toolbarLeft={
+          <MasterGridToolbar
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
             onSave={() => void handleSave()}
           />
         }

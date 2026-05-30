@@ -77,5 +77,6 @@ export interface Item {
 
 export interface Supplier {
   suppliers_id: number
+  suppliers_cd: string
   suppliers_nm: string
 }

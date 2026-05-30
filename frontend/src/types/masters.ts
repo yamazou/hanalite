@@ -34,6 +34,10 @@ export interface ItemListRow {
   supplier1_nm: string | null
   supplier2_id: number | null
   supplier3_id: number | null
+  customer1_id: number | null
+  customer1_nm: string | null
+  customer2_id: number | null
+  customer2_nm: string | null
 }
 
 export interface ItemSearchRow {
@@ -52,6 +56,8 @@ export interface ItemDetail {
   supplier1_id: number | null
   supplier2_id: number | null
   supplier3_id: number | null
+  customer1_id: number | null
+  customer2_id: number | null
 }
 
 export interface ItemPayload {
@@ -61,10 +67,20 @@ export interface ItemPayload {
   supplier1_id?: number | null
   supplier2_id?: number | null
   supplier3_id?: number | null
+  customer1_id?: number | null
+  customer2_id?: number | null
+}
+
+export interface CustomerMaster {
+  customers_id: number
+  customers_cd: string
+  customers_nm: string
+  created_at?: string | null
 }
 
 export interface SupplierMaster {
   suppliers_id: number
+  suppliers_cd: string
   suppliers_nm: string
   created_at?: string | null
 }

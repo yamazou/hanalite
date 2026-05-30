@@ -29,13 +29,12 @@ export function ProductionExcelImportPage() {
   }
 
   return (
-    <ErpScreen error={error}>
+    <ErpScreen error={error} title="Production Excel Import">
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to="/production/orders" className="btn erp-btn erp-btn-clear">
             Back to list
           </AppLink>
-          <span className="erp-search-section-label">Production Excel Import</span>
         </div>
       </ErpSearchPanel>
       <div className="erp-panel erp-panel-hint">

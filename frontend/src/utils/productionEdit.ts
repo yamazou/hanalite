@@ -10,6 +10,8 @@ import type {
 
   ProductionOrderLineWritePayload,
 
+  ProductionStatus,
+
 } from '../types/production'
 
 import type { Item } from '../types'
@@ -87,7 +89,19 @@ export function newEditKey(): string {
 
 
 
-export function lineToEditProcessRow(ln: ProductionOrderLine): EditProcessRow {
+export function actualQtyForEdit(
+  actual: string | number | null | undefined,
+  status: ProductionStatus
+): string {
+  if (status === 'registered') return ''
+  if (actual == null || actual === '') return ''
+  return String(actual)
+}
+
+export function lineToEditProcessRow(
+  ln: ProductionOrderLine,
+  status: ProductionStatus
+): EditProcessRow {
 
   return {
 
@@ -109,7 +123,7 @@ export function lineToEditProcessRow(ln: ProductionOrderLine): EditProcessRow {
 
     planned_qty: ln.planned_qty != null ? String(ln.planned_qty) : '',
 
-    actual_qty: ln.actual_qty != null ? String(ln.actual_qty) : '',
+    actual_qty: actualQtyForEdit(ln.actual_qty, status),
 
     status: ln.status,
 
@@ -119,7 +133,51 @@ export function lineToEditProcessRow(ln: ProductionOrderLine): EditProcessRow {
 
 
 
-export function inputToEditInputRow(ln: ProductionOrderInput): EditInputRow {
+export function consumeQtyForEdit(
+  consume: string | number | null | undefined,
+  req: string | number,
+  status: ProductionStatus,
+  orderPlannedQty?: string | number | null
+): string {
+  if (status === 'registered') return ''
+  if (consume == null || consume === '') return ''
+  const consumeNum = Number(consume)
+  if (Number.isNaN(consumeNum)) return ''
+  const reqNum = Number(req)
+  if (Number(consumeNum) === reqNum) return ''
+  if (orderPlannedQty != null) {
+    const plannedNum = Number(orderPlannedQty)
+    if (Number.isFinite(plannedNum) && consumeNum === reqNum * plannedNum) return ''
+  }
+  return String(consume)
+}
+
+export type InputConsumeQtyContext = {
+  status: ProductionStatus
+  orderPlannedQty: string | number
+}
+
+export function resolveInputConsumeQty(
+  row: EditInputRow,
+  context?: InputConsumeQtyContext
+): number {
+  const raw = row.consume_qty.trim()
+  if (raw) return Number(raw)
+  const req = Number(row.req_qty)
+  if (context && Number.isFinite(req)) {
+    const planned = Number(context.orderPlannedQty)
+    if (Number.isFinite(planned)) {
+      return req * planned
+    }
+  }
+  return req
+}
+
+export function inputToEditInputRow(
+  ln: ProductionOrderInput,
+  status: ProductionStatus,
+  orderPlannedQty: string | number
+): EditInputRow {
 
   return {
 
@@ -139,7 +197,7 @@ export function inputToEditInputRow(ln: ProductionOrderInput): EditInputRow {
 
     req_qty: String(ln.req_qty),
 
-    consume_qty: String(ln.consume_qty),
+    consume_qty: consumeQtyForEdit(ln.consume_qty, ln.req_qty, status, orderPlannedQty),
 
     lot: ln.lot ?? '',
 
@@ -317,10 +375,11 @@ export function isBlankInputRow(row: EditInputRow): boolean {
 /** Drop extra trailing blanks, then keep exactly one empty input row at the end. */
 export function inputRowsWithSingleTrailingBlank(
   rows: EditInputRow[],
-  createBlank: (existing: EditInputRow[]) => EditInputRow
+  createBlank: (existing: EditInputRow[]) => EditInputRow,
+  isBlank: (row: EditInputRow) => boolean = isBlankInputRow
 ): EditInputRow[] {
-  const data = rows.filter((row) => !isBlankInputRow(row))
-  return ensureTrailingBlankRow(data, isBlankInputRow, createBlank)
+  const data = rows.filter((row) => !isBlank(row))
+  return ensureTrailingBlankRow(data, isBlank, createBlank)
 }
 
 export function isActiveInputRow(row: EditInputRow): boolean {
@@ -333,11 +392,7 @@ export function isActiveInputRow(row: EditInputRow): boolean {
 
     Boolean(row.req_qty.trim()) &&
 
-    Boolean(row.consume_qty.trim()) &&
-
-    Number(row.req_qty) > 0 &&
-
-    Number(row.consume_qty) > 0
+    Number(row.req_qty) > 0
 
   )
 
@@ -401,7 +456,9 @@ export function buildProcessPayload(
         : resolveRmLocationForProcessWip(row.wip_location_id, row.key, rows)
 
     return {
-      ...(row.prd_order_line_id != null ? { prd_order_line_id: row.prd_order_line_id } : {}),
+      ...(row.prd_order_line_id != null && row.prd_order_line_id > 0
+        ? { prd_order_line_id: row.prd_order_line_id }
+        : {}),
       line_no: index + 1,
       rm_location_id: Number(rmId),
       wip_location_id: Number(row.wip_location_id),
@@ -420,11 +477,16 @@ export function buildProcessPayload(
 
 
 
-export function buildInputPayload(rows: EditInputRow[]): ProductionOrderInputWritePayload[] {
+export function buildInputPayload(
+  rows: EditInputRow[],
+  context?: InputConsumeQtyContext
+): ProductionOrderInputWritePayload[] {
 
   return rows.filter(isActiveInputRow).map((row) => ({
 
-    ...(row.prd_order_input_id != null ? { prd_order_input_id: row.prd_order_input_id } : {}),
+    ...(row.prd_order_input_id != null && row.prd_order_input_id > 0
+      ? { prd_order_input_id: row.prd_order_input_id }
+      : {}),
 
     line_no: row.line_no,
 
@@ -434,12 +496,80 @@ export function buildInputPayload(rows: EditInputRow[]): ProductionOrderInputWri
 
     req_qty: Number(row.req_qty),
 
-    consume_qty: Number(row.consume_qty),
+    consume_qty: resolveInputConsumeQty(row, context),
 
     lot: row.lot.trim() || null,
 
   }))
 
+}
+
+
+
+export function bomPreviewToEditProcessRows(
+  lines: ProductionOrderLine[],
+  status: ProductionStatus
+): EditProcessRow[] {
+  return lines.map((ln) => ({
+    key: `preview-line-${ln.line_no}`,
+    line_no: ln.line_no,
+    wip_location_id: ln.wip_location_id,
+    rm_location_id: ln.rm_location_id,
+    output_item_id: ln.output_item_id ?? '',
+    output_item_cd: ln.output_item_cd ?? '',
+    output_item_nm: ln.output_item_nm ?? '',
+    planned_qty: ln.planned_qty != null ? String(ln.planned_qty) : '',
+    actual_qty: actualQtyForEdit(ln.actual_qty, status),
+    status: ln.status,
+  }))
+}
+
+export function bomPreviewToEditInputRows(
+  inputs: ProductionOrderInput[],
+  status: ProductionStatus,
+  orderPlannedQty: string | number
+): EditInputRow[] {
+  return inputs.map((ln, index) => ({
+    key: `preview-input-${ln.line_no}-${ln.item_id}-${index}`,
+    line_no: ln.line_no,
+    item_id: ln.item_id,
+    item_cd: ln.item_cd,
+    item_nm: ln.item_nm,
+    from_location_id: ln.from_location_id ?? '',
+    req_qty: String(ln.req_qty),
+    consume_qty: consumeQtyForEdit(ln.consume_qty, ln.req_qty, status, orderPlannedQty),
+    lot: ln.lot ?? '',
+  }))
+}
+
+/** Data rows first, trailing blank row(s) always last (stable for grid display/sort). */
+export function sortEditInputRowsForDisplay(rows: EditInputRow[]): EditInputRow[] {
+  const data = rows.filter((row) => !isBlankInputRow(row))
+  const blanks = rows.filter(isBlankInputRow)
+  return [...data, ...blanks]
+}
+
+export function bomPreviewToEditInputRowsWithTrailingBlanks(
+  inputs: ProductionOrderInput[],
+  processLineNos: number[],
+  status: ProductionStatus,
+  orderPlannedQty: string | number
+): EditInputRow[] {
+  const rows = bomPreviewToEditInputRows(inputs, status, orderPlannedQty)
+  const lineNos =
+    processLineNos.length > 0
+      ? processLineNos
+      : [...new Set(rows.map((row) => row.line_no))].sort((a, b) => a - b)
+  const result: EditInputRow[] = []
+  for (const lineNo of lineNos) {
+    result.push(
+      ...inputRowsWithSingleTrailingBlank(
+        rows.filter((row) => row.line_no === lineNo),
+        () => emptyEditInputRow(lineNo)
+      )
+    )
+  }
+  return result
 }
 
 
@@ -467,7 +597,7 @@ export function createBlankInputRowForDetail(
 
 export function detailToEditProcessRows(detail: ProductionOrderDetail): EditProcessRow[] {
 
-  return detail.lines.map((ln) => lineToEditProcessRow(ln))
+  return detail.lines.map((ln) => lineToEditProcessRow(ln, detail.status))
 
 }
 
@@ -475,7 +605,7 @@ export function detailToEditProcessRows(detail: ProductionOrderDetail): EditProc
 
 export function detailToEditInputRows(detail: ProductionOrderDetail): EditInputRow[] {
 
-  return detail.inputs.map(inputToEditInputRow)
+  return detail.inputs.map((ln) => inputToEditInputRow(ln, detail.status, detail.planned_qty))
 
 }
 

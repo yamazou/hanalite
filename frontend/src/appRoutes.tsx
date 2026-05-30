@@ -9,10 +9,12 @@ import { CurrentStockPage } from './pages/CurrentStockPage'
 import { GrgiPage } from './pages/GrgiPage'
 import { LotTracePage } from './pages/LotTracePage'
 import { BomsPage } from './pages/masters/BomsPage'
+import { ItemProcessesPage } from './pages/masters/ItemProcessesPage'
 import { ItemTypesPage } from './pages/masters/ItemTypesPage'
 import { ItemsPage } from './pages/masters/ItemsPage'
 import { MoveTypesPage } from './pages/masters/MoveTypesPage'
 import { LocationsPage } from './pages/masters/LocationsPage'
+import { CustomersPage } from './pages/masters/CustomersPage'
 import { SuppliersPage } from './pages/masters/SuppliersPage'
 import { ApiDocsPage } from './pages/ApiDocsPage'
 import { ProductionOrdersPage } from './pages/ProductionOrdersPage'
@@ -48,10 +50,12 @@ export const appRouteObjects: RouteObject[] = [
   { path: 'trace', element: <LotTracePage /> },
   { path: 'masters/itemtyps', element: <ItemTypesPage /> },
   { path: 'masters/suppliers', element: <SuppliersPage /> },
+  { path: 'masters/customers', element: <CustomersPage /> },
   { path: 'masters/movetyps', element: <MoveTypesPage /> },
   { path: 'masters/locations', element: <LocationsPage /> },
   { path: 'masters/items', element: <ItemsPage /> },
   { path: 'masters/boms', element: <BomsPage /> },
+  { path: 'masters/item-processes', element: <ItemProcessesPage /> },
   { path: 'api-docs', element: <ApiDocsPage /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ]

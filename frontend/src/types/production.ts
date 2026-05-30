@@ -194,7 +194,10 @@ export interface ProductionOrderInputWritePayload {
   line_no?: number
 }
 
-
+export interface ProductionOrderBomPreview {
+  lines: ProductionOrderLine[]
+  inputs: ProductionOrderInput[]
+}
 
 export interface ProductionOrderUpdatePayload {
 

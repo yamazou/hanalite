@@ -17,11 +17,14 @@ import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeItemTypImportRows } from '../../utils/itemTypExcelImport'
 import { normalizeItemTypColor } from '../../utils/itemTypColor'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
 import { ItemTypColorCell } from '../../components/masters/ItemTypColorCell'
+import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 
 export function ItemTypesPage() {
+  const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const { reload: reloadItemTypColors } = useItemTypColors()
   const [editRows, setEditRows] = useState<EditItemTypRow[]>([])
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
@@ -238,6 +241,7 @@ export function ItemTypesPage() {
         }
       }
       setSuccess('Item types saved.')
+      refreshMasterCatalog()
       await load()
       await reloadItemTypColors()
     } catch (err) {
@@ -248,7 +252,7 @@ export function ItemTypesPage() {
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -258,15 +262,21 @@ export function ItemTypesPage() {
         loading={loading}
         isEmpty={false}
         onRefresh={() => void load()}
-        toolbarLeft={
-          <MasterGridToolbar
-            displayRowCount={grid.displayRows.length}
-            submitting={submitting}
-            rowError={rowError}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={grid.displayRows.length}
+            selectedCount={selectedKeys.size}
             onSelectAll={() =>
               setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
+          />
+        }
+        toolbarLeft={
+          <MasterGridToolbar
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
             onSave={() => void handleSave()}
           />
         }

@@ -27,6 +27,7 @@ import type {
   MoveTyp,
 } from '../types/inventory'
 import type {
+  ProductionOrderBomPreview,
   ProductionOrderCreatePayload,
   ProductionOrderDetail,
   ProductionOrderListItem,
@@ -127,16 +128,36 @@ function formatApiErrorDetail(detail: unknown): string {
   return parts.length > 0 ? parts.join('; ') : JSON.stringify(detail)
 }
 
+const API_UNAVAILABLE_MSG =
+  'Cannot reach the hanalite API. Start MySQL in XAMPP, run start-hanalite.bat, and wait until the API window shows "Application startup complete".'
+
+function isGenericServerError(status: number, detail: string): boolean {
+  if (status < 500) return false
+  const normalized = detail.trim().toLowerCase()
+  return (
+    normalized === '' ||
+    normalized === 'internal server error' ||
+    normalized === 'bad gateway' ||
+    normalized === 'service unavailable' ||
+    normalized === 'gateway timeout'
+  )
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${API_PREFIX}${path}`
   const headers = new Headers(options?.headers)
   if (!headers.has('Content-Type') && options?.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
-  const res = await fetch(url, {
-    ...options,
-    headers,
-  })
+  let res: Response
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers,
+    })
+  } catch {
+    throw new Error(API_UNAVAILABLE_MSG)
+  }
 
   if (!res.ok) {
     let detail = res.statusText
@@ -146,7 +167,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         detail = formatApiErrorDetail(body.detail)
       }
     } catch {
-      /* ignore */
+      if (isGenericServerError(res.status, detail)) {
+        detail = API_UNAVAILABLE_MSG
+      }
+    }
+    if (isGenericServerError(res.status, detail)) {
+      detail = API_UNAVAILABLE_MSG
     }
     if (res.status === 404 && path.startsWith('/inventory/')) {
       detail =
@@ -260,18 +286,39 @@ export const api = {
     request<void>(`/masters/itemtyps/${itemtyp_id}`, { method: 'DELETE' }),
 
   listSuppliersMaster: () => request<SupplierMaster[]>('/masters/suppliers'),
-  createSupplier: (suppliers_nm: string) =>
+  createSupplier: (payload: { suppliers_cd: string; suppliers_nm: string }) =>
     request<SupplierMaster>('/masters/suppliers', {
       method: 'POST',
-      body: JSON.stringify({ suppliers_nm }),
+      body: JSON.stringify(payload),
     }),
-  updateSupplier: (suppliers_id: number, suppliers_nm: string) =>
+  updateSupplier: (
+    suppliers_id: number,
+    payload: { suppliers_cd: string; suppliers_nm: string }
+  ) =>
     request<SupplierMaster>(`/masters/suppliers/${suppliers_id}`, {
       method: 'PUT',
-      body: JSON.stringify({ suppliers_nm }),
+      body: JSON.stringify(payload),
     }),
   deleteSupplier: (suppliers_id: number) =>
     request<void>(`/masters/suppliers/${suppliers_id}`, { method: 'DELETE' }),
+
+  listCustomersMaster: () =>
+    request<import('../types/masters').CustomerMaster[]>('/masters/customers'),
+  createCustomer: (payload: { customers_cd: string; customers_nm: string }) =>
+    request<import('../types/masters').CustomerMaster>('/masters/customers', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateCustomer: (
+    customers_id: number,
+    payload: { customers_cd: string; customers_nm: string }
+  ) =>
+    request<import('../types/masters').CustomerMaster>(`/masters/customers/${customers_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteCustomer: (customers_id: number) =>
+    request<void>(`/masters/customers/${customers_id}`, { method: 'DELETE' }),
 
   listMovetypsMaster: () => request<MoveTypMaster[]>('/masters/movetyps'),
   createMoveTyp: (payload: { movetyps_cd: string; movetyps_nm?: string | null }) =>
@@ -334,6 +381,26 @@ export const api = {
     request<BomRow>(`/boms/${bom_id}`, { method: 'PUT', body: JSON.stringify(payload) }),
 
   deleteBom: (bom_id: number) => request<void>(`/boms/${bom_id}`, { method: 'DELETE' }),
+
+  getItemProcesses: (item_id: number) =>
+    request<import('../types/itemprocs').ItemProcessesOut>(`/masters/items/${item_id}/processes`),
+
+  listItemProcessFinalItems: () =>
+    request<import('../types/itemprocs').ItemProcessFinalItem[]>(
+      '/masters/items/processes/final-items'
+    ),
+
+  saveItemProcesses: (item_id: number, payload: import('../types/itemprocs').ItemProcessesSave) =>
+    request<import('../types/itemprocs').ItemProcessesOut>(`/masters/items/${item_id}/processes`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  importItemProcessesFromBom: (item_id: number) =>
+    request<import('../types/itemprocs').ItemProcessesOut>(
+      `/masters/items/${item_id}/processes/import-from-bom`,
+      { method: 'POST' }
+    ),
 
   downloadTemplate: async (kind: DraftKind = 'receipt') => {
     const url = `${API_BASE}${API_PREFIX}${draftBase(kind)}/template`
@@ -511,6 +578,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ basis_qty }),
     }),
+  previewProductionOrderFromBom: (order_id: number, planned_qty?: number) => {
+    const params = new URLSearchParams()
+    if (planned_qty != null && Number.isFinite(planned_qty) && planned_qty > 0) {
+      params.set('planned_qty', String(planned_qty))
+    }
+    const qs = params.toString()
+    return request<ProductionOrderBomPreview>(
+      `/production/orders/${order_id}/bom-preview${qs ? `?${qs}` : ''}`
+    )
+  },
   reloadProductionOrderFromBom: (order_id: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}/reload-bom`, {
       method: 'POST',

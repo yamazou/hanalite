@@ -7,8 +7,10 @@ import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { grgiHistoryColumns } from '../components/erp/masterGridColumns'
 import type { ItemSearchRow } from '../types/masters'
-import type { GrgiHistory, MoveTyp } from '../types/inventory'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
+import type { GrgiHistory } from '../types/inventory'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { datetimeLocalToIso, formatDateTime, formatQty, toDatetimeLocalValue } from '../utils/format'
 import { ColoredItemName } from '../components/ColoredItemText'
 import { toFilterCellValue } from '../utils/gridColumnFilter'
@@ -16,7 +18,7 @@ import { resolveLocationIdFromText, suggestCurrentLots, suggestLocations } from 
 
 export function GrgiPage() {
   const [history, setHistory] = useState<GrgiHistory[]>([])
-  const [movetyps, setMovetyps] = useState<MoveTyp[]>([])
+  const { movetyps } = useMasterCatalog()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -38,9 +40,8 @@ export function GrgiPage() {
     setLoading(true)
     setError(null)
     try {
-      const [h, m] = await Promise.all([api.listGrgiHistory(80), api.listMovetyps()])
+      const h = await api.listGrgiHistory(80)
       setHistory(h)
-      setMovetyps(m)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -163,6 +164,8 @@ export function GrgiPage() {
     }
   }, [])
 
+  const [gridLayout, setGridLayout] = useState<GridColumnLayout | null>(null)
+
   const grid = useExcelLikeGrid({
     columns: grgiHistoryColumns,
     rows: history,
@@ -209,7 +212,15 @@ export function GrgiPage() {
   )
 
   return (
-    <ErpScreen error={error} success={success} className="erp-screen-stacked">
+    <ErpScreen
+      error={error}
+      success={success}
+      className="erp-screen-stacked"
+      title="GR/GI Movements"
+      onRefresh={load}
+      onSaveGrid={() => gridLayout?.saveLayout()}
+      saveGridIsDirty={gridLayout?.isDirty}
+    >
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpSearchPanel>
@@ -321,16 +332,17 @@ export function GrgiPage() {
 
       <ErpGridPanel
         gridId="inventory-grgi-history-v1"
-        title="History"
+        hidePanelTitleBar
         columns={grgiHistoryColumns}
         loading={loading}
         isEmpty={!loading && history.length === 0}
         emptyText="No history"
-        onRefresh={load}
         panelClassName="erp-panel-grow-main"
-        onLayoutReady={grid.onLayoutReady}
+        onLayoutReady={(layout) => {
+          setGridLayout(layout)
+          grid.onLayoutReady(layout)
+        }}
         onGridContextMenu={grid.openContextMenu}
-        showSaveGridButton
         {...grid.tableProps}
       >
         {(layout) => (

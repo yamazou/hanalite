@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.production import (
+    ProductionOrderBomPreview,
     ProductionOrderCompleteLineIn,
     ProductionOrderCreate,
     ProductionOrderListItem,
@@ -25,6 +26,7 @@ from app.services.production import (
     delete_order,
     get_order,
     list_orders,
+    preview_order_from_bom,
     recalculate_inputs,
     reload_order_from_bom,
     suggest_production_lots,
@@ -122,6 +124,18 @@ def api_update_order(
         return row
     except ProductionError as e:
         db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/{order_id}/bom-preview", response_model=ProductionOrderBomPreview)
+def api_preview_order_from_bom(
+    order_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    planned_qty: Decimal | None = Query(default=None, gt=0),
+):
+    try:
+        return preview_order_from_bom(db, order_id, planned_qty=planned_qty)
+    except ProductionError as e:
         raise _handle_error(e) from e
 
 

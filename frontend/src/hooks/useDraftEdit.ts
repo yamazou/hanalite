@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { DraftVariant } from '../config/draftPages'
-import type { DraftDetail, Item, Supplier } from '../types'
-import type { LocationMaster } from '../types/masters'
+import type { DraftDetail } from '../types'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import {
   type EditLineRow,
   type HeaderEdit,
@@ -37,9 +37,7 @@ export function useDraftEdit(
   const [rowError, setRowError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [items, setItems] = useState<Item[]>([])
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [locations, setLocations] = useState<LocationMaster[]>([])
+  const { items, suppliers, locations } = useMasterCatalog()
   const [headerEdit, setHeaderEdit] = useState<HeaderEdit | null>(null)
   const [editLines, setEditLines] = useState<EditLineRow[]>([])
 
@@ -86,32 +84,6 @@ export function useDraftEdit(
   useEffect(() => {
     void load()
   }, [load, refreshToken])
-
-  useEffect(() => {
-    if (!canEdit) return
-    Promise.all([
-      api.listItemsMaster(),
-      api.listSuppliers(),
-      api.listLocationsMaster(),
-    ])
-      .then(([i, s, l]) => {
-        setItems(
-          i.map((row) => ({
-            item_id: row.item_id,
-            item_cd: row.item_cd,
-            item_nm: row.item_nm,
-            itemtyp_id: row.itemtyp_id,
-          }))
-        )
-        setSuppliers(s)
-        setLocations(l)
-      })
-      .catch(() => {
-        setItems([])
-        setSuppliers([])
-        setLocations([])
-      })
-  }, [canEdit])
 
   useEffect(() => {
     if (!canEdit || items.length === 0 || editLines.length === 0) return

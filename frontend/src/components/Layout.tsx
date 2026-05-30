@@ -1,9 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useRoutes } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { useLocation, useNavigate, useRoutes, type Location } from 'react-router-dom'
 import { appRouteObjects } from '../appRoutes'
 import { AppShellProvider } from '../context/AppNavigateContext'
 import { ItemTypColorProvider } from '../context/ItemTypColorContext'
-import { formatAppRoute, normalizeTabPath, parseAppRoute } from '../utils/appRoute'
+import { MasterCatalogProvider } from '../context/MasterCatalogContext'
+import {
+  formatAppRoute,
+  normalizeTabPath,
+  parseAppRoute,
+  tabRouteKey,
+} from '../utils/appRoute'
 
 type NavLink = { to: string; label: string }
 /** `to` = pathname (tab key); `search` = query string including `?` when set. */
@@ -90,10 +96,12 @@ const navGroups: NavGroup[] = [
     items: [
       { to: '/masters/items', label: 'Items' },
       { to: '/masters/locations', label: 'Locations' },
+      { to: '/masters/item-processes', label: 'Item Processes' },
       { to: '/masters/boms', label: 'BOM' },
       { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/movetyps', label: 'Move Types' },
       { to: '/masters/suppliers', label: 'Suppliers' },
+      { to: '/masters/customers', label: 'Customers' },
     ],
   },
 ]
@@ -146,6 +154,48 @@ function normalizeAndDedupeTabs(
   return Array.from(deduped.values())
 }
 
+function labelForPath(pathname: string): string {
+  let best: NavLink | null = null
+  for (const group of navGroups) {
+    const items = 'modules' in group ? group.modules.flatMap((m) => m.items) : group.items
+    for (const item of items) {
+      const matched = item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(`${item.to}/`)
+      if (!matched) continue
+      if (!best || item.to.length > best.to.length) best = item
+    }
+  }
+  if (best) return best.label
+  if (pathname.startsWith('/drafts')) return 'Receipt'
+  if (pathname.startsWith('/delivery')) return 'Delivery'
+  return pathname
+}
+
+function tabPanelLocation(tab: OpenTab): Location {
+  const routeKey = tabRouteKey(tab.to, tab.search)
+  return {
+    pathname: tab.to,
+    search: tab.search,
+    hash: '',
+    state: null,
+    key: `tab-panel-${routeKey}`,
+  }
+}
+
+function normalizeOpenTab(tab: OpenTab): OpenTab {
+  const parsed = parseAppRoute(formatAppRoute(tab.to, tab.search))
+  return {
+    to: parsed.pathname,
+    search: parsed.search,
+    label: tab.label,
+    pinned: tab.pinned === true,
+  }
+}
+
+function TabPanelRoutes({ tab }: { tab: OpenTab }): ReactElement | null {
+  const location = useMemo(() => tabPanelLocation(tab), [tab.to, tab.search])
+  return useRoutes(appRouteObjects, location)
+}
+
 export function Layout() {
   const location = useLocation()
   const { pathname } = location
@@ -193,7 +243,33 @@ export function Layout() {
     ]
   })
 
-  const activeTab = useMemo(() => tabs.find((t) => t.to === currentPath), [tabs, currentPath])
+  const activeRouteKey = tabRouteKey(currentPath, viewRoute.search)
+
+  const activeTab = useMemo(
+    () =>
+      tabs.find((t) => tabRouteKey(t.to, t.search) === activeRouteKey) ??
+      tabs.find((t) => t.to === currentPath),
+    [tabs, activeRouteKey, currentPath]
+  )
+
+  useEffect(() => {
+    setTabs((prev) => {
+      const normalized = normalizeAndDedupeTabs(prev.map(normalizeOpenTab))
+      if (
+        normalized.length === prev.length &&
+        normalized.every(
+          (tab, index) =>
+            tab.to === prev[index]?.to &&
+            tab.search === prev[index]?.search &&
+            tab.label === prev[index]?.label &&
+            tab.pinned === prev[index]?.pinned
+        )
+      ) {
+        return prev
+      }
+      return normalized
+    })
+  }, [])
 
   useEffect(() => {
     if (activeTab) return
@@ -249,21 +325,6 @@ export function Layout() {
     [navigate, routerPath, location.search]
   )
 
-  const displayLocation = useMemo(() => {
-    if (viewRoute.pathname === routerPath && viewRoute.search === location.search) {
-      return location
-    }
-    return {
-      ...location,
-      pathname: viewRoute.pathname,
-      search: viewRoute.search,
-      hash: '',
-      key: `view-${viewRoute.pathname}${viewRoute.search}`,
-    }
-  }, [location, viewRoute, routerPath])
-
-  const routeElement = useRoutes(appRouteObjects, displayLocation)
-
   const requestRoute = (to: string) => {
     const next = parseAppRoute(to)
     if (currentPath === next.pathname && viewRoute.search === next.search) return
@@ -281,23 +342,21 @@ export function Layout() {
 
   const openTab = (to: string, label?: string) => {
     const parsed = parseAppRoute(to)
-    setTabs((prev) => {
-      const existing = prev.find((t) => t.to === parsed.pathname)
-      if (existing) {
-        requestRoute(tabRoute(existing))
-        return prev
-      }
-      requestRoute(formatAppRoute(parsed.pathname, parsed.search))
-      return [
-        ...prev,
-        {
-          to: parsed.pathname,
-          search: parsed.search,
-          label: label ?? labelForPath(parsed.pathname),
-          pinned: false,
-        },
-      ]
-    })
+    const existing = tabs.find((t) => t.to === parsed.pathname)
+    if (existing) {
+      requestRoute(tabRoute(existing))
+      return
+    }
+    setTabs((prev) => [
+      ...prev,
+      {
+        to: parsed.pathname,
+        search: parsed.search,
+        label: label ?? labelForPath(parsed.pathname),
+        pinned: false,
+      },
+    ])
+    requestRoute(formatAppRoute(parsed.pathname, parsed.search))
   }
 
   const closeTab = (to: string) => {
@@ -349,6 +408,7 @@ export function Layout() {
   return (
     <ItemTypColorProvider>
     <AppShellProvider navigate={appNavigate} viewRoute={viewRoute}>
+    <MasterCatalogProvider>
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
@@ -468,17 +528,9 @@ export function Layout() {
       <main className="main">
         <div className="main-tabs">
           {tabs.map((tab) => (
-            <button
-              key={tab.to}
-              type="button"
-              className={`main-tab ${tab.to === currentPath ? 'active' : ''}`}
-              onClick={() => requestRoute(tabRoute(tab))}
-              title={tabRoute(tab)}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/tab-to', tab.to)
-                e.dataTransfer.effectAllowed = 'move'
-              }}
+            <div
+              key={tabRouteKey(tab.to, tab.search)}
+              className={`main-tab ${tabRouteKey(tab.to, tab.search) === activeRouteKey ? 'active' : ''}`}
               onDragOver={(e) => {
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'move'
@@ -490,17 +542,35 @@ export function Layout() {
               }}
             >
               <span
-                className={`main-tab-pin ${tab.pinned ? 'is-pinned' : ''}`}
-                title={tab.pinned ? 'Unpin tab' : 'Pin tab'}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  togglePinTab(tab.to)
+                className="main-tab-drag"
+                draggable
+                title="Drag to reorder"
+                aria-label="Drag to reorder tab"
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/tab-to', tab.to)
+                  e.dataTransfer.effectAllowed = 'move'
                 }}
+                onClick={(e) => e.stopPropagation()}
               >
-                {tab.pinned ? '📌' : '📍'}
+                ⠿
               </span>
-              <span className="main-tab-label">{tab.label}</span>
-              {(
+              <button
+                type="button"
+                className="main-tab-select"
+                onClick={() => requestRoute(tabRoute(tab))}
+                title={tabRoute(tab)}
+              >
+                <span
+                  className={`main-tab-pin ${tab.pinned ? 'is-pinned' : ''}`}
+                  title={tab.pinned ? 'Unpin tab' : 'Pin tab'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    togglePinTab(tab.to)
+                  }}
+                >
+                  {tab.pinned ? '📌' : '📍'}
+                </span>
+                <span className="main-tab-label">{tab.label}</span>
                 <span
                   className="main-tab-close"
                   onClick={(e) => {
@@ -510,8 +580,8 @@ export function Layout() {
                 >
                   ×
                 </span>
-              )}
-            </button>
+              </button>
+            </div>
           ))}
         </div>
         {tabs.length === 0 ? (
@@ -521,27 +591,27 @@ export function Layout() {
             </div>
           </div>
         ) : (
-          routeElement
+          <div className="main-tab-panels">
+            {tabs.map((tab) => {
+              const routeKey = tabRouteKey(tab.to, tab.search)
+              const isActive = routeKey === activeRouteKey
+              return (
+                <div
+                  key={routeKey}
+                  className="main-tab-panel"
+                  hidden={!isActive}
+                  aria-hidden={!isActive}
+                >
+                  {isActive ? <TabPanelRoutes tab={tab} /> : null}
+                </div>
+              )
+            })}
+          </div>
         )}
       </main>
     </div>
+    </MasterCatalogProvider>
     </AppShellProvider>
     </ItemTypColorProvider>
   )
-}
-
-function labelForPath(pathname: string): string {
-  let best: NavLink | null = null
-  for (const group of navGroups) {
-    const items = 'modules' in group ? group.modules.flatMap((m) => m.items) : group.items
-    for (const item of items) {
-      const matched = item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(`${item.to}/`)
-      if (!matched) continue
-      if (!best || item.to.length > best.to.length) best = item
-    }
-  }
-  if (best) return best.label
-  if (pathname.startsWith('/drafts')) return 'Receipt'
-  if (pathname.startsWith('/delivery')) return 'Delivery'
-  return pathname
 }

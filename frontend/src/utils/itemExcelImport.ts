@@ -37,6 +37,7 @@ export function mergeItemImportRows(
           item_nm: name || match.item_nm,
           itemtyp_id: itemtyp_id !== '' ? itemtyp_id : match.itemtyp_id,
           supplier_ids: ['', '', ''],
+          customer_ids: ['', ''],
         }
         updated += 1
       }

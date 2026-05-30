@@ -14,10 +14,22 @@ function columnKeys(columns: GridColumnDef[]): string[] {
   return columns.map((col) => col.key)
 }
 
+/** Drop duplicate keys while preserving first occurrence (corrupt saved layouts). */
+export function dedupeColumnOrder(order: string[]): string[] {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const key of order) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    next.push(key)
+  }
+  return next
+}
+
 export function mergeColumnOrder(saved: string[] | undefined, keys: string[]): string[] {
   if (!saved?.length) return keys
   const keySet = new Set(keys)
-  const next = saved.filter((key) => keySet.has(key))
+  const next = dedupeColumnOrder(saved.filter((key) => keySet.has(key)))
   for (const key of keys) {
     if (!next.includes(key)) next.push(key)
   }

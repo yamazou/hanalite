@@ -1,10 +1,10 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useState } from 'react'
 import { AppLink, useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
-import type { Supplier } from '../types'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import { dateInputToIso, toDateInputValue } from '../utils/format'
 
 type Props = {
@@ -19,18 +19,10 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
   const [suppliersId, setSuppliersId] = useState<number | ''>('')
   const [referenceNo, setReferenceNo] = useState('')
   const [notes, setNotes] = useState('')
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [loading, setLoading] = useState(true)
+  const { suppliers, ready: catalogReady } = useMasterCatalog()
+  const loading = !catalogReady
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api
-      .listSuppliers()
-      .then(setSuppliers)
-      .catch((e) => setError(e instanceof Error ? e.message : copy.masterLoadFail))
-      .finally(() => setLoading(false))
-  }, [copy.masterLoadFail])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -56,13 +48,12 @@ export function DraftExcelImportPage({ variant = 'receipt' }: Props) {
   }
 
   return (
-    <ErpScreen error={error}>
+    <ErpScreen error={error} title={copy.excelTitle}>
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to={copy.listPath} className="btn erp-btn erp-btn-clear">
             {copy.backToList}
           </AppLink>
-          <span className="erp-search-section-label">{copy.excelTitle}</span>
           <div className="erp-search-actions">
             <button
               type="button"

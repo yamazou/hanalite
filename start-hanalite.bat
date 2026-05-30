@@ -10,6 +10,14 @@ set URL=http://localhost:5180/
 
 echo hanalite starting...
 
+echo Waiting for MySQL on port 3306...
+powershell -NoProfile -File "%ROOT%\scripts\wait-mysql.ps1"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: MySQL is not running. Start MySQL in XAMPP, then run this script again.
+    pause
+    exit /b 1
+)
+
 if not exist "%FRONTEND%\package.json" (
     echo ERROR: frontend not found: %FRONTEND%
     pause
@@ -32,7 +40,7 @@ set /a RETRY=0
 
 :wait_api
 timeout /t 2 /nobreak >nul
-powershell -NoProfile -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/v1/health' -TimeoutSec 3; if (-not $h.inventory_api) { Write-Host 'WARNING: API missing inventory routes. Run stop-hanalite.bat then start again.'; exit 2 }; if (-not $h.itemtyp_color_api) { Write-Host 'WARNING: API missing item type color support (stale server). Run stop-hanalite.bat then start again.'; exit 3 }; exit 0 } catch { exit 1 }"
+powershell -NoProfile -Command "try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/v1/health' -TimeoutSec 3; if (-not $h.database) { if ($h.database_error) { Write-Host ('WARNING: API database check failed: ' + $h.database_error) } else { Write-Host 'WARNING: API database not ready.' }; exit 4 }; if (-not $h.inventory_api) { Write-Host 'WARNING: API missing inventory routes. Run stop-hanalite.bat then start again.'; exit 2 }; if (-not $h.itemtyp_color_api) { Write-Host 'WARNING: API missing item type color support (stale server). Run stop-hanalite.bat then start again.'; exit 3 }; exit 0 } catch { exit 1 }"
 if %ERRORLEVEL%==0 goto wait_ui
 set /a RETRY+=1
 if %RETRY% LSS 15 goto wait_api

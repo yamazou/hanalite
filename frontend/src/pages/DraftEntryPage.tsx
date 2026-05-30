@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppLink, useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
+import { ErpScreen } from '../components/erp/ErpScreen'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { ColoredItemCode, ColoredItemName } from '../components/ColoredItemText'
 import { ExcelLikeGridTable } from '../components/ExcelLikeGridTable'
 import type { GridColumnDef } from '../components/ResizableGridTable'
@@ -19,8 +21,8 @@ import {
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
 import { getDraftLineFilterValue } from '../utils/draftGridSort'
 import { mergeDraftLineImportRows } from '../utils/draftLineExcelImport'
-import type { DraftDetail, DraftStatus, Item, Supplier } from '../types'
-import type { LocationMaster } from '../types/masters'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
+import type { DraftDetail, DraftStatus } from '../types'
 import {
   dateInputToIso,
   formatItemLabel,
@@ -49,13 +51,14 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
   const [referenceNo, setReferenceNo] = useState('')
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<EditLineRow[]>([])
-  const [items, setItems] = useState<Item[]>([])
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [locations, setLocations] = useState<LocationMaster[]>([])
+  const { items, suppliers, locations } = useMasterCatalog()
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const lineGridLayoutRef = useRef<Pick<GridColumnLayout, 'saveLayout' | 'isDirty'> | null>(
+    null
+  )
 
   const isEdit = draftId != null
   const canEdit = !isEdit || status === 'registered'
@@ -108,12 +111,7 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    Promise.all([api.listItems(), api.listSuppliers(), api.listLocationsMaster(), loadDraft()])
-      .then(([i, s, l]) => {
-        setItems(i)
-        setSuppliers(s)
-        setLocations(l)
-      })
+    void loadDraft()
       .catch((e) => setError(e instanceof Error ? e.message : copy.loadFail))
       .finally(() => setLoading(false))
   }, [copy.loadFail, loadDraft])
@@ -268,16 +266,15 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     }
   }
 
-  if (loading) {
-    return <p className="muted erp-grid-empty">{copy.loadingMasterText}</p>
+  const pageTitle =
+    isEdit && draftId != null ? copy.entryEditTitle(draftId) : copy.entryNewTitle
+
+  const handleSaveGrid = () => {
+    lineGridLayoutRef.current?.saveLayout()
   }
 
-  return (
-    <div className="erp-screen">
-      {error && <Alert type="error" message={error} />}
-      {message && <Alert type="success" message={message} />}
-      {!canEdit && isEdit && <Alert type="error" message={copy.entryReadOnlyMsg} />}
-
+  const entryBody = (
+    <>
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
           <div className="erp-entry-toolbar">
@@ -354,55 +351,92 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
       </div>
 
       <div className="erp-panel erp-panel-grow erp-detail-panel">
-        <div className="erp-panel-body erp-panel-content">
-          {canEdit ? (
-            <DraftEditableLineGrid
-              variant={variant}
-              scope="entry"
-              canEdit={canEdit}
-              lines={lines}
-              items={items}
-              locations={locations}
-              onUpdateLine={updateLine}
-              onRemoveRows={removeRows}
-              onImportParsed={importLines}
-              copy={copy}
-            />
-          ) : lines.length === 0 ? (
-            <p className="muted erp-grid-empty">{copy.noLinesMsg}</p>
-          ) : (
-            <ExcelLikeGridTable
-              gridId={lineGridId}
-              columns={lineColumns}
-              rows={lines}
-              getFilterValue={(row, col) =>
-                getDraftLineFilterValue(editRowToDraftLine(row), col)
-              }
-              layoutOptions={{ headerFilterable: true }}
-              excelLabel={copy.exportExcelLabel}
-              excelExport={{
-                sheetName: copy.exportLinesSheet,
-                filenamePrefix:
-                  variant === 'delivery'
-                    ? `delivery_draft_${draftId}_lines`
-                    : `receipt_draft_${draftId}_lines`,
-                getExportValue: (row, col) =>
-                  getDraftLineFilterValue(editRowToDraftLine(row), col),
-              }}
-            >
-              {({ layout, displayRows }) => (
-                <tbody>
-                  {displayRows.map((row, index) => (
-                    <tr key={row.key} className={index % 2 === 1 ? 'row-alt' : undefined}>
-                      {layout.orderedColumns.map((col) => renderReadOnlyLineCell(col.key, row))}
-                    </tr>
-                  ))}
-                </tbody>
-              )}
-            </ExcelLikeGridTable>
-          )}
+        <div className="erp-panel-body">
+          <div className="erp-panel-content erp-detail-content">
+            {!canEdit && isEdit && <Alert type="error" message={copy.entryReadOnlyMsg} />}
+            {canEdit ? (
+              <DraftEditableLineGrid
+                variant={variant}
+                scope="entry"
+                canEdit={canEdit}
+                lines={lines}
+                items={items}
+                locations={locations}
+                onUpdateLine={updateLine}
+                onRemoveRows={removeRows}
+                onImportParsed={importLines}
+                copy={copy}
+                onLayoutApi={(api) => {
+                  lineGridLayoutRef.current = api
+                }}
+              />
+            ) : lines.length === 0 ? (
+              <p className="muted erp-grid-empty">{copy.noLinesMsg}</p>
+            ) : (
+              <ExcelLikeGridTable
+                gridId={lineGridId}
+                columns={lineColumns}
+                rows={lines}
+                getFilterValue={(row, col) =>
+                  getDraftLineFilterValue(editRowToDraftLine(row), col)
+                }
+                layoutOptions={{ headerFilterable: true }}
+                onLayoutApi={(api) => {
+                  lineGridLayoutRef.current = api
+                }}
+                excelLabel={copy.exportExcelLabel}
+                excelExport={{
+                  sheetName: copy.exportLinesSheet,
+                  filenamePrefix:
+                    variant === 'delivery'
+                      ? `delivery_draft_${draftId}_lines`
+                      : `receipt_draft_${draftId}_lines`,
+                  getExportValue: (row, col) =>
+                    getDraftLineFilterValue(editRowToDraftLine(row), col),
+                }}
+              >
+                {({ layout, displayRows }) => (
+                  <tbody>
+                    {displayRows.map((row, index) => (
+                      <tr key={row.key} className={index % 2 === 1 ? 'row-alt' : undefined}>
+                        {layout.orderedColumns.map((col) =>
+                          renderReadOnlyLineCell(col.key, row)
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                )}
+              </ExcelLikeGridTable>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
+  )
+
+  if (loading) {
+    return (
+      <ErpScreen title={pageTitle}>
+        <div className="erp-panel erp-panel-grow erp-detail-panel">
+          <div className="erp-panel-body">
+            <div className="erp-panel-content erp-detail-content">
+              <p className="muted erp-grid-empty">{copy.loadingMasterText}</p>
+            </div>
+          </div>
+        </div>
+      </ErpScreen>
+    )
+  }
+
+  return (
+    <ErpScreen
+      error={error}
+      success={message}
+      title={pageTitle}
+      onRefresh={isEdit && draftId != null ? () => void loadDraft() : undefined}
+      onSaveGrid={handleSaveGrid}
+    >
+      {entryBody}
+    </ErpScreen>
   )
 }

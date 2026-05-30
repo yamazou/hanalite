@@ -17,9 +17,12 @@ import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeMoveTypImportRows } from '../../utils/moveTypExcelImport'
 import { gridCellPlaceholder } from '../../utils/gridPlaceholder'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 
 export function MoveTypesPage() {
+  const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditMoveTypRow[]>([])
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
@@ -184,6 +187,7 @@ export function MoveTypesPage() {
         }
       }
       setSuccess('Move types saved.')
+      refreshMasterCatalog()
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -193,7 +197,7 @@ export function MoveTypesPage() {
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -203,15 +207,21 @@ export function MoveTypesPage() {
         loading={loading}
         isEmpty={false}
         onRefresh={() => void load()}
-        toolbarLeft={
-          <MasterGridToolbar
-            displayRowCount={grid.displayRows.length}
-            submitting={submitting}
-            rowError={rowError}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={grid.displayRows.length}
+            selectedCount={selectedKeys.size}
             onSelectAll={() =>
               setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
+          />
+        }
+        toolbarLeft={
+          <MasterGridToolbar
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
             onSave={() => void handleSave()}
           />
         }

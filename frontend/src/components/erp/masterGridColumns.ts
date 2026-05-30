@@ -1,22 +1,45 @@
 import type { GridColumnDef } from '../ResizableGridTable'
 import { GRID_ROWNUM_COLUMN } from '../GridRowNumCell'
 
+/** Bulk-select column (after rownum); header hosts check-all / clear-all controls. */
+export const GRID_SELECT_COLUMN: GridColumnDef = {
+  key: 'select',
+  label: '',
+  defaultWidth: 28,
+  minWidth: 26,
+  className: 'erp-col-check',
+}
+
 export const masterNameEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'name', label: 'Name', defaultWidth: 200 },
+]
+
+export const masterSupplierEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'code', label: 'Supplier Code', defaultWidth: 120 },
+  { key: 'name', label: 'Supplier Name', defaultWidth: 200 },
+]
+
+export const masterCustomerEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'code', label: 'Customer Code', defaultWidth: 120 },
+  { key: 'name', label: 'Customer Name', defaultWidth: 200 },
 ]
 
 export const masterMoveTypEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'code', label: 'Move Type Code', defaultWidth: 120 },
   { key: 'name', label: 'Move Type Name', defaultWidth: 200 },
 ]
 
 export const masterLocationEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'code', label: 'Location Code', defaultWidth: 96 },
   { key: 'name', label: 'Location Name', defaultWidth: 160 },
   { key: 'type', label: 'Location Type', defaultWidth: 100 },
@@ -33,7 +56,7 @@ export const masterItemColumns: GridColumnDef[] = [
 
 export const masterItemTypEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'code', label: 'Item Type Code', defaultWidth: 120 },
   { key: 'name', label: 'Item Type Name', defaultWidth: 200 },
   { key: 'color', label: 'Color', defaultWidth: 120, className: 'erp-col-color' },
@@ -41,18 +64,20 @@ export const masterItemTypEditColumns: GridColumnDef[] = [
 
 export const masterItemEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'code', label: 'Item Code', defaultWidth: 96 },
   { key: 'name', label: 'Item Name', defaultWidth: 160 },
   { key: 'type', label: 'Item Type', defaultWidth: 72 },
   { key: 'supplier1', label: 'Supplier 1', defaultWidth: 120 },
   { key: 'supplier2', label: 'Supplier 2', defaultWidth: 120 },
   { key: 'supplier3', label: 'Supplier 3', defaultWidth: 120 },
+  { key: 'customer1', label: 'Customer 1', defaultWidth: 120 },
+  { key: 'customer2', label: 'Customer 2', defaultWidth: 120 },
 ]
 
 export const masterBomEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'parent_cd', label: 'Parent Code', defaultWidth: 100 },
   { key: 'parent_nm', label: 'Parent Name', defaultWidth: 140 },
   { key: 'child_cd', label: 'Child Code', defaultWidth: 100 },
@@ -141,7 +166,7 @@ const productionOrderDataColumns: GridColumnDef[] = [
 
 export const productionOrderListColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   ...productionOrderDataColumns,
 ]
 
@@ -154,6 +179,30 @@ export const productionLineColumns: GridColumnDef[] = [
   { key: 'planned_qty', label: 'Plan Qty', defaultWidth: 80, className: 'erp-col-num' },
   { key: 'actual_qty', label: 'Actual Qty', defaultWidth: 80, className: 'erp-col-num' },
   { key: 'actions', label: '', defaultWidth: 100, className: 'erp-col-actions' },
+]
+
+export const itemProcessProcessEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'process', label: 'Location Code', defaultWidth: 120 },
+]
+
+export const itemProcessInputEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
+  { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
+  { key: 'from_location', label: 'From Location', defaultWidth: 100 },
+  { key: 'req_qty', label: 'Req Qty', defaultWidth: 96, className: 'erp-col-num' },
+]
+
+export const itemProcessFinalItemColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
+  { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
+  { key: 'final_item_cd', label: 'Final Item', defaultWidth: 110 },
+  { key: 'itemtyp_cd', label: 'Item Type Code', defaultWidth: 100 },
+  { key: 'customer_cd', label: 'Customer Code', defaultWidth: 110 },
 ]
 
 export const productionInputColumns: GridColumnDef[] = [

@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { erpRowClass } from './erp/ErpGridPanel'
-import { productionInputColumns, productionLineColumns } from './erp/masterGridColumns'
+import {
+  GRID_SELECT_COLUMN,
+  itemProcessInputEditColumns,
+  itemProcessProcessEditColumns,
+  productionInputColumns,
+  productionLineColumns,
+} from './erp/masterGridColumns'
+import { isBlankItemProcessInputRow, isBlankItemProcessRow } from '../utils/itemProcessEdit'
+import { GridRowSelectButtons } from './GridRowSelectButtons'
 import { ProductionGridToolbar } from './ProductionGridToolbar'
 import { GRID_ROWNUM_COLUMN, GridRowNumCell } from './GridRowNumCell'
 import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
@@ -24,11 +32,14 @@ import {
   isBlankInputRow,
   isBlankProcessRow,
   processRowsWithSingleTrailingBlank,
+  sortEditInputRowsForDisplay,
   itemCdFieldPatch,
   itemNmFieldPatch,
   processItemCdFieldPatch,
   processItemNmFieldPatch,
   processWipLocationPatch,
+  actualQtyForEdit,
+  consumeQtyForEdit,
   type EditInputRow,
   type EditProcessRow,
 } from '../utils/productionEdit'
@@ -36,6 +47,24 @@ import { formatQty } from '../utils/format'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
 import { processLinesFromDetail } from '../utils/productionProcessDisplay'
 import { gridCellPlaceholder } from '../utils/gridPlaceholder'
+import type { ProcessTreeHighlight } from '../utils/bomTree'
+import {
+  parentTreeHighlight,
+  resolveProcessTreeHighlight,
+} from '../utils/productionTreeHighlight'
+import { buildItemProcessMasterTree } from '../utils/itemProcessTree'
+import type { ItemProcessesOut } from '../types/itemprocs'
+import type { ItemListRow } from '../types/masters'
+import {
+  buildProductionOrderTree,
+  resolveInputTreeHighlight,
+  type ProductionTreeData,
+} from '../utils/productionOrderTree'
+
+function formatInputLotCell(row: EditInputRow): string {
+  if (isBlankInputRow(row)) return ''
+  return (row.lot ?? '').trim() || '-'
+}
 
 const GRID_COPY = {
   deleteRowBtn: 'Delete row',
@@ -47,14 +76,14 @@ const GRID_COPY = {
   lineValidation: 'Enter at least one valid process step and input line before saving.',
   processValidation: 'Enter at least one valid process step before saving.',
   inputValidation: 'Enter at least one valid input line before saving.',
-  saveProcessBtn: 'Save',
-  saveInputBtn: 'Save',
+  saveProcessBtn: 'Update',
+  saveInputBtn: 'Update',
   selectOption: 'Select...',
 }
 
 const processEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'process', label: 'Location Code', defaultWidth: 100 },
   { key: 'output_item_cd', label: 'Item Code', defaultWidth: 100 },
   { key: 'output_item_nm', label: 'Item Name', defaultWidth: 160 },
@@ -84,7 +113,7 @@ const INPUT_EDIT_LAYOUT_OPTS = gridColumnLayoutOptions({
 
 const inputEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' },
+  GRID_SELECT_COLUMN,
   { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
   { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
   { key: 'from_location', label: 'From Location', defaultWidth: 100 },
@@ -135,6 +164,8 @@ type Props = {
   rowError?: string | null
   processRowError?: string | null
   inputRowError?: string | null
+  processStatusMessage?: string | null
+  inputStatusMessage?: string | null
   onSaveProcess?: () => void
   onSaveInput?: () => void
   savingProcess?: boolean
@@ -147,6 +178,17 @@ type Props = {
     saveLayouts: () => void
     isDirty: boolean
   }) => void
+  onTreeHighlightChange?: (highlight: ProcessTreeHighlight | null) => void
+  onTreeDataChange?: (data: ProductionTreeData) => void
+  onResetHandlerChange?: (handler: (() => void) | null) => void
+  /** When false, no process row is selected on load (Production Entry). */
+  autoSelectFirstProcess?: boolean
+  /** Render process/input sections only (no outer panel wrapper). */
+  embedded?: boolean
+  /** Item Processes master: process grid shows location only. */
+  processColumnsMode?: 'default' | 'location-only'
+  /** Saved subprocess definitions for WIP expansion in item-process tree. */
+  itemProcessCache?: Map<number, ItemProcessesOut>
 }
 
 export function ProductionProcessInputPanels({
@@ -165,6 +207,8 @@ export function ProductionProcessInputPanels({
   rowError,
   processRowError,
   inputRowError,
+  processStatusMessage,
+  inputStatusMessage,
   onSaveProcess,
   onSaveInput,
   savingProcess = false,
@@ -174,7 +218,19 @@ export function ProductionProcessInputPanels({
   processEditGridId = 'production-process-edit-v3',
   inputEditGridId = 'production-input-edit-v3',
   onGridLayoutsReady,
+  onTreeHighlightChange,
+  onTreeDataChange,
+  onResetHandlerChange,
+  autoSelectFirstProcess = true,
+  embedded = false,
+  processColumnsMode = 'default',
+  itemProcessCache,
 }: Props) {
+  const isProcessRowBlank =
+    processColumnsMode === 'location-only' ? isBlankItemProcessRow : isBlankProcessRow
+  const isInputRowBlank =
+    processColumnsMode === 'location-only' ? isBlankItemProcessInputRow : isBlankInputRow
+  const showSectionSaveButtons = processColumnsMode !== 'location-only'
   const { colorForItem } = useItemTypColors()
   const orderStatus = detail?.status
   const canEditPlan =
@@ -185,18 +241,30 @@ export function ProductionProcessInputPanels({
     canEditActualsProp !== undefined
       ? canEditActualsProp
       : Boolean(canEdit && (orderStatus === 'approved' || orderStatus === 'started'))
+  const baseProcessEditColumns =
+    processColumnsMode === 'location-only' ? itemProcessProcessEditColumns : processEditColumns
   const editProcessColumns = useMemo(
     () =>
-      canEditPlan ? processEditColumns : processEditColumns.filter((c) => c.key !== 'select'),
-    [canEditPlan]
+      canEditPlan ? baseProcessEditColumns : baseProcessEditColumns.filter((c) => c.key !== 'select'),
+    [canEditPlan, baseProcessEditColumns]
   )
+  const baseInputEditColumns =
+    processColumnsMode === 'location-only' ? itemProcessInputEditColumns : inputEditColumns
   const editInputColumnsActive = useMemo(
-    () => (canEditPlan ? inputEditColumns : inputEditColumns.filter((c) => c.key !== 'select')),
-    [canEditPlan]
+    () =>
+      canEditPlan ? baseInputEditColumns : baseInputEditColumns.filter((c) => c.key !== 'select'),
+    [canEditPlan, baseInputEditColumns]
   )
   const [selectedProcessKey, setSelectedProcessKey] = useState<string | null>(null)
+  const [treeProcessHighlightKey, setTreeProcessHighlightKey] = useState<string | null>(null)
   const [selectedProcessKeys, setSelectedProcessKeys] = useState<Set<string>>(() => new Set())
+  const [selectedInputKey, setSelectedInputKey] = useState<string | null>(null)
   const [selectedInputKeys, setSelectedInputKeys] = useState<Set<string>>(() => new Set())
+  const pinnedProcessLineNoRef = useRef<number | null>(null)
+  const inputRowsRef = useRef(inputRows)
+  const processRowsRef = useRef(processRows)
+  inputRowsRef.current = inputRows
+  processRowsRef.current = processRows
 
   const processLocations = useMemo(
     () => locations.filter((loc) => loc.location_type === 'Process'),
@@ -209,27 +277,186 @@ export function ProductionProcessInputPanels({
 
   useEffect(() => {
     setSelectedProcessKey(null)
+    setTreeProcessHighlightKey(null)
     setSelectedProcessKeys(new Set())
+    setSelectedInputKey(null)
     setSelectedInputKeys(new Set())
-  }, [detail?.production_order_id])
+    pinnedProcessLineNoRef.current = null
+  }, [detail?.production_order_id, detail?.parent_item_id])
 
   useEffect(() => {
-    if (!canEdit || processRows.length === 0) return
+    setSelectedInputKey(null)
+    setSelectedInputKeys(new Set())
+  }, [selectedProcessKey])
+
+  const useEditProcessRows = canEditPlan || canEditActuals
+
+  const activateProcessRow = (key: string) => {
+    const row = processRowsRef.current.find((r) => r.key === key)
+    if (!row || isProcessRowBlank(row)) return
+    pinnedProcessLineNoRef.current = row.line_no
+    setSelectedProcessKey(key)
+    setTreeProcessHighlightKey(key)
+    setSelectedInputKey(null)
+    setSelectedInputKeys(new Set())
+  }
+
+  const activateInputRow = (key: string) => {
+    setSelectedInputKey(key)
+  }
+
+  const toggleInputRowRead = (key: string) => {
+    setSelectedInputKey((prev) => (prev === key ? null : key))
+  }
+
+  const resetProcessInputSelection = useCallback(() => {
+    setSelectedProcessKey(null)
+    setTreeProcessHighlightKey(null)
+    setSelectedProcessKeys(new Set())
+    setSelectedInputKey(null)
+    setSelectedInputKeys(new Set())
+    pinnedProcessLineNoRef.current = null
+  }, [])
+
+  useEffect(() => {
+    if (!onResetHandlerChange) return
+    onResetHandlerChange(onTreeHighlightChange ? resetProcessInputSelection : null)
+    return () => onResetHandlerChange(null)
+  }, [onResetHandlerChange, onTreeHighlightChange, resetProcessInputSelection])
+
+  const toggleProcessRowRead = (key: string) => {
     setSelectedProcessKey((prev) => {
-      if (prev && processRows.some((row) => row.key === prev)) return prev
-      return processRows[0]?.key ?? null
+      if (prev === key) {
+        setTreeProcessHighlightKey(null)
+        return null
+      }
+      setTreeProcessHighlightKey(key)
+      return key
     })
-  }, [canEdit, detail?.production_order_id, processRows])
+  }
+
+  useEffect(() => {
+    if (!onTreeDataChange || !detail) return
+    if (processColumnsMode === 'location-only' && itemProcessCache) {
+      onTreeDataChange(
+        buildItemProcessMasterTree({
+          detail,
+          processRows,
+          inputRows,
+          locations,
+          items: items as ItemListRow[],
+          itemProcessCache,
+        })
+      )
+      return
+    }
+    onTreeDataChange(
+      buildProductionOrderTree({
+        detail,
+        processRows,
+        inputRows,
+        locations,
+        items,
+        useEditRows: useEditProcessRows,
+      })
+    )
+  }, [
+    onTreeDataChange,
+    detail,
+    processRows,
+    inputRows,
+    locations,
+    items,
+    useEditProcessRows,
+    processColumnsMode,
+    itemProcessCache,
+  ])
+
+  useEffect(() => {
+    if (!onTreeHighlightChange || !detail) return
+    const inputHighlight = resolveInputTreeHighlight(
+      inputRows,
+      selectedInputKey,
+      detail,
+      processRows,
+      locations
+    )
+    if (inputHighlight) {
+      onTreeHighlightChange(inputHighlight)
+      return
+    }
+    if (treeProcessHighlightKey == null) {
+      onTreeHighlightChange(parentTreeHighlight(detail.parent_item_id))
+      return
+    }
+    onTreeHighlightChange(
+      resolveProcessTreeHighlight(
+        detail,
+        treeProcessHighlightKey,
+        processRows,
+        locations,
+        useEditProcessRows
+      )
+    )
+  }, [
+    detail,
+    treeProcessHighlightKey,
+    selectedInputKey,
+    inputRows,
+    processRows,
+    locations,
+    useEditProcessRows,
+    onTreeHighlightChange,
+  ])
+
+  useEffect(() => {
+    if (!autoSelectFirstProcess || !canEdit || loading || processRows.length === 0) return
+    const topProcess = processRows
+      .filter((row) => !isProcessRowBlank(row))
+      .sort((a, b) => a.line_no - b.line_no)[0]
+    if (!topProcess) return
+    const keepCurrent =
+      selectedProcessKey != null &&
+      processRows.some(
+        (row) => row.key === selectedProcessKey && !isProcessRowBlank(row)
+      )
+    if (keepCurrent) return
+    pinnedProcessLineNoRef.current = topProcess.line_no
+    setTreeProcessHighlightKey(topProcess.key)
+    setSelectedProcessKey(topProcess.key)
+    setSelectedInputKey(null)
+    setSelectedInputKeys(new Set())
+  }, [
+    autoSelectFirstProcess,
+    canEdit,
+    loading,
+    detail?.production_order_id,
+    processRows,
+    selectedProcessKey,
+    isProcessRowBlank,
+  ])
 
   useEffect(() => {
     if (!canEdit) return
-    const valid = new Set(processRows.map((row) => row.key))
+    const rows = processRowsRef.current
+    const valid = new Set(rows.map((row) => row.key))
     setSelectedProcessKeys((prev) => {
       const next = new Set([...prev].filter((key) => valid.has(key)))
       return next.size === prev.size ? prev : next
     })
     if (selectedProcessKey && !valid.has(selectedProcessKey)) {
-      setSelectedProcessKey(null)
+      const pinnedLine = pinnedProcessLineNoRef.current
+      const fallback =
+        pinnedLine != null
+          ? rows.find((row) => row.line_no === pinnedLine && !isProcessRowBlank(row))
+          : undefined
+      if (fallback) {
+        setSelectedProcessKey(fallback.key)
+        setTreeProcessHighlightKey(fallback.key)
+      } else {
+        setSelectedProcessKey(null)
+        setTreeProcessHighlightKey(null)
+      }
     }
   }, [canEdit, processRows, selectedProcessKey])
 
@@ -248,16 +475,29 @@ export function ProductionProcessInputPanels({
   )
 
   const selectedProcessLineNo = useMemo(() => {
-    if (!canEdit) return null
-    const row = processRows.find((r) => r.key === selectedProcessKey)
-    return row?.line_no ?? null
-  }, [canEdit, processRows, selectedProcessKey])
+    if (useEditProcessRows && selectedProcessKey != null) {
+      const row = processRows.find((r) => r.key === selectedProcessKey)
+      if (row && !isProcessRowBlank(row)) {
+        pinnedProcessLineNoRef.current = row.line_no
+        return row.line_no
+      }
+    }
+    if (pinnedProcessLineNoRef.current != null) {
+      const pinnedRow = processRows.find(
+        (row) => row.line_no === pinnedProcessLineNoRef.current && !isProcessRowBlank(row)
+      )
+      if (pinnedRow) {
+        return pinnedProcessLineNoRef.current
+      }
+    }
+    return null
+  }, [useEditProcessRows, processRows, selectedProcessKey])
 
   const visibleEditInputs = useMemo(() => {
     if (selectedProcessLineNo == null) return []
-    return inputRows
-      .filter((row) => row.line_no === selectedProcessLineNo)
-      .sort((a, b) => a.line_no - b.line_no || a.key.localeCompare(b.key))
+    return sortEditInputRowsForDisplay(
+      inputRows.filter((row) => row.line_no === selectedProcessLineNo)
+    )
   }, [inputRows, selectedProcessLineNo])
 
   const visibleInputs = useMemo(() => {
@@ -298,28 +538,50 @@ export function ProductionProcessInputPanels({
       processRows,
       key,
       patch,
-      isBlankProcessRow,
+      isProcessRowBlank,
       (rows) => (detail ? makeBlankProcessRow(rows) : emptyEditProcessRow(rows.length + 1))
     )
     onProcessRowsChange(next)
     const touched = next.find((row) => row.key === key)
-    if (touched && !isBlankProcessRow(touched)) {
+    if (touched && !isProcessRowBlank(touched)) {
+      pinnedProcessLineNoRef.current = touched.line_no
       setSelectedProcessKey(touched.key)
+      setTreeProcessHighlightKey(touched.key)
     }
+  }
+
+  const ensureProcessSelectedForLine = (lineNo: number) => {
+    if (selectedProcessKey != null) {
+      const current = processRowsRef.current.find((row) => row.key === selectedProcessKey)
+      if (current && !isProcessRowBlank(current) && current.line_no === lineNo) return
+    }
+    const procRow = processRowsRef.current.find(
+      (row) => row.line_no === lineNo && !isProcessRowBlank(row)
+    )
+    if (!procRow) return
+    pinnedProcessLineNoRef.current = lineNo
+    setSelectedProcessKey(procRow.key)
+    setTreeProcessHighlightKey(procRow.key)
   }
 
   const updateInputRow = (key: string, patch: Partial<EditInputRow>) => {
     if (!onInputRowsChange) return
+    const sourceRow = inputRowsRef.current.find((row) => row.key === key)
+    const lineNo = sourceRow?.line_no ?? selectedProcessLineNo ?? pinnedProcessLineNoRef.current ?? 1
+    if (lineNo != null) {
+      pinnedProcessLineNoRef.current = lineNo
+      ensureProcessSelectedForLine(lineNo)
+    }
     onInputRowsChange(
       updateRowWithTrailingBlank(
-        inputRows,
+        inputRowsRef.current,
         key,
         patch,
-        isBlankInputRow,
+        isInputRowBlank,
         (rows) =>
-          detail && selectedProcessLineNo != null
-            ? makeBlankInputRow(rows)
-            : emptyEditInputRow(selectedProcessLineNo ?? 1)
+          detail && lineNo != null
+            ? createBlankInputRowForDetail(rows, lineNo)
+            : emptyEditInputRow(lineNo ?? 1)
       )
     )
   }
@@ -361,9 +623,10 @@ export function ProductionProcessInputPanels({
   }
 
   useEffect(() => {
-    if (!canEdit || !detail || !onInputRowsChange || selectedProcessLineNo == null) return
-    const forProcess = inputRows.filter((row) => row.line_no === selectedProcessLineNo)
-    const other = inputRows.filter((row) => row.line_no !== selectedProcessLineNo)
+    if (!useEditProcessRows || !detail || !onInputRowsChange || selectedProcessLineNo == null) return
+    const currentInputRows = inputRowsRef.current
+    const forProcess = currentInputRows.filter((row) => row.line_no === selectedProcessLineNo)
+    const other = currentInputRows.filter((row) => row.line_no !== selectedProcessLineNo)
     const ensured = appendBlankInputRow(forProcess)
     if (
       ensured.length === forProcess.length &&
@@ -372,7 +635,7 @@ export function ProductionProcessInputPanels({
       return
     }
     onInputRowsChange([...other, ...ensured])
-  }, [canEdit, detail?.production_order_id, selectedProcessLineNo])
+  }, [useEditProcessRows, detail?.production_order_id, selectedProcessLineNo, onInputRowsChange])
 
   const datalistScope = processEditGridId
 
@@ -456,7 +719,7 @@ export function ProductionProcessInputPanels({
       case 'consume_qty':
         return toFilterCellValue(row.consume_qty)
       case 'lot':
-        return toFilterCellValue(row.lot || detail?.lot)
+        return toFilterCellValue((row.lot ?? '').trim() || null)
       default:
         return toFilterCellValue('')
     }
@@ -498,6 +761,11 @@ export function ProductionProcessInputPanels({
     },
   })
 
+  const inputEditDisplayRows = useMemo(
+    () => sortEditInputRowsForDisplay(inputEditExcel.displayRows),
+    [inputEditExcel.displayRows]
+  )
+
   const processReadExcel = useExcelLikeGrid({
     columns: productionLineColumns,
     rows: processGroups,
@@ -537,11 +805,25 @@ export function ProductionProcessInputPanels({
     rowCount: inputEditExcel.displayRows.length,
   })
 
+  const layoutBundleRef = useRef({
+    lineLayout,
+    inputLayout,
+    processEditLayout,
+    inputEditLayout,
+  })
+  layoutBundleRef.current = {
+    lineLayout,
+    inputLayout,
+    processEditLayout,
+    inputEditLayout,
+  }
+
   useEffect(() => {
     if (!onGridLayoutsReady) return
+    const bundle = layoutBundleRef.current
     const layouts: GridColumnLayout[] = canEdit
-      ? [processEditLayout, inputEditLayout]
-      : [lineLayout, inputLayout]
+      ? [bundle.processEditLayout, bundle.inputEditLayout]
+      : [bundle.lineLayout, bundle.inputLayout]
     onGridLayoutsReady({
       saveLayouts: () => layouts.forEach((layout) => layout.saveLayout()),
       isDirty: layouts.some((layout) => layout.isDirty),
@@ -553,33 +835,30 @@ export function ProductionProcessInputPanels({
     inputLayout.isDirty,
     processEditLayout.isDirty,
     inputEditLayout.isDirty,
-    lineLayout.saveLayout,
-    inputLayout.saveLayout,
-    processEditLayout.saveLayout,
-    inputEditLayout.saveLayout,
   ])
 
   useEffect(() => {
     processEditExcel.onLayoutReady(processEditLayout)
-  }, [processEditLayout, processEditExcel.onLayoutReady])
+  }, [processEditLayout.isDirty, processEditLayout.saveLayout, processEditExcel.onLayoutReady])
 
   useEffect(() => {
     inputEditExcel.onLayoutReady(inputEditLayout)
-  }, [inputEditLayout, inputEditExcel.onLayoutReady])
+  }, [inputEditLayout.isDirty, inputEditLayout.saveLayout, inputEditExcel.onLayoutReady])
 
   useEffect(() => {
     processReadExcel.onLayoutReady(lineLayout)
-  }, [lineLayout, processReadExcel.onLayoutReady])
+  }, [lineLayout.isDirty, lineLayout.saveLayout, processReadExcel.onLayoutReady])
 
   useEffect(() => {
     inputReadExcel.onLayoutReady(inputLayout)
-  }, [inputLayout, inputReadExcel.onLayoutReady])
+  }, [inputLayout.isDirty, inputLayout.saveLayout, inputReadExcel.onLayoutReady])
 
   if (loading) {
     return <p className="muted erp-grid-empty">Loading process and input…</p>
   }
 
   if (!detail) {
+    if (embedded) return null
     return <p className="muted erp-grid-empty">{emptyMessage}</p>
   }
 
@@ -589,38 +868,46 @@ export function ProductionProcessInputPanels({
   if (canEditPlan || canEditActuals) {
     const sortedProcessRows = [...processRows].sort((a, b) => a.line_no - b.line_no)
 
-    return (
-      <div className="erp-panel erp-panel-grow erp-detail-panel">
-        {processEditExcel.filterMenuElement}
-        {inputEditExcel.filterMenuElement}
-        {processEditExcel.contextMenuElement}
-        {inputEditExcel.contextMenuElement}
-        <div className="erp-panel-content erp-detail-content">
-          <section className="erp-production-detail-section" data-production-grid="process">
+    const editSections = (
+      <>
+        <section className="erp-production-detail-section" data-production-grid="process">
             <div className="erp-production-detail-section-title">Process</div>
             <ProductionGridToolbar
-              checkAllTitle={GRID_COPY.checkAllRowsTitle}
-              uncheckAllTitle={GRID_COPY.uncheckAllRowsTitle}
-              rowCount={sortedProcessRows.length}
               rowError={processRowError ?? rowError}
               rowErrorMessage={toolbarErrorMessage(processRowError ?? rowError)}
+              statusMessage={processStatusMessage}
               saveLabel={GRID_COPY.saveProcessBtn}
               saving={savingProcess}
-              onSave={onSaveProcess}
-              onCheckAll={() => setSelectedProcessKeys(new Set(sortedProcessRows.map((r) => r.key)))}
-              onUncheckAll={() => setSelectedProcessKeys(new Set())}
+              onSave={showSectionSaveButtons ? onSaveProcess : undefined}
             />
             <div
                 className="erp-grid-wrap erp-grid-wrap-detail"
                 onContextMenu={processEditExcel.openContextMenu}
               >
-                <ResizableGridTable layout={processEditLayout} {...processEditExcel.tableProps}>
+                <ResizableGridTable
+                  layout={processEditLayout}
+                  selectColumnHeader={
+                    <GridRowSelectButtons
+                      rowCount={sortedProcessRows.length}
+                      selectedCount={
+                        sortedProcessRows.filter((r) => selectedProcessKeys.has(r.key)).length
+                      }
+                      selectAllTitle={GRID_COPY.checkAllRowsTitle}
+                      clearTitle={GRID_COPY.uncheckAllRowsTitle}
+                      onSelectAll={() =>
+                        setSelectedProcessKeys(new Set(sortedProcessRows.map((r) => r.key)))
+                      }
+                      onClearSelection={() => setSelectedProcessKeys(new Set())}
+                    />
+                  }
+                  {...processEditExcel.tableProps}
+                >
                   <tbody>
                     {processEditExcel.displayRows.map((row, index) => (
                       <tr
                         key={row.key}
                         className={erpRowClass(index, selectedProcessKey === row.key) ?? undefined}
-                        onClick={() => setSelectedProcessKey(row.key)}
+                        onClick={() => activateProcessRow(row.key)}
                       >
                         {processEditLayout.orderedColumns.map((col) => {
                           switch (col.key) {
@@ -663,7 +950,6 @@ export function ProductionProcessInputPanels({
                                 <td
                                   key={col.key}
                                   className="erp-grid-cell-edit"
-                                  onClick={(e) => e.stopPropagation()}
                                 >
                                   <select
                                     className="erp-grid-input"
@@ -680,7 +966,7 @@ export function ProductionProcessInputPanels({
                                     }
                                   >
                                     <option value="">
-                                      {isBlankProcessRow(row) ? '' : GRID_COPY.selectOption}
+                                      {isProcessRowBlank(row) ? '' : GRID_COPY.selectOption}
                                     </option>
                                     {processLocations.map((l) => (
                                       <option key={l.location_id} value={l.location_id}>
@@ -695,8 +981,11 @@ export function ProductionProcessInputPanels({
                               return (
                                 <td
                                   key={col.key}
-                                  className="erp-grid-cell-edit"
-                                  onClick={(e) => e.stopPropagation()}
+                                  className={
+                                    planFieldsReadonly || row.status === 'completed'
+                                      ? 'erp-grid-cell-readonly'
+                                      : 'erp-grid-cell-edit'
+                                  }
                                 >
                                   {planFieldsReadonly || row.status === 'completed' ? (
                                     <ColoredItemCode
@@ -742,8 +1031,11 @@ export function ProductionProcessInputPanels({
                               return (
                                 <td
                                   key={col.key}
-                                  className="erp-grid-cell-edit"
-                                  onClick={(e) => e.stopPropagation()}
+                                  className={
+                                    planFieldsReadonly || row.status === 'completed'
+                                      ? 'erp-grid-cell-readonly'
+                                      : 'erp-grid-cell-edit'
+                                  }
                                 >
                                   {planFieldsReadonly || row.status === 'completed' ? (
                                     <ColoredItemName
@@ -780,8 +1072,11 @@ export function ProductionProcessInputPanels({
                               return (
                                 <td
                                   key={col.key}
-                                  className="erp-grid-cell-edit erp-col-num"
-                                  onClick={(e) => e.stopPropagation()}
+                                  className={
+                                    planFieldsReadonly || row.status === 'completed'
+                                      ? 'erp-grid-cell-readonly erp-col-num'
+                                      : 'erp-grid-cell-edit erp-col-num'
+                                  }
                                 >
                                   {planFieldsReadonly || row.status === 'completed' ? (
                                     <span>
@@ -814,10 +1109,9 @@ export function ProductionProcessInputPanels({
                                       ? 'erp-col-num erp-grid-cell-readonly'
                                       : 'erp-grid-cell-edit erp-col-num'
                                   }
-                                  onClick={actualQtyReadonly ? undefined : (e) => e.stopPropagation()}
                                 >
                                   {actualQtyReadonly ? (
-                                    row.actual_qty.trim() ? formatQty(row.actual_qty) : '-'
+                                    row.actual_qty.trim() ? formatQty(row.actual_qty) : ''
                                   ) : (
                                     <input
                                       className="erp-grid-input"
@@ -852,18 +1146,12 @@ export function ProductionProcessInputPanels({
           <section className="erp-production-detail-section" data-production-grid="input">
             <div className="erp-production-detail-section-title">Input Item</div>
             <ProductionGridToolbar
-              checkAllTitle={GRID_COPY.checkAllRowsTitle}
-              uncheckAllTitle={GRID_COPY.uncheckAllRowsTitle}
-              rowCount={visibleEditInputs.length}
               rowError={inputRowError ?? rowError}
               rowErrorMessage={toolbarErrorMessage(inputRowError ?? rowError)}
+              statusMessage={inputStatusMessage}
               saveLabel={GRID_COPY.saveInputBtn}
               saving={savingInput}
-              onSave={onSaveInput}
-              onCheckAll={() =>
-                setSelectedInputKeys(new Set(visibleEditInputs.map((r) => r.key)))
-              }
-              onUncheckAll={() => setSelectedInputKeys(new Set())}
+              onSave={showSectionSaveButtons ? onSaveInput : undefined}
             />
             {selectedProcessLineNo == null && (
               <p className="muted erp-grid-empty">{GRID_COPY.inputSelectProcessMsg}</p>
@@ -873,17 +1161,47 @@ export function ProductionProcessInputPanels({
                 className="erp-grid-wrap erp-grid-wrap-detail"
                 onContextMenu={inputEditExcel.openContextMenu}
               >
-                <ResizableGridTable layout={inputEditLayout} {...inputEditExcel.tableProps}>
+                <ResizableGridTable
+                  layout={inputEditLayout}
+                  selectColumnHeader={
+                    <GridRowSelectButtons
+                      rowCount={visibleEditInputs.length}
+                      selectedCount={
+                        visibleEditInputs.filter((r) => selectedInputKeys.has(r.key)).length
+                      }
+                      selectAllTitle={GRID_COPY.checkAllRowsTitle}
+                      clearTitle={GRID_COPY.uncheckAllRowsTitle}
+                      onSelectAll={() =>
+                        setSelectedInputKeys(new Set(visibleEditInputs.map((r) => r.key)))
+                      }
+                      onClearSelection={() => setSelectedInputKeys(new Set())}
+                    />
+                  }
+                  {...inputEditExcel.tableProps}
+                >
                   <tbody>
-                    {inputEditExcel.displayRows.map((row, index) => (
-                      <tr key={row.key} className={erpRowClass(index) ?? undefined}>
+                    {inputEditDisplayRows.map((row, index) => (
+                      <tr
+                        key={row.key}
+                        className={
+                          erpRowClass(
+                            index,
+                            selectedInputKey === row.key || selectedInputKeys.has(row.key)
+                          ) ?? undefined
+                        }
+                        onClick={() => activateInputRow(row.key)}
+                      >
                         {inputEditLayout.orderedColumns.map((col) => {
                           switch (col.key) {
                             case 'rownum':
                               return <GridRowNumCell key={col.key} index={index} />
                             case 'select':
                               return (
-                                <td key={col.key} className="erp-col-check">
+                                <td
+                                  key={col.key}
+                                  className="erp-col-check"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   <input
                                     type="checkbox"
                                     checked={selectedInputKeys.has(row.key)}
@@ -1011,7 +1329,7 @@ export function ProductionProcessInputPanels({
                                     }
                                   >
                                     <option value="">
-                                      {isBlankInputRow(row) ? '' : GRID_COPY.selectOption}
+                                      {isInputRowBlank(row) ? '' : GRID_COPY.selectOption}
                                     </option>
                                     {locations.map((loc) => (
                                       <option key={loc.location_id} value={loc.location_id}>
@@ -1031,7 +1349,7 @@ export function ProductionProcessInputPanels({
                                   }
                                 >
                                   {planFieldsReadonly ? (
-                                    <code>{row.lot.trim() || detail.lot}</code>
+                                    <code>{formatInputLotCell(row)}</code>
                                   ) : (
                                     <input
                                       className="erp-grid-input"
@@ -1081,7 +1399,7 @@ export function ProductionProcessInputPanels({
                                   onClick={actualQtyReadonly ? undefined : (e) => e.stopPropagation()}
                                 >
                                   {actualQtyReadonly ? (
-                                    row.consume_qty.trim() ? formatQty(row.consume_qty) : '-'
+                                    row.consume_qty.trim() ? formatQty(row.consume_qty) : ''
                                   ) : (
                                     <input
                                       className="erp-grid-input"
@@ -1107,20 +1425,42 @@ export function ProductionProcessInputPanels({
               </div>
             )}
           </section>
-        </div>
+      </>
+    )
+
+    if (embedded) {
+      return (
+        <>
+          {processEditExcel.filterMenuElement}
+          {inputEditExcel.filterMenuElement}
+          {processEditExcel.contextMenuElement}
+          {inputEditExcel.contextMenuElement}
+          {editSections}
+        </>
+      )
+    }
+
+    return (
+      <div className="erp-panel erp-panel-grow erp-detail-panel">
+        {processEditExcel.filterMenuElement}
+        {inputEditExcel.filterMenuElement}
+        {processEditExcel.contextMenuElement}
+        {inputEditExcel.contextMenuElement}
+        <div className="erp-panel-content erp-detail-content">{editSections}</div>
       </div>
     )
   }
 
-  return (
-    <div className="erp-panel erp-panel-grow erp-detail-panel">
-      {processReadExcel.filterMenuElement}
-      {inputReadExcel.filterMenuElement}
-      {processReadExcel.contextMenuElement}
-      {inputReadExcel.contextMenuElement}
-      <div className="erp-panel-content erp-detail-content">
+  const readSections = (
+    <>
         <section className="erp-production-detail-section" data-production-grid="process">
           <div className="erp-production-detail-section-title">Process</div>
+          {onTreeHighlightChange ? (
+            <div
+              className="erp-detail-toolbar erp-production-detail-toolbar"
+              aria-hidden="true"
+            />
+          ) : null}
           <div
             className="erp-grid-wrap erp-grid-wrap-static"
             onContextMenu={processReadExcel.openContextMenu}
@@ -1138,9 +1478,7 @@ export function ProductionProcessInputPanels({
                     <tr
                       key={ln.key}
                       className={erpRowClass(idx, selectedProcessKey === ln.key)}
-                      onClick={() =>
-                        setSelectedProcessKey((prev) => (prev === ln.key ? null : ln.key))
-                      }
+                      onClick={() => toggleProcessRowRead(ln.key)}
                     >
                       {lineLayout.orderedColumns.map((col) => {
                         switch (col.key) {
@@ -1182,7 +1520,13 @@ export function ProductionProcessInputPanels({
                                     : 'erp-col-num'
                                 }
                               >
-                                {ln.actualQty != null ? formatQty(ln.actualQty) : '-'}
+                                {(() => {
+                                  const display = actualQtyForEdit(
+                                    ln.actualQty,
+                                    detail.status
+                                  )
+                                  return display.trim() ? formatQty(display) : ''
+                                })()}
                               </td>
                             )
                           case 'actions':
@@ -1221,7 +1565,11 @@ export function ProductionProcessInputPanels({
                   </tr>
                 ) : (
                   inputReadExcel.displayRows.map((ln, idx) => (
-                    <tr key={ln.prd_order_input_id} className={erpRowClass(idx)}>
+                    <tr
+                      key={ln.prd_order_input_id}
+                      className={erpRowClass(idx, selectedInputKey === String(ln.prd_order_input_id))}
+                      onClick={() => toggleInputRowRead(String(ln.prd_order_input_id))}
+                    >
                       {inputLayout.orderedColumns.map((col) => {
                         switch (col.key) {
                           case 'rownum':
@@ -1260,13 +1608,21 @@ export function ProductionProcessInputPanels({
                                     : 'erp-col-num'
                                 }
                               >
-                                {formatQty(ln.consume_qty)}
+                                {(() => {
+                                  const display = consumeQtyForEdit(
+                                    ln.consume_qty,
+                                    ln.req_qty,
+                                    detail.status,
+                                    detail.planned_qty
+                                  )
+                                  return display.trim() ? formatQty(display) : ''
+                                })()}
                               </td>
                             )
                           case 'lot':
                             return (
                               <td key={col.key}>
-                                <code>{ln.lot || detail.lot}</code>
+                                <code>{ln.lot?.trim() || '-'}</code>
                               </td>
                             )
                           default:
@@ -1280,7 +1636,28 @@ export function ProductionProcessInputPanels({
             </ResizableGridTable>
           </div>
         </section>
-      </div>
+    </>
+  )
+
+  if (embedded) {
+    return (
+      <>
+        {processReadExcel.filterMenuElement}
+        {inputReadExcel.filterMenuElement}
+        {processReadExcel.contextMenuElement}
+        {inputReadExcel.contextMenuElement}
+        {readSections}
+      </>
+    )
+  }
+
+  return (
+    <div className="erp-panel erp-panel-grow erp-detail-panel">
+      {processReadExcel.filterMenuElement}
+      {inputReadExcel.filterMenuElement}
+      {processReadExcel.contextMenuElement}
+      {inputReadExcel.contextMenuElement}
+      <div className="erp-panel-content erp-detail-content">{readSections}</div>
     </div>
   )
 }

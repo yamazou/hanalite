@@ -9,10 +9,13 @@ import { SearchDateInput, SearchFilterField } from '../components/erp/SearchFilt
 import { productionOrderListColumns } from '../components/erp/masterGridColumns'
 import { GridRowNumCell } from '../components/GridRowNumCell'
 import { ProductionProcessInputPanels } from '../components/ProductionProcessInputPanels'
+import { GridRowSelectButtons } from '../components/GridRowSelectButtons'
+import { BomTreePanel } from '../components/BomTreePanel'
+import { ProductionTreeSidebar } from '../components/ProductionTreeSidebar'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import { useGridColumnLayout, type GridColumnLayout } from '../hooks/useGridColumnLayout'
 import type { Item } from '../types'
-import type { LocationMaster } from '../types/masters'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import type {
   ProductionOrderDetail,
   ProductionOrderListItem,
@@ -42,6 +45,8 @@ import {
   type EditInputRow,
   type EditProcessRow,
 } from '../utils/productionEdit'
+import { type BomTreeLine, type ProcessTreeHighlight } from '../utils/bomTree'
+import type { ProductionTreeData } from '../utils/productionOrderTree'
 type ProductionSearchFilters = {
   dateFrom: string
   dateTo: string
@@ -104,8 +109,7 @@ export function ProductionOrdersPage() {
   const [appliedSearch, setAppliedSearch] = useState<ProductionSearchFilters>(emptyProductionSearch)
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [masterItems, setMasterItems] = useState<Item[]>([])
-  const [masterLocations, setMasterLocations] = useState<LocationMaster[]>([])
+  const { items: masterItems, locations: masterLocations } = useMasterCatalog()
   const [editProcessRows, setEditProcessRows] = useState<EditProcessRow[]>([])
   const [editInputRows, setEditInputRows] = useState<EditInputRow[]>([])
   const [processRowError, setProcessRowError] = useState<string | null>(null)
@@ -114,15 +118,22 @@ export function ProductionOrdersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [processStatusMessage, setProcessStatusMessage] = useState<string | null>(null)
+  const [inputStatusMessage, setInputStatusMessage] = useState<string | null>(null)
   const [orderGridLayoutApi, setOrderGridLayoutApi] = useState<{
     saveLayout: () => void
     isDirty: boolean
   } | null>(null)
   const [selectedOrderIds, setSelectedOrderIds] = useState<Set<number>>(() => new Set())
+  const [treeTitle, setTreeTitle] = useState<string | null>(null)
+  const [treeLines, setTreeLines] = useState<BomTreeLine[]>([])
+  const [treeOnSelect, setTreeOnSelect] = useState(true)
+  const [treeHighlight, setTreeHighlight] = useState<ProcessTreeHighlight | null>(null)
   const orderLayoutRef = useRef<GridColumnLayout | null>(null)
   const processInputLayoutApiRef = useRef<{ saveLayouts: () => void; isDirty: boolean } | null>(
     null
   )
+  const resetProcessSelectionRef = useRef<(() => void) | null>(null)
 
   const loadOrders = useCallback(async () => {
     setLoading(true)
@@ -176,6 +187,8 @@ export function ProductionOrdersPage() {
   const fetchLotSuggestions = useCallback((q: string) => suggestProductionLots(q), [])
 
   const loadDetail = useCallback(async (orderId: number | null) => {
+    setProcessStatusMessage(null)
+    setInputStatusMessage(null)
     if (!orderId) {
       setDetail(null)
       return
@@ -229,18 +242,6 @@ export function ProductionOrdersPage() {
     setInputRowError(null)
   }, [detail?.production_order_id, detail?.updated_at, canEditDetail, canEditPlan])
 
-  useEffect(() => {
-    if (!canEditDetail) return
-    void Promise.all([api.listItems(), api.listLocationsMaster()])
-      .then(([items, locations]) => {
-        setMasterItems(items)
-        setMasterLocations(locations)
-      })
-      .catch(() => {
-        /* keep prior master data */
-      })
-  }, [canEditDetail])
-
   const statusOptions: Array<{ value: '' | ProductionStatus; label: string }> = [
     { value: '', label: 'All' },
     { value: 'cancelled', label: productionStatusLabel.cancelled },
@@ -276,7 +277,17 @@ export function ProductionOrdersPage() {
       ).length,
     [orders, selectedOrderIds]
   )
+  const bulkDeleteTargetCount = useMemo(
+    () =>
+      orders.filter(
+        (r) => selectedOrderIds.has(r.production_order_id) && r.status === 'cancelled'
+      ).length,
+    [orders, selectedOrderIds]
+  )
+  const bulkRestoreTargetCount = bulkDeleteTargetCount
   const hasBulkSelection = selectedOrderIds.size > 0
+  const bulkActionsForCancelled = statusFilter === 'cancelled'
+  const bulkActionsForRegistered = statusFilter === 'registered'
 
   const canCancel =
     detail?.status === 'registered' ||
@@ -383,7 +394,10 @@ export function ProductionOrdersPage() {
   const saveInputsOnly = async (): Promise<boolean> => {
     if (!selectedId || !detail) return false
     if (detail.status === 'approved' || detail.status === 'started') {
-      const inputs = buildInputPayload(editInputRows)
+      const inputs = buildInputPayload(editInputRows, {
+        status: detail.status,
+        orderPlannedQty: detail.planned_qty,
+      })
       if (inputs.length === 0) {
         setInputRowError('input_validation')
         return false
@@ -401,7 +415,10 @@ export function ProductionOrdersPage() {
       }
     }
     if (detail.status !== 'registered') return false
-    const inputs = buildInputPayload(editInputRows)
+    const inputs = buildInputPayload(editInputRows, {
+      status: detail.status,
+      orderPlannedQty: detail.planned_qty,
+    })
     if (inputs.length === 0) {
       setInputRowError('input_validation')
       return false
@@ -556,15 +573,68 @@ export function ProductionOrdersPage() {
     }
   }
 
+  const handleBulkDelete = async () => {
+    const targets = orders.filter(
+      (r) => selectedOrderIds.has(r.production_order_id) && r.status === 'cancelled'
+    )
+    if (targets.length === 0) return
+    if (!confirm(`Delete ${targets.length} production order(s)?`)) return
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      for (const row of targets) {
+        await api.deleteProductionOrder(row.production_order_id)
+      }
+      setSelectedOrderIds(new Set())
+      setSuccess(`Deleted ${targets.length} production order(s).`)
+      if (selectedId && targets.some((r) => r.production_order_id === selectedId)) {
+        setSelectedId(null)
+        setDetail(null)
+      }
+      await loadOrders()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete production order')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleBulkRestore = async () => {
+    const targets = orders.filter(
+      (r) => selectedOrderIds.has(r.production_order_id) && r.status === 'cancelled'
+    )
+    if (targets.length === 0) return
+    if (!confirm(`Restore ${targets.length} production order(s) to registered?`)) return
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      for (const row of targets) {
+        await api.restoreProductionOrder(row.production_order_id)
+      }
+      setSelectedOrderIds(new Set())
+      setSuccess(`Restored ${targets.length} production order(s).`)
+      if (selectedId && targets.some((r) => r.production_order_id === selectedId)) {
+        await loadDetail(selectedId)
+      }
+      await loadOrders()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to restore production order')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   const handleSaveProcess = async () => {
     if (!selectedId || !detail || !canEditDetail) return
     setLineSaveTarget('process')
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
+    setProcessStatusMessage(null)
     try {
       const ok = await saveProcessOnly()
-      if (ok) setSuccess('Process saved.')
+      if (ok) setProcessStatusMessage('Process saved.')
     } finally {
       setSubmitting(false)
       setLineSaveTarget(null)
@@ -576,10 +646,10 @@ export function ProductionOrdersPage() {
     setLineSaveTarget('input')
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
+    setInputStatusMessage(null)
     try {
       const ok = await saveInputsOnly()
-      if (ok) setSuccess('Input items saved.')
+      if (ok) setInputStatusMessage('Input items saved.')
     } finally {
       setSubmitting(false)
       setLineSaveTarget(null)
@@ -593,6 +663,19 @@ export function ProductionOrdersPage() {
     []
   )
 
+  const handleResetProcessSelection = useCallback(() => {
+    resetProcessSelectionRef.current?.()
+  }, [])
+
+  const handleTreeDataChange = useCallback((data: ProductionTreeData) => {
+    setTreeTitle(data.title)
+    setTreeLines(data.lines)
+  }, [])
+
+  const handleResetHandlerChange = useCallback((handler: (() => void) | null) => {
+    resetProcessSelectionRef.current = handler
+  }, [])
+
   const handleSaveAllGridLayouts = () => {
     orderGridLayoutApi?.saveLayout()
     processInputLayoutApiRef.current?.saveLayouts()
@@ -601,6 +684,28 @@ export function ProductionOrdersPage() {
   const getOrderFilterValue = useCallback((row: ProductionOrderListItem, col: string) => {
     const cell = getOrderExportCell(row, col)
     return toFilterCellValue(cell === '' ? null : cell)
+  }, [])
+
+  useEffect(() => {
+    if (!detail) {
+      setTreeHighlight(null)
+      if (treeOnSelect) {
+        setTreeTitle(null)
+        setTreeLines([])
+      }
+    }
+  }, [detail?.production_order_id, treeOnSelect])
+
+  const activateOrder = useCallback((row: ProductionOrderListItem) => {
+    setSelectedId(row.production_order_id)
+  }, [])
+
+  const handleTreeOnSelectChange = useCallback((enabled: boolean) => {
+    setTreeOnSelect(enabled)
+    if (!enabled) {
+      setTreeTitle(null)
+      setTreeLines([])
+    }
   }, [])
 
   const ordersGrid = useExcelLikeGrid({
@@ -614,8 +719,28 @@ export function ProductionOrdersPage() {
     },
   })
 
+  const handleOrderGridLayoutReady = useCallback(
+    (layout: GridColumnLayout) => {
+      orderLayoutRef.current = layout
+      ordersGrid.onLayoutReady(layout)
+      setOrderGridLayoutApi((prev) =>
+        prev && prev.saveLayout === layout.saveLayout && prev.isDirty === layout.isDirty
+          ? prev
+          : { saveLayout: layout.saveLayout, isDirty: layout.isDirty }
+      )
+    },
+    [ordersGrid.onLayoutReady]
+  )
+
   return (
-    <ErpScreen error={error} success={success} className="erp-screen-stacked">
+    <ErpScreen
+      error={error}
+      success={success}
+      className="erp-screen-stacked"
+      title="Production List"
+      onRefresh={() => void loadOrders()}
+      onSaveGrid={handleSaveAllGridLayouts}
+    >
       {ordersGrid.filterMenuElement}
       {ordersGrid.contextMenuElement}
       <ErpSearchPanel>
@@ -638,8 +763,7 @@ export function ProductionOrdersPage() {
                 onChange={(dateFrom) => setSearchInput((prev) => ({ ...prev, dateFrom }))}
               />
               <span className="erp-search-date-sep" aria-hidden="true">
-                –
-              </span>
+                 E              </span>
               <SearchDateInput
                 className="erp-input erp-input-date"
                 value={searchInput.dateTo}
@@ -687,12 +811,39 @@ export function ProductionOrdersPage() {
 
       <ErpGridPanel
         gridId="production-orders-v6"
+        hidePanelTitleBar
         panelClassName="erp-panel-orders-header"
         columns={productionOrderListColumns}
         loading={loading}
         isEmpty={!loading && orders.length === 0}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={ordersGrid.displayRows.length}
+            selectedCount={
+              ordersGrid.displayRows.filter((r) =>
+                selectedOrderIds.has(r.production_order_id)
+              ).length
+            }
+            onSelectAll={() =>
+              setSelectedOrderIds(
+                new Set(ordersGrid.displayRows.map((r) => r.production_order_id))
+              )
+            }
+            onClearSelection={() => setSelectedOrderIds(new Set())}
+          />
+        }
         toolbarLeft={
           <>
+            <div className="erp-toolbar-select-tree">
+              <label className="erp-toolbar-tree-toggle">
+                Tree
+                <input
+                  type="checkbox"
+                  checked={treeOnSelect}
+                  onChange={(e) => handleTreeOnSelectChange(e.target.checked)}
+                />
+              </label>
+            </div>
             {statusOptions.map((s) => (
               <button
                 key={s.value || 'all'}
@@ -707,50 +858,90 @@ export function ProductionOrdersPage() {
         }
         toolbarRight={
           <>
-            <div className="erp-check-toggle-group erp-toolbar-check-group">
-              <button
-                type="button"
-                className="erp-check-toggle-btn"
-                title="Check all rows"
-                aria-label="Check all rows"
-                disabled={ordersGrid.displayRows.length === 0}
-                onClick={() =>
-                  setSelectedOrderIds(
-                    new Set(ordersGrid.displayRows.map((r) => r.production_order_id))
-                  )
-                }
-              >
-                <span className="erp-check-toggle-icon checked" aria-hidden />
-              </button>
-              <button
-                type="button"
-                className="erp-check-toggle-btn"
-                title="Clear selection"
-                aria-label="Clear selection"
-                disabled={selectedOrderIds.size === 0}
-                onClick={() => setSelectedOrderIds(new Set())}
-              >
-                <span className="erp-check-toggle-icon unchecked" aria-hidden />
-              </button>
-            </div>
             {hasBulkSelection && (
               <>
-                <button
-                  type="button"
-                  className="btn erp-btn erp-btn-approve"
-                  disabled={submitting || bulkOrderTargetCount === 0}
-                  onClick={() => void handleBulkOrder()}
-                >
-                  Order
-                </button>
-                <button
-                  type="button"
-                  className="btn erp-btn erp-btn-cancel"
-                  disabled={submitting || bulkCancelTargetCount === 0}
-                  onClick={() => void handleBulkCancel()}
-                >
-                  Cancel
-                </button>
+                {bulkActionsForCancelled ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn erp-btn erp-btn-new"
+                      disabled={submitting || bulkRestoreTargetCount === 0}
+                      onClick={() => void handleBulkRestore()}
+                    >
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      className="btn erp-btn erp-btn-cancel"
+                      disabled={submitting || bulkDeleteTargetCount === 0}
+                      onClick={() => void handleBulkDelete()}
+                    >
+                      Delete
+                    </button>
+                  </>
+                ) : bulkActionsForRegistered ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn erp-btn erp-btn-approve"
+                      disabled={submitting || bulkOrderTargetCount === 0}
+                      onClick={() => void handleBulkOrder()}
+                    >
+                      Order
+                    </button>
+                    <button
+                      type="button"
+                      className="btn erp-btn erp-btn-cancel"
+                      disabled={submitting || bulkCancelTargetCount === 0}
+                      onClick={() => void handleBulkCancel()}
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {bulkOrderTargetCount > 0 && (
+                      <button
+                        type="button"
+                        className="btn erp-btn erp-btn-approve"
+                        disabled={submitting}
+                        onClick={() => void handleBulkOrder()}
+                      >
+                        Order
+                      </button>
+                    )}
+                    {bulkCancelTargetCount > 0 && (
+                      <button
+                        type="button"
+                        className="btn erp-btn erp-btn-cancel"
+                        disabled={submitting}
+                        onClick={() => void handleBulkCancel()}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    {bulkRestoreTargetCount > 0 && (
+                      <button
+                        type="button"
+                        className="btn erp-btn erp-btn-new"
+                        disabled={submitting}
+                        onClick={() => void handleBulkRestore()}
+                      >
+                        Restore
+                      </button>
+                    )}
+                    {bulkDeleteTargetCount > 0 && (
+                      <button
+                        type="button"
+                        className="btn erp-btn erp-btn-cancel"
+                        disabled={submitting}
+                        onClick={() => void handleBulkDelete()}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </>
+                )}
               </>
             )}
             {!hasBulkSelection && selectedId && canApproveSelected && (
@@ -773,7 +964,7 @@ export function ProductionOrdersPage() {
                 Cancel
               </button>
             )}
-            {selectedId && canRestore && (
+            {!hasBulkSelection && selectedId && canRestore && (
               <button
                 type="button"
                 className="btn erp-btn erp-btn-new"
@@ -783,7 +974,7 @@ export function ProductionOrdersPage() {
                 Restore
               </button>
             )}
-            {selectedId && canDelete && (
+            {!hasBulkSelection && selectedId && canDelete && (
               <button
                 type="button"
                 className="btn erp-btn erp-btn-cancel"
@@ -795,18 +986,8 @@ export function ProductionOrdersPage() {
             )}
           </>
         }
-        onSaveGrid={handleSaveAllGridLayouts}
-        onLayoutReady={(layout) => {
-          orderLayoutRef.current = layout
-          ordersGrid.onLayoutReady(layout)
-          setOrderGridLayoutApi((prev) =>
-            prev && prev.saveLayout === layout.saveLayout && prev.isDirty === layout.isDirty
-              ? prev
-              : { saveLayout: layout.saveLayout, isDirty: layout.isDirty }
-          )
-        }}
+        onLayoutReady={handleOrderGridLayoutReady}
         onGridContextMenu={ordersGrid.openContextMenu}
-        onRefresh={() => void loadOrders()}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
         rowCount={ordersGrid.displayRows.length}
         {...ordersGrid.tableProps}
@@ -816,8 +997,12 @@ export function ProductionOrdersPage() {
             {ordersGrid.displayRows.map((row, index) => (
               <tr
                 key={row.production_order_id}
+                data-production-order-id={row.production_order_id}
                 className={erpRowClass(index, selectedId === row.production_order_id)}
-                onClick={() => setSelectedId(row.production_order_id)}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest('input, select, button, textarea')) return
+                  activateOrder(row)
+                }}
                 onDoubleClick={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -847,6 +1032,7 @@ export function ProductionOrdersPage() {
                                 else next.delete(row.production_order_id)
                                 return next
                               })
+                              if (e.target.checked) activateOrder(row)
                             }}
                           />
                         </td>
@@ -930,39 +1116,65 @@ export function ProductionOrdersPage() {
         )}
       </ErpGridPanel>
 
-      {!detail || detailLoading ? (
-        <div className="erp-panel erp-panel-grow erp-detail-panel">
-          <div className="erp-panel-content erp-detail-content">
-            <p className="muted erp-grid-empty">{detailLoading ? 'Loading…' : 'Select an order.'}</p>
-          </div>
+      <div className={`erp-production-detail-split${treeOnSelect ? ' has-tree' : ''}`}>
+        <div className="erp-production-detail-main">
+          {!detail || detailLoading ? (
+            <div className="erp-panel erp-panel-grow erp-detail-panel">
+              <div className="erp-panel-content erp-detail-content">
+                <p className="muted erp-grid-empty">
+                  {detailLoading ? 'Loading…' : 'Select an order.'}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <ProductionProcessInputPanels
+              detail={detail}
+              canEdit={canEditDetail}
+              canEditPlan={canEditPlan}
+              canEditActuals={canEditActuals}
+              items={masterItems}
+              locations={masterLocations}
+              processRows={editProcessRows}
+              inputRows={editInputRows}
+              onProcessRowsChange={setEditProcessRows}
+              onInputRowsChange={setEditInputRows}
+              processRowError={processRowError}
+              inputRowError={inputRowError}
+              processStatusMessage={processStatusMessage}
+              inputStatusMessage={inputStatusMessage}
+              onSaveProcess={() => void handleSaveProcess()}
+              onSaveInput={() => void handleSaveInput()}
+              savingProcess={submitting && lineSaveTarget === 'process'}
+              savingInput={submitting && lineSaveTarget === 'input'}
+              lineGridId="production-lines-v4"
+              inputGridId="production-inputs-v3"
+              processEditGridId="production-lines-edit-v2"
+              inputEditGridId="production-inputs-edit-v2"
+              onGridLayoutsReady={handleProcessInputGridLayoutsReady}
+              onTreeHighlightChange={setTreeHighlight}
+              onTreeDataChange={handleTreeDataChange}
+              onResetHandlerChange={handleResetHandlerChange}
+            />
+          )}
         </div>
-      ) : (
-        <div>
-          <ProductionProcessInputPanels
-            detail={detail}
-            canEdit={canEditDetail}
-            canEditPlan={canEditPlan}
-            canEditActuals={canEditActuals}
-            items={masterItems}
-            locations={masterLocations}
-            processRows={editProcessRows}
-            inputRows={editInputRows}
-            onProcessRowsChange={setEditProcessRows}
-            onInputRowsChange={setEditInputRows}
-            processRowError={processRowError}
-            inputRowError={inputRowError}
-            onSaveProcess={() => void handleSaveProcess()}
-            onSaveInput={() => void handleSaveInput()}
-            savingProcess={submitting && lineSaveTarget === 'process'}
-            savingInput={submitting && lineSaveTarget === 'input'}
-            lineGridId="production-lines-v4"
-            inputGridId="production-inputs-v3"
-            processEditGridId="production-lines-edit-v2"
-            inputEditGridId="production-inputs-edit-v2"
-            onGridLayoutsReady={handleProcessInputGridLayoutsReady}
-          />
-        </div>
-      )}
+        {treeOnSelect ? (
+          <aside className="erp-production-detail-tree" aria-label="BOM tree">
+            {treeTitle && treeLines.length > 0 ? (
+              <BomTreePanel
+                sidebar
+                title={treeTitle}
+                lines={treeLines}
+                highlight={treeHighlight}
+                onReset={handleResetProcessSelection}
+              />
+            ) : (
+              <ProductionTreeSidebar title="Tree" onReset={handleResetProcessSelection}>
+                <p className="muted erp-grid-empty">Select an order to show tree.</p>
+              </ProductionTreeSidebar>
+            )}
+          </aside>
+        ) : null}
+      </div>
     </ErpScreen>
   )
 }

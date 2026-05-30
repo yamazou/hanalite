@@ -19,11 +19,24 @@ CREATE TABLE IF NOT EXISTS m_itemtyps (
 
 CREATE TABLE IF NOT EXISTS m_suppliers (
     suppliers_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    suppliers_cd VARCHAR(50) NOT NULL,
     suppliers_nm VARCHAR(200) NOT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
-    PRIMARY KEY (suppliers_id)
+    PRIMARY KEY (suppliers_id),
+    UNIQUE KEY uk_suppliers_cd (suppliers_cd)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS m_customers (
+    customers_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    customers_cd VARCHAR(50) NOT NULL,
+    customers_nm VARCHAR(200) NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at   DATETIME NULL DEFAULT NULL,
+    PRIMARY KEY (customers_id),
+    UNIQUE KEY uk_customers_cd (customers_cd)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_movetyps (
@@ -58,6 +71,8 @@ CREATE TABLE IF NOT EXISTS m_items (
     supplier1_id INT UNSIGNED NULL DEFAULT NULL,
     supplier2_id INT UNSIGNED NULL DEFAULT NULL,
     supplier3_id INT UNSIGNED NULL DEFAULT NULL,
+    customer1_id INT UNSIGNED NULL DEFAULT NULL,
+    customer2_id INT UNSIGNED NULL DEFAULT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
@@ -68,7 +83,9 @@ CREATE TABLE IF NOT EXISTS m_items (
     CONSTRAINT fk_items_itemtyp FOREIGN KEY (itemtyp_id) REFERENCES m_itemtyps (itemtyp_id),
     CONSTRAINT fk_items_supplier1 FOREIGN KEY (supplier1_id) REFERENCES m_suppliers (suppliers_id),
     CONSTRAINT fk_items_supplier2 FOREIGN KEY (supplier2_id) REFERENCES m_suppliers (suppliers_id),
-    CONSTRAINT fk_items_supplier3 FOREIGN KEY (supplier3_id) REFERENCES m_suppliers (suppliers_id)
+    CONSTRAINT fk_items_supplier3 FOREIGN KEY (supplier3_id) REFERENCES m_suppliers (suppliers_id),
+    CONSTRAINT fk_items_customer1 FOREIGN KEY (customer1_id) REFERENCES m_customers (customers_id),
+    CONSTRAINT fk_items_customer2 FOREIGN KEY (customer2_id) REFERENCES m_customers (customers_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_boms (

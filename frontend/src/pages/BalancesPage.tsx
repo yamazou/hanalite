@@ -7,6 +7,7 @@ import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { balanceColumns } from '../components/erp/masterGridColumns'
 import type { BalanceItem } from '../types/inventory'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { formatDateTime, formatQty } from '../utils/format'
 import { ColoredItemName } from '../components/ColoredItemText'
 import { toFilterCellValue } from '../utils/gridColumnFilter'
@@ -71,6 +72,8 @@ export function BalancesPage() {
     }
   }, [])
 
+  const [gridLayout, setGridLayout] = useState<GridColumnLayout | null>(null)
+
   const grid = useExcelLikeGrid({
     columns: balanceColumns,
     rows,
@@ -130,7 +133,14 @@ export function BalancesPage() {
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen
+      error={error}
+      success={success}
+      title="Period Balances"
+      onRefresh={load}
+      onSaveGrid={() => gridLayout?.saveLayout()}
+      saveGridIsDirty={gridLayout?.isDirty}
+    >
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpSearchPanel>
@@ -186,23 +196,21 @@ export function BalancesPage() {
             <button type="submit" className="btn erp-btn erp-btn-search">
               Search
             </button>
-            <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
-              Refresh
-            </button>
           </div>
         </form>
       </ErpSearchPanel>
 
       <ErpGridPanel
         gridId="inventory-balances-v1"
-        title="Period Balances"
+        hidePanelTitleBar
         columns={balanceColumns}
         loading={loading}
         isEmpty={!loading && rows.length === 0}
-        onRefresh={load}
-        onLayoutReady={grid.onLayoutReady}
+        onLayoutReady={(layout) => {
+          setGridLayout(layout)
+          grid.onLayoutReady(layout)
+        }}
         onGridContextMenu={grid.openContextMenu}
-        showSaveGridButton
         {...grid.tableProps}
       >
         {(layout) => (

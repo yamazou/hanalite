@@ -25,6 +25,7 @@ type Props<T> = {
   wrapClassName?: string
   onGridContextMenu?: (event: MouseEvent) => void
   onLayoutApi?: (api: Pick<GridColumnLayout, 'saveLayout' | 'isDirty'>) => void
+  selectColumnHeader?: ReactNode
   children: (ctx: {
     layout: GridColumnLayout
     displayRows: T[]
@@ -48,6 +49,7 @@ export function ExcelLikeGridTable<T>({
   wrapClassName = 'erp-grid-wrap erp-grid-wrap-detail',
   onGridContextMenu,
   onLayoutApi,
+  selectColumnHeader,
   children,
 }: Props<T>) {
   const grid = useExcelLikeGrid({
@@ -93,6 +95,7 @@ export function ExcelLikeGridTable<T>({
         <ResizableGridTable
           layout={layout}
           className={className}
+          selectColumnHeader={selectColumnHeader}
           {...grid.tableProps}
         >
           {children({ layout, displayRows: grid.displayRows })}

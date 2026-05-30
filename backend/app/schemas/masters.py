@@ -58,16 +58,37 @@ class ItemTypUpdate(BaseModel):
 class SupplierOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     suppliers_id: int
+    suppliers_cd: str
     suppliers_nm: str
     created_at: datetime | None = None
 
 
 class SupplierCreate(BaseModel):
+    suppliers_cd: str = Field(min_length=1, max_length=50)
     suppliers_nm: str = Field(min_length=1, max_length=200)
 
 
 class SupplierUpdate(BaseModel):
+    suppliers_cd: str = Field(min_length=1, max_length=50)
     suppliers_nm: str = Field(min_length=1, max_length=200)
+
+
+class CustomerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    customers_id: int
+    customers_cd: str
+    customers_nm: str
+    created_at: datetime | None = None
+
+
+class CustomerCreate(BaseModel):
+    customers_cd: str = Field(min_length=1, max_length=50)
+    customers_nm: str = Field(min_length=1, max_length=200)
+
+
+class CustomerUpdate(BaseModel):
+    customers_cd: str = Field(min_length=1, max_length=50)
+    customers_nm: str = Field(min_length=1, max_length=200)
 
 
 class MoveTypMasterOut(BaseModel):
@@ -119,6 +140,10 @@ class ItemListOut(BaseModel):
     supplier1_nm: str | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
+    customer1_id: int | None = None
+    customer1_nm: str | None = None
+    customer2_id: int | None = None
+    customer2_nm: str | None = None
 
 
 class ItemSearchOut(BaseModel):
@@ -139,6 +164,8 @@ class ItemDetailOut(BaseModel):
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
+    customer1_id: int | None = None
+    customer2_id: int | None = None
 
 
 class ItemCreate(BaseModel):
@@ -148,6 +175,8 @@ class ItemCreate(BaseModel):
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
+    customer1_id: int | None = None
+    customer2_id: int | None = None
 
 
 class ItemUpdate(BaseModel):
@@ -157,5 +186,7 @@ class ItemUpdate(BaseModel):
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
+    customer1_id: int | None = None
+    customer2_id: int | None = None
 
 

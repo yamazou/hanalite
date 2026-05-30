@@ -9,8 +9,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.inventory import MoveTyp
-from app.models.masters import Item, ItemTyp, Location, Supplier
+from app.models.masters import Customer, Item, ItemTyp, Location, Supplier
 from app.schemas.masters import (
+    CustomerCreate,
+    CustomerOut,
+    CustomerUpdate,
     ItemCreate,
     ItemDetailOut,
     ItemListOut,
@@ -95,9 +98,17 @@ def list_suppliers(db: Session) -> list[SupplierOut]:
 
 def create_supplier(db: Session, payload: SupplierCreate) -> SupplierOut:
     now = _now()
-    row = Supplier(suppliers_nm=payload.suppliers_nm.strip(), created_at=now, updated_at=now)
+    row = Supplier(
+        suppliers_cd=payload.suppliers_cd.strip(),
+        suppliers_nm=payload.suppliers_nm.strip(),
+        created_at=now,
+        updated_at=now,
+    )
     db.add(row)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Supplier code already exists.") from e
     return SupplierOut.model_validate(row)
 
 
@@ -112,10 +123,58 @@ def update_supplier(db: Session, suppliers_id: int, payload: SupplierUpdate) -> 
     row = db.get(Supplier, suppliers_id)
     if not row or row.deleted_at is not None:
         raise MasterError("Supplier not found.")
+    row.suppliers_cd = payload.suppliers_cd.strip()
     row.suppliers_nm = payload.suppliers_nm.strip()
     row.updated_at = _now()
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Supplier code already exists.") from e
     return SupplierOut.model_validate(row)
+
+
+def list_customers(db: Session) -> list[CustomerOut]:
+    rows = db.scalars(
+        select(Customer).where(Customer.deleted_at.is_(None)).order_by(Customer.customers_id)
+    ).all()
+    return [CustomerOut.model_validate(r) for r in rows]
+
+
+def create_customer(db: Session, payload: CustomerCreate) -> CustomerOut:
+    now = _now()
+    row = Customer(
+        customers_cd=payload.customers_cd.strip(),
+        customers_nm=payload.customers_nm.strip(),
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Customer code already exists.") from e
+    return CustomerOut.model_validate(row)
+
+
+def delete_customer(db: Session, customers_id: int) -> None:
+    row = db.get(Customer, customers_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Customer not found.")
+    _soft_delete(row)
+
+
+def update_customer(db: Session, customers_id: int, payload: CustomerUpdate) -> CustomerOut:
+    row = db.get(Customer, customers_id)
+    if not row or row.deleted_at is not None:
+        raise MasterError("Customer not found.")
+    row.customers_cd = payload.customers_cd.strip()
+    row.customers_nm = payload.customers_nm.strip()
+    row.updated_at = _now()
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Customer code already exists.") from e
+    return CustomerOut.model_validate(row)
 
 
 def list_movetyps(db: Session) -> list[MoveTypMasterOut]:
@@ -351,14 +410,24 @@ def _validate_item_refs(db: Session, payload: ItemCreate | ItemUpdate) -> None:
         supplier = db.get(Supplier, sid)
         if not supplier or supplier.deleted_at is not None:
             raise MasterError(f"Supplier {sid} not found.")
+    for cid in (payload.customer1_id, payload.customer2_id):
+        if cid is None:
+            continue
+        customer = db.get(Customer, cid)
+        if not customer or customer.deleted_at is not None:
+            raise MasterError(f"Customer {cid} not found.")
 
 
 def list_items(db: Session) -> list[ItemListOut]:
     s1 = Supplier.__table__.alias("s1")
+    c1 = Customer.__table__.alias("c1")
+    c2 = Customer.__table__.alias("c2")
     stmt = (
-        select(Item, ItemTyp.itemtyp_nm, s1.c.suppliers_nm)
+        select(Item, ItemTyp.itemtyp_nm, s1.c.suppliers_nm, c1.c.customers_nm, c2.c.customers_nm)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .outerjoin(s1, s1.c.suppliers_id == Item.supplier1_id)
+        .outerjoin(c1, c1.c.customers_id == Item.customer1_id)
+        .outerjoin(c2, c2.c.customers_id == Item.customer2_id)
         .where(Item.deleted_at.is_(None))
         .order_by(Item.item_id)
     )
@@ -374,8 +443,12 @@ def list_items(db: Session) -> list[ItemListOut]:
             supplier1_nm=supplier1_nm,
             supplier2_id=item.supplier2_id,
             supplier3_id=item.supplier3_id,
+            customer1_id=item.customer1_id,
+            customer1_nm=customer1_nm,
+            customer2_id=item.customer2_id,
+            customer2_nm=customer2_nm,
         )
-        for item, itemtyp_nm, supplier1_nm in rows
+        for item, itemtyp_nm, supplier1_nm, customer1_nm, customer2_nm in rows
     ]
 
 
@@ -391,6 +464,8 @@ def get_item(db: Session, item_id: int) -> ItemDetailOut:
         supplier1_id=row.supplier1_id,
         supplier2_id=row.supplier2_id,
         supplier3_id=row.supplier3_id,
+        customer1_id=row.customer1_id,
+        customer2_id=row.customer2_id,
     )
 
 
@@ -405,6 +480,8 @@ def create_item(db: Session, payload: ItemCreate) -> ItemDetailOut:
         supplier1_id=payload.supplier1_id,
         supplier2_id=payload.supplier2_id,
         supplier3_id=payload.supplier3_id,
+        customer1_id=payload.customer1_id,
+        customer2_id=payload.customer2_id,
         created_at=now,
         updated_at=now,
     )
@@ -428,6 +505,8 @@ def update_item(db: Session, item_id: int, payload: ItemUpdate) -> ItemDetailOut
     row.supplier1_id = payload.supplier1_id
     row.supplier2_id = payload.supplier2_id
     row.supplier3_id = payload.supplier3_id
+    row.customer1_id = payload.customer1_id
+    row.customer2_id = payload.customer2_id
     row.updated_at = _now()
     db.flush()
     return get_item(db, item_id)

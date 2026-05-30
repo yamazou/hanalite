@@ -8,6 +8,7 @@ import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { currentStockColumns } from '../components/erp/masterGridColumns'
 import type { CurrentStock } from '../types/inventory'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { formatDate, formatDateTime, formatQty } from '../utils/format'
 import { ColoredItemCode, ColoredItemName } from '../components/ColoredItemText'
 import { toFilterCellValue } from '../utils/gridColumnFilter'
@@ -91,6 +92,8 @@ export function CurrentStockPage() {
     }
   }, [])
 
+  const [gridLayout, setGridLayout] = useState<GridColumnLayout | null>(null)
+
   const grid = useExcelLikeGrid({
     columns: currentStockColumns,
     rows,
@@ -124,7 +127,13 @@ export function CurrentStockPage() {
   })
 
   return (
-    <ErpScreen error={error}>
+    <ErpScreen
+      error={error}
+      title="Current Stock"
+      onRefresh={load}
+      onSaveGrid={() => gridLayout?.saveLayout()}
+      saveGridIsDirty={gridLayout?.isDirty}
+    >
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpSearchPanel>
@@ -170,23 +179,21 @@ export function CurrentStockPage() {
             <button type="button" className="btn erp-btn erp-btn-clear" onClick={clearSearch}>
               Clear
             </button>
-            <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
-              Refresh
-            </button>
           </div>
         </form>
       </ErpSearchPanel>
 
       <ErpGridPanel
         gridId="inventory-current-v3"
-        title="Current Stock"
+        hidePanelTitleBar
         columns={currentStockColumns}
         loading={loading}
         isEmpty={!loading && rows.length === 0}
-        onRefresh={load}
-        onLayoutReady={grid.onLayoutReady}
+        onLayoutReady={(layout) => {
+          setGridLayout(layout)
+          grid.onLayoutReady(layout)
+        }}
         onGridContextMenu={grid.openContextMenu}
-        showSaveGridButton
         {...grid.tableProps}
       >
         {(layout) => (

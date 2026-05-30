@@ -19,17 +19,22 @@ from app.schemas.masters import (
     MoveTypCreate,
     MoveTypMasterOut,
     MoveTypUpdate,
+    CustomerCreate,
+    CustomerOut,
+    CustomerUpdate,
     SupplierCreate,
     SupplierOut,
     SupplierUpdate,
 )
 from app.services.masters import (
     MasterError,
+    create_customer,
     create_item,
     create_itemtyp,
     create_location,
     create_movetyp,
     create_supplier,
+    delete_customer,
     delete_item,
     delete_itemtyp,
     delete_location,
@@ -40,8 +45,10 @@ from app.services.masters import (
     list_itemtyps,
     list_locations,
     list_movetyps,
+    list_customers,
     list_suppliers,
     search_items,
+    update_customer,
     update_item,
     update_itemtyp,
     update_location,
@@ -128,6 +135,45 @@ def api_update_supplier(
 def api_delete_supplier(suppliers_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         delete_supplier(db, suppliers_id)
+        db.commit()
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/customers", response_model=list[CustomerOut])
+def api_list_customers(db: Annotated[Session, Depends(get_db)]):
+    return list_customers(db)
+
+
+@router.post("/customers", response_model=CustomerOut, status_code=201)
+def api_create_customer(payload: CustomerCreate, db: Annotated[Session, Depends(get_db)]):
+    try:
+        row = create_customer(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/customers/{customers_id}", response_model=CustomerOut)
+def api_update_customer(
+    customers_id: int, payload: CustomerUpdate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = update_customer(db, customers_id, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.delete("/customers/{customers_id}", status_code=204, response_class=Response)
+def api_delete_customer(customers_id: int, db: Annotated[Session, Depends(get_db)]):
+    try:
+        delete_customer(db, customers_id)
         db.commit()
     except MasterError as e:
         db.rollback()

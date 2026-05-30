@@ -14,7 +14,9 @@ import {
 } from '../utils/draftEdit'
 import { getDraftLineFilterValue } from '../utils/draftGridSort'
 import { gridCellPlaceholder } from '../utils/gridPlaceholder'
+import { GRID_SELECT_COLUMN } from './erp/masterGridColumns'
 import { GRID_ROWNUM_COLUMN, GridRowNumCell } from './GridRowNumCell'
+import { GridRowSelectButtons } from './GridRowSelectButtons'
 import { ExcelLikeGridTable } from './ExcelLikeGridTable'
 import type { GridColumnDef } from './ResizableGridTable'
 
@@ -79,17 +81,17 @@ export function DraftEditableLineGrid({
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(() => new Set())
 
   const lineColumns = useMemo((): GridColumnDef[] => {
-    const cols: GridColumnDef[] = [
-      GRID_ROWNUM_COLUMN,
+    const cols: GridColumnDef[] = [GRID_ROWNUM_COLUMN]
+    if (canEdit && allowRowDelete) {
+      cols.push(GRID_SELECT_COLUMN)
+    }
+    cols.push(
       { key: 'item_cd', label: copy.itemCdLabel, defaultWidth: 110 },
       { key: 'item_nm', label: copy.itemNmLabel, defaultWidth: 160 },
       { key: 'lot', label: copy.lotLabel, defaultWidth: 100 },
       { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
-      { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' },
-    ]
-    if (canEdit && allowRowDelete) {
-      cols.unshift({ key: 'select', label: '', defaultWidth: 36, className: 'erp-col-check' })
-    }
+      { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' }
+    )
     return cols
   }, [canEdit, allowRowDelete, copy])
 
@@ -267,28 +269,6 @@ export function DraftEditableLineGrid({
           )}
           {allowRowDelete && (
             <>
-              <div className="erp-check-toggle-group">
-                <button
-                  type="button"
-                  className="erp-check-toggle-btn"
-                  title={copy.checkAllRowsTitle}
-                  aria-label={copy.checkAllRowsTitle}
-                  disabled={lines.length === 0}
-                  onClick={() => setSelectedRowKeys(new Set(lines.map((row) => row.key)))}
-                >
-                  <span className="erp-check-toggle-icon checked" aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  className="erp-check-toggle-btn"
-                  title={copy.uncheckAllRowsTitle}
-                  aria-label={copy.uncheckAllRowsTitle}
-                  disabled={lines.length === 0}
-                  onClick={() => setSelectedRowKeys(new Set())}
-                >
-                  <span className="erp-check-toggle-icon unchecked" aria-hidden />
-                </button>
-              </div>
               <button
                 type="button"
                 className="btn erp-btn erp-btn-clear btn-sm"
@@ -313,6 +293,18 @@ export function DraftEditableLineGrid({
           columns={lineColumns}
           rows={linesSorted}
           getFilterValue={(row, col) => getDraftLineFilterValue(editRowToDraftLine(row), col)}
+          selectColumnHeader={
+            allowRowDelete ? (
+              <GridRowSelectButtons
+                rowCount={lines.length}
+                selectedCount={selectedRowKeys.size}
+                selectAllTitle={copy.checkAllRowsTitle}
+                clearTitle={copy.uncheckAllRowsTitle}
+                onSelectAll={() => setSelectedRowKeys(new Set(lines.map((row) => row.key)))}
+                onClearSelection={() => setSelectedRowKeys(new Set())}
+              />
+            ) : undefined
+          }
           layoutOptions={{
             onLayoutChange,
             pinFirst: canEdit && allowRowDelete ? [...PIN_LINE_COLUMNS] : ['rownum'],

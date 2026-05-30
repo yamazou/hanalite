@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'reac
 import { useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
-import { Alert } from '../components/Alert'
+import { ErpScreen } from '../components/erp/ErpScreen'
 import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
 import { DraftHeaderEditCell } from '../components/DraftHeaderEditCells'
 import { useDraftEdit } from '../hooks/useDraftEdit'
 import { GRID_ROWNUM_COLUMN, GridRowNumCell } from '../components/GridRowNumCell'
-import { SaveGridButton } from '../components/erp/SaveGridButton'
 import { SearchDateInput, SearchFilterField } from '../components/erp/SearchFilterField'
 import { ResizableGridTable, type GridColumnDef } from '../components/ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
@@ -460,11 +459,21 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   }
 
   return (
-    <div className="erp-screen">
+    <ErpScreen
+      error={error}
+      success={message}
+      title={copy.listTitle}
+      onRefresh={() => void load()}
+      refreshLabel={copy.refreshBtn}
+      showSaveGridButton
+      onSaveGrid={handleSaveGrid}
+      saveGridIsDirty={gridLayoutDirty}
+      saveGridDisabled={!gridLayoutDirty}
+      saveGridLabel={copy.saveGridBtn}
+      saveGridSuccessMessage={copy.saveGridSuccessMsg}
+    >
       {headerGrid.filterMenuElement}
       {headerGrid.contextMenuElement}
-      {error && <Alert type="error" message={error} />}
-      {message && <Alert type="success" message={message} />}
 
       <div className="erp-panel erp-panel-search">
         <div className="erp-panel-body erp-search-body">
@@ -597,16 +606,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
                 {copy.deleteBtn}
               </button>
             )}
-            <SaveGridButton
-              label={copy.saveGridBtn}
-              successMessage={copy.saveGridSuccessMsg}
-              disabled={!gridLayoutDirty}
-              isDirty={gridLayoutDirty}
-              onSave={handleSaveGrid}
-            />
-            <button type="button" className="btn erp-btn erp-btn-clear" onClick={load}>
-              {copy.refreshBtn}
-            </button>
           </div>
         </div>
 
@@ -687,6 +686,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           />
         </div>
       </div>
-    </div>
+    </ErpScreen>
   )
 }

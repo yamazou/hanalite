@@ -287,17 +287,42 @@ body,
 
 .main-tab {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  align-items: stretch;
+  gap: 0;
   border: 1px solid var(--erp-border);
   border-bottom: 2px solid var(--erp-title);
   background: var(--erp-surface);
   color: var(--erp-link);
+  max-width: 260px;
+  user-select: none;
+}
+
+.main-tab-drag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 0.65rem;
+  color: var(--erp-text-muted, #64748b);
+  cursor: grab;
+  border-right: 1px solid var(--erp-border);
+}
+
+.main-tab-drag:active {
+  cursor: grabbing;
+}
+
+.main-tab-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
   padding: 4px 8px;
   font-size: 0.7rem;
   cursor: pointer;
-  max-width: 240px;
-  user-select: none;
 }
 
 .main-tab:hover {
@@ -308,6 +333,24 @@ body,
   background: #fffde7;
   color: var(--erp-title-dark);
   font-weight: normal;
+}
+
+.main-tab-panels {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-tab-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main-tab-panel[hidden] {
+  display: none !important;
 }
 
 .main-tab-label {
@@ -874,6 +917,7 @@ input[type='file'] {
 /* --- ERP screen (Receipt / Delivery drafts) — pale green theme --- */
 
 .erp-screen {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -884,6 +928,25 @@ input[type='file'] {
   overflow: hidden;
   background: var(--erp-bg);
   color: var(--erp-text);
+}
+
+.erp-screen-messages {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(420px, 48vw);
+  pointer-events: none;
+}
+
+.erp-screen-messages .alert {
+  pointer-events: auto;
+  box-shadow: 1px 2px 6px rgba(61, 107, 61, 0.2);
+  animation: erp-feedback-in 0.2s ease-out;
 }
 
 .erp-screen .alert {
@@ -930,6 +993,49 @@ input[type='file'] {
   letter-spacing: 0.02em;
   border-bottom: 1px solid var(--erp-title-dark);
   flex-shrink: 0;
+}
+
+.erp-panel-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: linear-gradient(180deg, var(--erp-title) 0%, var(--erp-title-dark) 100%);
+  color: #fff;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: normal;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--erp-title-dark);
+  flex-shrink: 0;
+  min-height: 26px;
+}
+
+.erp-screen > .erp-panel-title-bar {
+  align-self: stretch;
+  border: 1px solid var(--erp-border);
+  box-shadow: 1px 1px 2px rgba(61, 107, 61, 0.08);
+}
+
+.erp-panel-title-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-panel-title-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.erp-panel-title-actions .erp-save-grid-hint {
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .erp-panel-body {
@@ -1023,6 +1129,115 @@ input[type='file'] {
   flex: 1 1 55%;
   min-height: 220px;
 }
+
+.erp-screen-stacked .erp-production-detail-split {
+  flex: 1 1 55%;
+  min-height: 220px;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+.erp-production-detail-main {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.erp-production-detail-main .erp-detail-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.erp-production-detail-split.has-tree .erp-production-detail-main {
+  flex: 1 1 0;
+}
+
+.erp-production-detail-tree {
+  flex: 0 0 min(44%, 520px);
+  min-width: 280px;
+  max-width: 55%;
+  min-height: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+.erp-production-detail-tree > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.erp-production-detail-split.has-tree .erp-production-detail-main .erp-detail-panel,
+.erp-production-detail-split.has-tree .erp-tree-panel-sidebar {
+  height: 100%;
+}
+
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section[data-production-grid='process']
+  > .erp-production-detail-section-title,
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section-tree
+  > .erp-production-detail-section-title {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section[data-production-grid='process']
+  > .erp-detail-toolbar,
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section-tree
+  > .erp-detail-toolbar {
+  min-height: 30px;
+  box-sizing: border-box;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.erp-production-detail-section-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
+}
+
+.erp-production-detail-section-tree > .erp-tree-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-tree-panel-sidebar {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.erp-tree-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 
 .erp-panel-grow-main {
   flex: 1 1 auto;
@@ -1387,12 +1602,56 @@ input[type='file'] {
   line-height: 1.5;
 }
 
+/* Sidebar tree: fill the split column (must follow .erp-tree-view — same specificity, later wins). */
+.erp-tree-view.erp-tree-view-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  height: 100%;
+  margin-bottom: 0;
+  overflow: auto;
+}
+
 .erp-tree-line {
   white-space: nowrap;
+  border-radius: 2px;
+  padding: 1px 4px;
+  margin: 0 -4px;
+}
+
+.erp-tree-line-highlight {
+  background: var(--erp-grid-selected);
+  outline: 1px solid var(--erp-grid-selected-border);
+  outline-offset: -1px;
 }
 
 .erp-tree-suffix {
   color: var(--erp-text-muted, #64748b);
+}
+
+.erp-tree-marker {
+  display: inline-block;
+  margin-right: 3px;
+  color: var(--erp-title-dark);
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+.erp-tree-process-btn {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  min-height: 16px;
+  line-height: 16px;
+  font-size: 0.62rem;
+  font-weight: normal;
+  vertical-align: middle;
+  border: 1px solid var(--erp-border);
+  border-radius: 2px;
+  background: linear-gradient(180deg, #fff 0%, var(--erp-label) 100%);
+  color: var(--erp-title-dark);
+  box-shadow: 1px 1px 0 rgba(61, 107, 61, 0.12);
+  white-space: nowrap;
 }
 
 .erp-itemtyp-color-cell {
@@ -1673,8 +1932,25 @@ select.erp-input option {
 
 .erp-toolbar-check-group {
   margin-left: 4px;
-  padding-left: 8px;
-  border-left: 1px solid var(--erp-border);
+  padding-left: 4px;
+}
+
+.erp-toolbar-check-group-leading {
+  margin-right: 4px;
+  padding-right: 4px;
+}
+
+/** Match Process/Input toolbar: check toggles then action (Tree / Update) with same gap. */
+.erp-toolbar-select-tree {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-left: 4px;
+}
+
+.erp-toolbar-select-tree .erp-toolbar-tree-toggle {
+  margin-left: 0;
 }
 
 .erp-save-grid-group {
@@ -2287,6 +2563,8 @@ a.erp-link-cell:hover {
   background: linear-gradient(180deg, var(--erp-toolbar) 0%, var(--erp-label) 100%);
   border-bottom: 1px solid var(--erp-border);
   flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 
 .erp-detail-toolbar-actions {
@@ -2295,6 +2573,27 @@ a.erp-link-cell:hover {
   flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
+}
+
+.erp-toolbar-tree-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  margin-left: 4px;
+  padding-left: 0;
+  font-weight: normal;
+}
+
+.erp-toolbar-tree-toggle input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
 }
 
 .erp-bom-filter-inline {
@@ -2331,16 +2630,49 @@ a.erp-link-cell:hover {
   margin-right: 4px;
 }
 
-.erp-col-check {
+.erp-th-select-header .erp-th-select-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 18px;
+}
+
+.erp-th-select-header .erp-check-toggle-group {
+  margin-right: 0;
+}
+
+.erp-th-select-header .erp-th-drag-handle,
+.erp-th-select-header .erp-th-text {
+  display: none;
+}
+
+.erp-grid th.erp-col-check,
+.erp-grid td.erp-col-check {
   text-align: center;
-  padding: 0 4px !important;
+  vertical-align: middle;
+}
+
+.erp-grid-resizable th.erp-col-check.erp-th-compact,
+.erp-grid-resizable th.erp-col-check.erp-th-select-header {
+  text-align: center;
+  padding-left: 2px !important;
+  padding-right: 2px !important;
+}
+
+.erp-col-check {
+  padding: 0 2px !important;
+}
+
+.erp-grid td.erp-col-check.erp-grid-cell-edit {
+  text-align: center;
 }
 
 .erp-col-check input[type='checkbox'] {
+  display: block;
   width: 14px;
   height: 14px;
-  margin: 0;
-  vertical-align: middle;
+  margin: 0 auto;
   cursor: pointer;
 }
 
@@ -2497,6 +2829,39 @@ a.erp-link-cell:hover {
 }
 
 .alert-inline.error {
+  color: var(--danger);
+}
+
+@keyframes erp-feedback-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.erp-toolbar-feedback {
+  font-size: 0.72rem;
+  font-weight: normal;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: min(360px, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: erp-feedback-in 0.2s ease-out;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+.erp-toolbar-feedback--success {
+  color: var(--erp-title-dark);
+}
+
+.erp-toolbar-feedback--error {
   color: var(--danger);
 }
 

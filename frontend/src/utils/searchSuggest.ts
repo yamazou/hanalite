@@ -25,7 +25,16 @@ export function formatLocationLabel(loc: { location_cd: string; location_nm: str
 
 let itemCatalogPromise: Promise<ItemSearchRow[]> | null = null
 let locationCatalogPromise: Promise<LocationMaster[]> | null = null
-let supplierCatalogPromise: Promise<Array<{ suppliers_id: number; suppliers_nm: string }>> | null = null
+let supplierCatalogPromise: Promise<
+  Array<{ suppliers_id: number; suppliers_cd: string; suppliers_nm: string }>
+> | null = null
+
+/** Drop cached master lists (e.g. after MasterCatalogContext refresh). */
+export function clearMasterSuggestCaches(): void {
+  itemCatalogPromise = null
+  locationCatalogPromise = null
+  supplierCatalogPromise = null
+}
 
 async function getItemCatalog(): Promise<ItemSearchRow[]> {
   if (!itemCatalogPromise) {
@@ -49,7 +58,9 @@ async function getLocationCatalog(): Promise<LocationMaster[]> {
   return locationCatalogPromise
 }
 
-async function getSupplierCatalog(): Promise<Array<{ suppliers_id: number; suppliers_nm: string }>> {
+async function getSupplierCatalog(): Promise<
+  Array<{ suppliers_id: number; suppliers_cd: string; suppliers_nm: string }>
+> {
   if (!supplierCatalogPromise) {
     supplierCatalogPromise = api.listSuppliersMaster()
   }
@@ -149,9 +160,14 @@ export async function resolveLocationIdFromText(text: string): Promise<number | 
 export async function suggestSuppliers(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {
   const catalog = await getSupplierCatalog()
   return catalog
-    .filter((s) => matchTokens(s.suppliers_nm, query))
+    .filter((s) =>
+      matchTokens(`${s.suppliers_cd} ${s.suppliers_nm}`, query)
+    )
     .slice(0, limit)
-    .map((s) => ({ label: s.suppliers_nm, value: s.suppliers_nm }))
+    .map((s) => ({
+      label: s.suppliers_cd && s.suppliers_nm ? `${s.suppliers_cd} / ${s.suppliers_nm}` : s.suppliers_nm,
+      value: s.suppliers_nm,
+    }))
 }
 
 export async function suggestCurrentLots(query: string, limit = MAX_SUGGESTIONS): Promise<SuggestOption[]> {

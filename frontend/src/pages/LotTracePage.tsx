@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
@@ -11,6 +11,7 @@ import {
   traceHistoryColumns,
 } from '../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import type { LotTraceResult } from '../types/inventory'
 import { formatDateTime, formatQty } from '../utils/format'
 import { ColoredItemName } from '../components/ColoredItemText'
@@ -208,8 +209,28 @@ export function LotTracePage() {
     },
   })
 
+  const currentLayoutRef = useRef<GridColumnLayout | null>(null)
+  const historyLayoutRef = useRef<GridColumnLayout | null>(null)
+  const balanceLayoutRef = useRef<GridColumnLayout | null>(null)
+
+  const handleRefresh = () => {
+    if (lot.trim()) void runTrace(lot, locationText)
+  }
+
+  const handleSaveAllGridLayouts = () => {
+    currentLayoutRef.current?.saveLayout()
+    historyLayoutRef.current?.saveLayout()
+    balanceLayoutRef.current?.saveLayout()
+  }
+
   return (
-    <ErpScreen error={error} className="erp-screen-stacked">
+    <ErpScreen
+      error={error}
+      className="erp-screen-stacked"
+      title="Lot Trace"
+      onRefresh={handleRefresh}
+      onSaveGrid={result ? handleSaveAllGridLayouts : undefined}
+    >
       {currentGrid.filterMenuElement}
       {currentGrid.contextMenuElement}
       {historyGrid.filterMenuElement}
@@ -250,9 +271,11 @@ export function LotTracePage() {
             columns={traceCurrentColumns}
             isEmpty={currentRows.length === 0}
             emptyText="No current stock for this lot"
-            onLayoutReady={currentGrid.onLayoutReady}
+            onLayoutReady={(layout) => {
+              currentLayoutRef.current = layout
+              currentGrid.onLayoutReady(layout)
+            }}
             onGridContextMenu={currentGrid.openContextMenu}
-            showSaveGridButton
             {...currentGrid.tableProps}
           >
             {(layout) => (
@@ -293,9 +316,11 @@ export function LotTracePage() {
             columns={traceHistoryColumns}
             isEmpty={historyRows.length === 0}
             emptyText="No movements"
-            onLayoutReady={historyGrid.onLayoutReady}
+            onLayoutReady={(layout) => {
+              historyLayoutRef.current = layout
+              historyGrid.onLayoutReady(layout)
+            }}
             onGridContextMenu={historyGrid.openContextMenu}
-            showSaveGridButton
             {...historyGrid.tableProps}
           >
             {(layout) => (
@@ -338,9 +363,11 @@ export function LotTracePage() {
             columns={traceBalanceColumns}
             isEmpty={balanceRows.length === 0}
             emptyText="No balance snapshots"
-            onLayoutReady={balanceGrid.onLayoutReady}
+            onLayoutReady={(layout) => {
+              balanceLayoutRef.current = layout
+              balanceGrid.onLayoutReady(layout)
+            }}
             onGridContextMenu={balanceGrid.openContextMenu}
-            showSaveGridButton
             {...balanceGrid.tableProps}
           >
             {(layout) => (

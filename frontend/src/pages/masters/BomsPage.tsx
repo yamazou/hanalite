@@ -4,11 +4,16 @@ import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterBomEditColumns } from '../../components/erp/masterGridColumns'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { ToolbarFeedback } from '../../components/ToolbarFeedback'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
-import type { BomCreatePayload, BomRow } from '../../types/boms'
-import type { ItemSearchRow, LocationMaster } from '../../types/masters'
-import { formatQty } from '../../utils/format'
+import type { BomCreatePayload } from '../../types/boms'
+import {
+  useMasterCatalog,
+  useRefreshMasterCatalogAfterSave,
+} from '../../context/MasterCatalogContext'
+import type { ItemSearchRow } from '../../types/masters'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import {
   emptyEditBomRow,
@@ -19,9 +24,11 @@ import {
 } from '../../utils/bomMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { mergeBomImportRows } from '../../utils/bomExcelImport'
-import { ColoredItemCode, ColoredItemName } from '../../components/ColoredItemText'
+import { ColoredItemName } from '../../components/ColoredItemText'
+import { BomTreePanel } from '../../components/BomTreePanel'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
+import { loadBomTreeForParent, type BomTreeLine } from '../../utils/bomTree'
 
 async function resolveItemCd(cd: string): Promise<ItemSearchRow | null> {
   const trimmed = cd.trim()
@@ -31,28 +38,21 @@ async function resolveItemCd(cd: string): Promise<ItemSearchRow | null> {
   return exact ?? hits[0] ?? null
 }
 
-type BomTreeLine = {
-  indent: number
-  item_cd: string
-  item_nm: string
-  item_id?: number
-  itemtyp_id?: number
-  suffix?: string
-}
-
 export function BomsPage() {
   const { colorForItemRef } = useItemTypColors()
+  const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditBomRow[]>([])
-  const [locations, setLocations] = useState<LocationMaster[]>([])
+  const { locations } = useMasterCatalog()
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
-  const contextRowRef = useRef<EditBomRow | null>(null)
   const [treeTitle, setTreeTitle] = useState<string | null>(null)
   const [treeLines, setTreeLines] = useState<BomTreeLine[]>([])
+  const [treeOnSelect, setTreeOnSelect] = useState(true)
+  const [activeRowKey, setActiveRowKey] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -76,10 +76,6 @@ export function BomsPage() {
   useEffect(() => {
     void load()
   }, [load])
-
-  useEffect(() => {
-    api.listLocationsMaster().then(setLocations).catch(() => {})
-  }, [])
 
   useEffect(() => {
     const valid = new Set(editRows.map((row) => row.key))
@@ -145,58 +141,38 @@ export function BomsPage() {
   )
 
   const showTreeFromRow = async (baseRow: EditBomRow | null) => {
-    if (!baseRow?.p_item_cd.trim()) return
+    if (!(baseRow?.p_item_cd ?? '').trim()) return
     try {
-      const allBoms = await api.listBoms()
-      const byParent = new Map<number, BomRow[]>()
-      for (const row of allBoms) {
-        const bucket = byParent.get(row.p_item_id) ?? []
-        bucket.push(row)
-        byParent.set(row.p_item_id, bucket)
-      }
-      for (const [key, bucket] of byParent) {
-        bucket.sort((a, b) => Number(a.level) - Number(b.level) || a.bom_id - b.bom_id)
-        byParent.set(key, bucket)
-      }
-
-      const lines: BomTreeLine[] = [
-        {
-          indent: 0,
-          item_cd: baseRow.p_item_cd,
-          item_nm: baseRow.p_item_nm,
-          itemtyp_id: baseRow.p_itemtyp_id,
-        },
-      ]
-      const parentItem = await resolveItemCd(baseRow.p_item_cd)
-      if (!parentItem) {
-        setTreeTitle(`Tree: ${baseRow.p_item_cd}`)
-        setTreeLines([])
-        return
-      }
-      lines[0].item_id = parentItem.item_id
-      lines[0].itemtyp_id = parentItem.itemtyp_id
-
-      const visitedParents = new Set<number>()
-      const walk = (parentId: number, depth: number) => {
-        if (visitedParents.has(parentId)) return
-        visitedParents.add(parentId)
-        for (const child of byParent.get(parentId) ?? []) {
-          lines.push({
-            indent: depth,
-            item_cd: child.c_item_cd,
-            item_nm: child.c_item_nm,
-            item_id: child.c_item_id,
-            suffix: `(Lv ${child.level}, ${child.to_location_cd} ← ${child.from_location_cd}, Qty ${formatQty(child.c_req_qty)})`,
-          })
-          walk(child.c_item_id, depth + 1)
-        }
-        visitedParents.delete(parentId)
-      }
-      walk(parentItem.item_id, 1)
-      setTreeTitle(`Tree: ${baseRow.p_item_cd} ${baseRow.p_item_nm}`)
+      const { title, lines } = await loadBomTreeForParent({
+        item_cd: baseRow.p_item_cd,
+        item_nm: baseRow.p_item_nm,
+        itemtyp_id: baseRow.p_itemtyp_id,
+      })
+      setTreeTitle(title)
       setTreeLines(lines)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load BOM tree')
+    }
+  }
+
+  const activateRow = (row: EditBomRow) => {
+    if (isBlankBomRow(row)) return
+    setActiveRowKey(row.key)
+    if (treeOnSelect) {
+      void showTreeFromRow(row)
+    }
+  }
+
+  const handleTreeOnSelectChange = (enabled: boolean) => {
+    setTreeOnSelect(enabled)
+    if (!enabled) {
+      setTreeTitle(null)
+      setTreeLines([])
+    } else if (activeRowKey) {
+      const row = editRows.find((r) => r.key === activeRowKey) ?? null
+      if (row && !isBlankBomRow(row)) {
+        void showTreeFromRow(row)
+      }
     }
   }
 
@@ -232,18 +208,12 @@ export function BomsPage() {
         const { rows, added } = mergeBomImportRows(parsed, editRows, locations)
         setEditRows(ensureTrailingBlankRow(rows, isBlankBomRow, () => emptyEditBomRow()))
         if (added > 0) {
-          setSuccess(`Import: ${added} row(s) added to grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} row(s) added to grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
       },
     },
-    contextMenuItems: [
-      {
-        label: 'Show Parent Tree',
-        onClick: () => void showTreeFromRow(contextRowRef.current),
-      },
-    ],
   })
 
   /** Column filters apply to data rows only; trailing add row stays visible. */
@@ -338,11 +308,11 @@ export function BomsPage() {
     if (!child) throw new Error(`Child item not found: ${row.c_item_cd}`)
     const levelNo = Number(row.level)
     if (row.level.trim() === '' || !Number.isInteger(levelNo) || levelNo < 0) {
-      throw new Error(`Invalid level on row: ${row.p_item_cd} → ${row.c_item_cd}`)
+      throw new Error(`Invalid level on row: ${row.p_item_cd} ↁE${row.c_item_cd}`)
     }
     const qty = Number(row.c_req_qty)
     if (!qty || qty <= 0) {
-      throw new Error(`Invalid qty on row: ${row.p_item_cd} → ${row.c_item_cd}`)
+      throw new Error(`Invalid qty on row: ${row.p_item_cd} ↁE${row.c_item_cd}`)
     }
     return {
       parent: { item_id: parent.item_id },
@@ -379,7 +349,8 @@ export function BomsPage() {
           await api.createBom(payload)
         }
       }
-      setSuccess('BOM saved.')
+      setSuccess('BOM updated.')
+      refreshMasterCatalog()
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -389,7 +360,7 @@ export function BomsPage() {
   }
 
   return (
-    <ErpScreen error={error} success={success}>
+    <ErpScreen error={error}>
       {grid.filterMenuElement}
       {grid.contextMenuElement}
       <ErpGridPanel
@@ -400,29 +371,50 @@ export function BomsPage() {
         isEmpty={false}
         emptyText="No BOM lines"
         onRefresh={() => void load()}
-        toolbarLeft={
-          <MasterGridToolbar
-            displayRowCount={displayRows.length}
-            submitting={submitting}
-            rowError={rowError}
+        selectColumnHeader={
+          <GridRowSelectButtons
+            rowCount={displayRows.length}
+            selectedCount={selectedKeys.size}
             onSelectAll={() =>
               setSelectedKeys(new Set(displayRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
-            onSave={() => void handleSave()}
           />
+        }
+        toolbarLeft={
+          <MasterGridToolbar
+            submitting={submitting}
+            rowError={rowError}
+            extraLeft={
+              <label className="erp-toolbar-tree-toggle">
+                Tree
+                <input
+                  type="checkbox"
+                  checked={treeOnSelect}
+                  onChange={(e) => handleTreeOnSelectChange(e.target.checked)}
+                />
+              </label>
+            }
+          />
+        }
+        toolbarRight={
+          <div className="erp-detail-toolbar-actions">
+            <button
+              type="button"
+              className="btn erp-btn erp-btn-search btn-sm"
+              disabled={submitting}
+              onClick={() => void handleSave()}
+            >
+              {submitting ? 'Updating…' : 'Update'}
+            </button>
+            <ToolbarFeedback message={success} type="success" />
+            <ToolbarFeedback message={rowError} type="error" />
+          </div>
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
         onLayoutReady={grid.onLayoutReady}
-        onGridContextMenu={(event) => {
-          const tr = (event.target as HTMLElement).closest('tr')
-          const key = tr?.getAttribute('data-bom-row-key')
-          if (key) {
-            contextRowRef.current = editRows.find((r) => r.key === key) ?? null
-          }
-          grid.openContextMenu(event)
-        }}
+        onGridContextMenu={grid.openContextMenu}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
         rowCount={displayRows.length}
         {...grid.tableProps}
@@ -436,8 +428,9 @@ export function BomsPage() {
                   key={row.key}
                   data-bom-row-key={row.key}
                   className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
-                    selectedKeys.has(row.key) ? ' selected' : ''
+                    activeRowKey === row.key || selectedKeys.has(row.key) ? ' selected' : ''
                   }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                  onClick={() => activateRow(row)}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -450,6 +443,7 @@ export function BomsPage() {
                               type="checkbox"
                               checked={selectedKeys.has(row.key)}
                               aria-label={`Select ${row.p_item_cd || 'row'}`}
+                              onClick={(e) => e.stopPropagation()}
                               onChange={(e) => {
                                 setSelectedKeys((prev) => {
                                   const next = new Set(prev)
@@ -457,6 +451,9 @@ export function BomsPage() {
                                   else next.delete(row.key)
                                   return next
                                 })
+                                if (e.target.checked) {
+                                  activateRow(row)
+                                }
                               }}
                             />
                           </td>
@@ -618,40 +615,14 @@ export function BomsPage() {
           </tbody>
         )}
       </ErpGridPanel>
-      {treeTitle && treeLines.length > 0 && (
-        <div className="erp-panel">
-          <div className="erp-panel-title">{treeTitle}</div>
-          <div className="erp-panel-content">
-            <div className="erp-tree-view">
-              {treeLines.map((line, index) => (
-                <div
-                  key={`${line.item_cd}-${index}`}
-                  className="erp-tree-line"
-                  style={{ paddingLeft: `${line.indent * 14}px` }}
-                >
-                  {line.indent > 0 ? <span className="erp-tree-marker">▶ </span> : null}
-                  <ColoredItemCode itemId={line.item_id} itemtypId={line.itemtyp_id}>
-                    {line.item_cd}
-                  </ColoredItemCode>{' '}
-                  <ColoredItemName itemId={line.item_id} itemtypId={line.itemtyp_id}>
-                    {line.item_nm}
-                  </ColoredItemName>
-                  {line.suffix ? <span className="erp-tree-suffix"> {line.suffix}</span> : null}
-                </div>
-              ))}
-            </div>
-            <div className="erp-search-actions">
-              <button
-                type="button"
-                className="btn erp-btn erp-btn-clear"
-                onClick={() => setTreeTitle(null)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <BomTreePanel
+        title={treeTitle}
+        lines={treeLines}
+        onClose={() => {
+          setTreeTitle(null)
+          setTreeLines([])
+        }}
+      />
     </ErpScreen>
   )
 }
