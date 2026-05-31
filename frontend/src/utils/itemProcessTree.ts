@@ -136,8 +136,9 @@ function appendEditProcessBranch(
 
   const inputs = sortEditInputRowsForDisplay(
     inputRows.filter(
-      (row) => row.line_no === proc.line_no && !isBlankItemProcessInputRow(row)
-    )
+      (row) => row.line_no === proc.line_no && isActiveItemProcessInputRow(row)
+    ),
+    isBlankItemProcessInputRow
   )
 
   for (const inp of inputs) {
@@ -258,7 +259,8 @@ function collectEditProcessDescendantIds(
     const inputs = sortEditInputRowsForDisplay(
       inputRows.filter(
         (row) => row.line_no === proc.line_no && isActiveItemProcessInputRow(row)
-      )
+      ),
+      isBlankItemProcessInputRow
     )
     for (const inp of inputs) {
       const id = Number(inp.item_id)

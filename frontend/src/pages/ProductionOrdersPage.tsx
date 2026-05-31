@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
+import { ItemSearchFilterInput } from '../components/ItemSearchFilterInput'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
@@ -8,7 +9,9 @@ import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { SearchDateInput, SearchFilterField } from '../components/erp/SearchFilterField'
 import { productionOrderListColumns } from '../components/erp/masterGridColumns'
 import { GridRowNumCell } from '../components/GridRowNumCell'
+import { ProductionDetailSplit } from '../components/ProductionDetailSplit'
 import { ProductionProcessInputPanels } from '../components/ProductionProcessInputPanels'
+import { useProductionPanelSplitLayout } from '../hooks/useProductionPanelSplitLayout'
 import { GridRowSelectButtons } from '../components/GridRowSelectButtons'
 import { BomTreePanel } from '../components/BomTreePanel'
 import { ProductionTreeSidebar } from '../components/ProductionTreeSidebar'
@@ -32,7 +35,7 @@ import {
 } from '../utils/format'
 import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { ensureTrailingBlankRow } from '../utils/gridTrailingBlankRow'
-import { suggestItems, suggestProductionLots } from '../utils/searchSuggest'
+import { suggestProductionLots } from '../utils/searchSuggest'
 import {
   buildInputPayload,
   buildProcessPayload,
@@ -41,12 +44,13 @@ import {
   detailToEditProcessRows,
   isActiveInputRow,
   isActiveProcessRow,
+  isBlankInputRow,
   isBlankProcessRow,
   type EditInputRow,
   type EditProcessRow,
 } from '../utils/productionEdit'
 import { type BomTreeLine, type ProcessTreeHighlight } from '../utils/bomTree'
-import type { ProductionTreeData } from '../utils/productionOrderTree'
+import { isSameProductionTreeData, type ProductionTreeData } from '../utils/productionOrderTree'
 type ProductionSearchFilters = {
   dateFrom: string
   dateTo: string
@@ -99,6 +103,8 @@ function getOrderExportCell(row: ProductionOrderListItem, key: string): string |
   }
 }
 
+const PANEL_SPLIT_LAYOUT_ID = 'production-orders-panels-v1'
+
 export function ProductionOrdersPage() {
   const navigate = useAppNavigate()
   const [orders, setOrders] = useState<ProductionOrderListItem[]>([])
@@ -133,7 +139,8 @@ export function ProductionOrdersPage() {
   const processInputLayoutApiRef = useRef<{ saveLayouts: () => void; isDirty: boolean } | null>(
     null
   )
-  const resetProcessSelectionRef = useRef<(() => void) | null>(null)
+  const panelSplit = useProductionPanelSplitLayout(PANEL_SPLIT_LAYOUT_ID)
+  const [processInputGridDirty, setProcessInputGridDirty] = useState(false)
 
   const loadOrders = useCallback(async () => {
     setLoading(true)
@@ -183,7 +190,6 @@ export function ProductionOrdersPage() {
     setError(null)
   }, [])
 
-  const fetchItemSuggestions = useCallback((q: string) => suggestItems(q), [])
   const fetchLotSuggestions = useCallback((q: string) => suggestProductionLots(q), [])
 
   const loadDetail = useCallback(async (orderId: number | null) => {
@@ -240,7 +246,7 @@ export function ProductionOrdersPage() {
     setEditInputRows(detailToEditInputRows(detail))
     setProcessRowError(null)
     setInputRowError(null)
-  }, [detail?.production_order_id, detail?.updated_at, canEditDetail, canEditPlan])
+  }, [detail?.production_order_id, detail?.status, canEditDetail, canEditPlan])
 
   const statusOptions: Array<{ value: '' | ProductionStatus; label: string }> = [
     { value: '', label: 'All' },
@@ -338,8 +344,12 @@ export function ProductionOrdersPage() {
 
   const saveProcessOnly = async (): Promise<boolean> => {
     if (!selectedId || !detail) return false
+    const processSaveContext = {
+      parentItemId: detail.parent_item_id,
+      orderPlannedQty: detail.planned_qty,
+    }
     if (detail.status === 'approved' || detail.status === 'started') {
-      const lines = buildProcessPayload(editProcessRows, masterItems)
+      const lines = buildProcessPayload(editProcessRows, masterItems, processSaveContext)
       if (lines.length === 0) {
         setProcessRowError('process_validation')
         return false
@@ -358,7 +368,7 @@ export function ProductionOrdersPage() {
     }
     if (detail.status !== 'registered') return false
     const processRows = editProcessRows.filter((r) => !isBlankProcessRow(r))
-    const lines = buildProcessPayload(editProcessRows, masterItems)
+    const lines = buildProcessPayload(editProcessRows, masterItems, processSaveContext)
     if (lines.length === 0) {
       setProcessRowError('process_validation')
       return false
@@ -393,11 +403,17 @@ export function ProductionOrdersPage() {
 
   const saveInputsOnly = async (): Promise<boolean> => {
     if (!selectedId || !detail) return false
+    const inputSaveContext = {
+      status: detail.status,
+      orderPlannedQty: detail.planned_qty,
+      processRows: editProcessRows,
+    }
+    const activeInputRows = editInputRows.filter(isActiveInputRow)
+    const partialInputRows = editInputRows.some(
+      (r) => !isBlankInputRow(r) && !isActiveInputRow(r)
+    )
     if (detail.status === 'approved' || detail.status === 'started') {
-      const inputs = buildInputPayload(editInputRows, {
-        status: detail.status,
-        orderPlannedQty: detail.planned_qty,
-      })
+      const inputs = buildInputPayload(editInputRows, inputSaveContext)
       if (inputs.length === 0) {
         setInputRowError('input_validation')
         return false
@@ -415,15 +431,8 @@ export function ProductionOrdersPage() {
       }
     }
     if (detail.status !== 'registered') return false
-    const inputs = buildInputPayload(editInputRows, {
-      status: detail.status,
-      orderPlannedQty: detail.planned_qty,
-    })
-    if (inputs.length === 0) {
-      setInputRowError('input_validation')
-      return false
-    }
-    if (!editInputRows.some(isActiveInputRow)) {
+    const inputs = buildInputPayload(editInputRows, inputSaveContext)
+    if (partialInputRows || (activeInputRows.length > 0 && inputs.length === 0)) {
       setInputRowError('input_validation')
       return false
     }
@@ -659,27 +668,26 @@ export function ProductionOrdersPage() {
   const handleProcessInputGridLayoutsReady = useCallback(
     (api: { saveLayouts: () => void; isDirty: boolean }) => {
       processInputLayoutApiRef.current = api
+      setProcessInputGridDirty(api.isDirty)
     },
     []
   )
 
-  const handleResetProcessSelection = useCallback(() => {
-    resetProcessSelectionRef.current?.()
-  }, [])
-
   const handleTreeDataChange = useCallback((data: ProductionTreeData) => {
-    setTreeTitle(data.title)
-    setTreeLines(data.lines)
-  }, [])
-
-  const handleResetHandlerChange = useCallback((handler: (() => void) | null) => {
-    resetProcessSelectionRef.current = handler
+    setTreeTitle((prev) => (prev === data.title ? prev : data.title))
+    setTreeLines((prev) => (isSameProductionTreeData(data, data.title, prev) ? prev : data.lines))
   }, [])
 
   const handleSaveAllGridLayouts = () => {
     orderGridLayoutApi?.saveLayout()
+    panelSplit.saveLayout()
     processInputLayoutApiRef.current?.saveLayouts()
   }
+
+  const saveGridIsDirty =
+    panelSplit.isDirty ||
+    processInputGridDirty ||
+    Boolean(orderGridLayoutApi?.isDirty)
 
   const getOrderFilterValue = useCallback((row: ProductionOrderListItem, col: string) => {
     const cell = getOrderExportCell(row, col)
@@ -719,6 +727,23 @@ export function ProductionOrdersPage() {
     },
   })
 
+  const handleReload = useCallback(async () => {
+    setError(null)
+    setSuccess(null)
+    setProcessRowError(null)
+    setInputRowError(null)
+    setProcessStatusMessage(null)
+    setInputStatusMessage(null)
+    await loadOrders()
+    if (selectedId != null) {
+      await loadDetail(selectedId)
+    } else {
+      setDetail(null)
+      setEditProcessRows([])
+      setEditInputRows([])
+    }
+  }, [loadOrders, loadDetail, selectedId])
+
   const handleOrderGridLayoutReady = useCallback(
     (layout: GridColumnLayout) => {
       orderLayoutRef.current = layout
@@ -738,8 +763,9 @@ export function ProductionOrdersPage() {
       success={success}
       className="erp-screen-stacked"
       title="Production List"
-      onRefresh={() => void loadOrders()}
+      onRefresh={() => void handleReload()}
       onSaveGrid={handleSaveAllGridLayouts}
+      saveGridIsDirty={saveGridIsDirty}
     >
       {ordersGrid.filterMenuElement}
       {ordersGrid.contextMenuElement}
@@ -779,14 +805,13 @@ export function ProductionOrdersPage() {
             showClear={Boolean(appliedSearch.item.trim())}
             onClear={() => clearSearchField({ item: '' })}
           >
-            <ErpSuggestInput
+            <ItemSearchFilterInput
               value={searchInput.item}
               onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
               placeholder="Item Code - Item Name"
               ariaLabel="Item Code - Item Name"
               variant="inline"
               fieldClassName="erp-suggest-in-filter"
-              fetchSuggestions={fetchItemSuggestions}
             />
           </SearchFilterField>
           <SearchFilterField
@@ -1116,11 +1141,28 @@ export function ProductionOrdersPage() {
         )}
       </ErpGridPanel>
 
-      <div className={`erp-production-detail-split${treeOnSelect ? ' has-tree' : ''}`}>
-        <div className="erp-production-detail-main">
+      <ProductionDetailSplit
+        hasTree={treeOnSelect}
+        treeWidthRatio={panelSplit.layout.treeWidthRatio}
+        onTreeWidthRatioChange={panelSplit.setTreeWidthRatio}
+        tree={
+          treeTitle && treeLines.length > 0 ? (
+            <BomTreePanel
+              sidebar
+              title={treeTitle}
+              lines={treeLines}
+              highlight={treeHighlight}
+            />
+          ) : (
+            <ProductionTreeSidebar title="Tree">
+              <p className="muted erp-grid-empty">Select an order to show tree.</p>
+            </ProductionTreeSidebar>
+          )
+        }
+      >
           {!detail || detailLoading ? (
             <div className="erp-panel erp-panel-grow erp-detail-panel">
-              <div className="erp-panel-content erp-detail-content">
+              <div className="erp-panel-content erp-detail-content erp-detail-content-split">
                 <p className="muted erp-grid-empty">
                   {detailLoading ? 'Loading…' : 'Select an order.'}
                 </p>
@@ -1132,6 +1174,7 @@ export function ProductionOrdersPage() {
               canEdit={canEditDetail}
               canEditPlan={canEditPlan}
               canEditActuals={canEditActuals}
+              autoSelectProcess="last"
               items={masterItems}
               locations={masterLocations}
               processRows={editProcessRows}
@@ -1153,28 +1196,13 @@ export function ProductionOrdersPage() {
               onGridLayoutsReady={handleProcessInputGridLayoutsReady}
               onTreeHighlightChange={setTreeHighlight}
               onTreeDataChange={handleTreeDataChange}
-              onResetHandlerChange={handleResetHandlerChange}
+              processInputSplit={{
+                processHeightRatio: panelSplit.layout.processHeightRatio,
+                onProcessHeightRatioChange: panelSplit.setProcessHeightRatio,
+              }}
             />
           )}
-        </div>
-        {treeOnSelect ? (
-          <aside className="erp-production-detail-tree" aria-label="BOM tree">
-            {treeTitle && treeLines.length > 0 ? (
-              <BomTreePanel
-                sidebar
-                title={treeTitle}
-                lines={treeLines}
-                highlight={treeHighlight}
-                onReset={handleResetProcessSelection}
-              />
-            ) : (
-              <ProductionTreeSidebar title="Tree" onReset={handleResetProcessSelection}>
-                <p className="muted erp-grid-empty">Select an order to show tree.</p>
-              </ProductionTreeSidebar>
-            )}
-          </aside>
-        ) : null}
-      </div>
+      </ProductionDetailSplit>
     </ErpScreen>
   )
 }

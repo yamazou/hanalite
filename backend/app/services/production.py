@@ -58,6 +58,21 @@ def _get_item_or_error(db: Session, item_id: int) -> Item:
     return item
 
 
+def _get_item_optional(db: Session, item_id: int | None) -> Item | None:
+    if item_id is None:
+        return None
+    item = db.get(Item, int(item_id))
+    if not item or item.deleted_at is not None:
+        return None
+    return item
+
+
+def _item_display_fields(item_id: int, item: Item | None) -> tuple[int, str, str]:
+    if item is not None:
+        return item.item_id, item.item_cd, item.item_nm
+    return int(item_id), f"#{item_id}", "(missing item)"
+
+
 def _itemtyp_sort_key(itemtyp_cd: str = "", itemtyp_nm: str = "") -> int:
     """FG → WIP → Purchase parts → RM/Material."""
     for n in (itemtyp_cd.strip().lower(), itemtyp_nm.strip().lower()):
@@ -116,10 +131,10 @@ def _line_read(
     else:
         resolved_output_item_id = None
     if resolved_output_item_id is not None:
-        output_item = _get_item_or_error(db, int(resolved_output_item_id))
-        output_item_id = output_item.item_id
-        output_item_cd = output_item.item_cd
-        output_item_nm = output_item.item_nm
+        output_item = _get_item_optional(db, int(resolved_output_item_id))
+        output_item_id, output_item_cd, output_item_nm = _item_display_fields(
+            int(resolved_output_item_id), output_item
+        )
     else:
         output_item_id = bom_output_item_id
         output_item_cd = bom_output_item_cd
@@ -288,7 +303,10 @@ def _has_posted_lines(db: Session, order_id: int) -> bool:
 
 
 def _to_list_item(db: Session, row: ProductionOrder) -> ProductionOrderListItem:
-    parent = _get_item_or_error(db, row.parent_item_id)
+    parent_item_id, parent_item_cd, parent_item_nm = _item_display_fields(
+        int(row.parent_item_id),
+        _get_item_optional(db, int(row.parent_item_id)),
+    )
     line_count, completed_line_count = _process_counts(db, row.production_order_id)
     return ProductionOrderListItem(
         production_order_id=row.production_order_id,
@@ -296,9 +314,9 @@ def _to_list_item(db: Session, row: ProductionOrder) -> ProductionOrderListItem:
         production_date=row.production_date,
         reference_no=row.reference_no,
         source_type=row.source_type,  # type: ignore[arg-type]
-        parent_item_id=parent.item_id,
-        parent_item_cd=parent.item_cd,
-        parent_item_nm=parent.item_nm,
+        parent_item_id=parent_item_id,
+        parent_item_cd=parent_item_cd,
+        parent_item_nm=parent_item_nm,
         planned_qty=row.planned_qty,
         actual_qty=row.actual_qty,
         lot=row.lot,
@@ -390,11 +408,14 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
     output_nm_by_line_no: dict[int, str | None] = {}
     level_by_line_no: dict[int, int] = {}
     for proc in proc_rows:
-        output_item = _get_item_or_error(db, proc.output_item_id)
         line_no = int(proc.line_no)
-        output_id_by_line_no[line_no] = int(output_item.item_id)
-        output_cd_by_line_no[line_no] = output_item.item_cd
-        output_nm_by_line_no[line_no] = output_item.item_nm
+        output_item_id, output_cd, output_nm = _item_display_fields(
+            int(proc.output_item_id),
+            _get_item_optional(db, proc.output_item_id),
+        )
+        output_id_by_line_no[line_no] = output_item_id
+        output_cd_by_line_no[line_no] = output_cd
+        output_nm_by_line_no[line_no] = output_nm
         level_by_line_no[line_no] = line_no
 
     itemtyp_fields_by_id = _itemtyp_fields_by_id(db)
@@ -413,8 +434,12 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
     ]
     input_reads: list[tuple[int, int, int, ProductionOrderInputRead]] = []
     for ln in inputs_raw:
-        item = _get_item_or_error(db, ln.item_id)
-        cd, itemtyp_nm = itemtyp_fields_by_id.get(int(item.itemtyp_id), ("", ""))
+        item = _get_item_optional(db, ln.item_id)
+        item_id, item_cd, item_nm = _item_display_fields(int(ln.item_id), item)
+        if item is not None:
+            cd, itemtyp_nm = itemtyp_fields_by_id.get(int(item.itemtyp_id), ("", ""))
+        else:
+            cd, itemtyp_nm = "", ""
         typ_sort = _itemtyp_sort_key(cd, itemtyp_nm)
         if ln.from_location_id is not None:
             from_loc = _get_location_or_error(db, int(ln.from_location_id))
@@ -435,9 +460,9 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
                     line_no=ln.line_no,
                     level=level_by_line_no.get(int(ln.line_no), 0),
                     itemtyp_nm=itemtyp_nm,
-                    item_id=ln.item_id,
-                    item_cd=item.item_cd,
-                    item_nm=item.item_nm,
+                    item_id=item_id,
+                    item_cd=item_cd,
+                    item_nm=item_nm,
                     from_location_id=from_location_id,
                     from_location_cd=from_location_cd,
                     from_location_nm=from_location_nm,
@@ -449,22 +474,28 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
         )
     input_reads.sort(key=lambda t: (t[0], t[1], t[2]))
     inputs = [read for _, _, _, read in input_reads]
-    outputs = [
-        ProductionOrderOutputRead(
-            prd_order_output_id=ln.prd_order_output_id,
-            prd_order_line_id=ln.prd_order_line_id,
-            line_no=ln.line_no,
-            item_id=ln.item_id,
-            item_cd=_get_item_or_error(db, ln.item_id).item_cd,
-            item_nm=_get_item_or_error(db, ln.item_id).item_nm,
-            output_qty=ln.output_qty,
-            location_id=ln.location_id,
-            location_cd=_get_location_or_error(db, ln.location_id).location_cd,
-            location_nm=_get_location_or_error(db, ln.location_id).location_nm,
-            lot=ln.lot,
+    outputs = []
+    for ln in outputs_raw:
+        out_item_id, out_item_cd, out_item_nm = _item_display_fields(
+            int(ln.item_id),
+            _get_item_optional(db, ln.item_id),
         )
-        for ln in outputs_raw
-    ]
+        loc = _get_location_or_error(db, ln.location_id)
+        outputs.append(
+            ProductionOrderOutputRead(
+                prd_order_output_id=ln.prd_order_output_id,
+                prd_order_line_id=ln.prd_order_line_id,
+                line_no=ln.line_no,
+                item_id=out_item_id,
+                item_cd=out_item_cd,
+                item_nm=out_item_nm,
+                output_qty=ln.output_qty,
+                location_id=ln.location_id,
+                location_cd=loc.location_cd,
+                location_nm=loc.location_nm,
+                lot=ln.lot,
+            )
+        )
 
     return ProductionOrderRead(
         **base.model_dump(),

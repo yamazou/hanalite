@@ -102,8 +102,10 @@ class ItemProcInput(Base):
     itemproc_id: Mapped[int] = mapped_column(ForeignKey("m_itemprocs.itemproc_id"))
     input_no: Mapped[int] = mapped_column(Integer)
     item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
-    from_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
-    req_qty: Mapped[Decimal] = mapped_column(Numeric(15, 3))
+    from_location_id: Mapped[int | None] = mapped_column(
+        ForeignKey("m_locations.location_id"), nullable=True
+    )
+    req_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

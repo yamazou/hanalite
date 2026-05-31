@@ -1,10 +1,12 @@
 import type { CustomerMaster, ItemListRow, ItemTyp } from '../types/masters'
 import type { ItemProcessesOut, ItemProcessesSave } from '../types/itemprocs'
+import { buildRecordSnapshotMap } from './gridRowChange'
 import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
 import { itemTypDropdownLabel } from './itemTypDisplay'
 import {
   createBlankInputRowForDetail,
   createBlankProcessRowForDetail,
+  editInputText,
   emptyEditInputRow,
   inputRowsWithSingleTrailingBlank,
   isBlankInputRow,
@@ -87,12 +89,51 @@ export function emptyEditFinalItemRow(): EditFinalItemRow {
   }
 }
 
+/** Trailing row until item_id is resolved (partial Item Code/Name typing stays on sentinel row). */
 export function isBlankFinalItemRow(row: EditFinalItemRow): boolean {
-  return row.item_cd.trim() === '' && row.item_nm.trim() === ''
+  return row.item_id === ''
 }
 
 export function isActiveFinalItemRow(row: EditFinalItemRow): boolean {
-  return row.item_id !== '' && row.item_cd.trim() !== '' && row.item_nm.trim() !== ''
+  return row.item_id !== '' && row.item_cd.trim() !== ''
+}
+
+function findItemListRowByCd(
+  items: ItemListRow[],
+  cd: string
+): ItemListRow | undefined {
+  const trimmed = cd.trim()
+  if (!trimmed) return undefined
+  const lower = trimmed.toLowerCase()
+  return items.find((row) => row.item_cd.toLowerCase() === lower)
+}
+
+function findItemListRowByNm(
+  items: ItemListRow[],
+  nm: string
+): ItemListRow | undefined {
+  const trimmed = nm.trim()
+  if (!trimmed) return undefined
+  return items.find((row) => row.item_nm === trimmed)
+}
+
+export type FinalItemRowSnapshot = {
+  item_id: number
+}
+
+export function finalItemRowSnapshot(row: EditFinalItemRow): FinalItemRowSnapshot | null {
+  if (!isActiveFinalItemRow(row)) return null
+  return { item_id: Number(row.item_id) }
+}
+
+export function finalItemRowSnapshotsFromEditRows(
+  rows: EditFinalItemRow[]
+): Map<number, FinalItemRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => (row.item_id !== '' ? Number(row.item_id) : undefined),
+    finalItemRowSnapshot
+  )
 }
 
 export function finalItemListToEditRows(
@@ -167,8 +208,7 @@ export function finalItemCdFieldPatch(
   lookups: FinalItemCatalogLookups,
   value: string
 ): Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'> {
-  const trimmed = value.trim()
-  const match = items.find((row) => row.item_cd === trimmed)
+  const match = findItemListRowByCd(items, value)
   if (match) {
     return finalItemFieldsFromCatalogItem(match, lookups)
   }
@@ -180,8 +220,7 @@ export function finalItemNmFieldPatch(
   lookups: FinalItemCatalogLookups,
   value: string
 ): Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'> {
-  const trimmed = value.trim()
-  const match = items.find((row) => row.item_nm === trimmed)
+  const match = findItemListRowByNm(items, value)
   if (match) {
     return finalItemFieldsFromCatalogItem(match, lookups)
   }
@@ -193,6 +232,7 @@ export function itemProcessesToEditProcessRows(processes: ItemProcessesOut['proc
     key: `itemproc-${proc.itemproc_id}`,
     line_no: proc.line_no,
     wip_location_id: proc.wip_location_id,
+    wip_location_cd: proc.wip_location_cd,
     rm_location_id: proc.rm_location_id,
     output_item_id: proc.output_item_id,
     output_item_cd: proc.output_item_cd,
@@ -213,8 +253,8 @@ export function itemProcessesToEditInputRows(processes: ItemProcessesOut['proces
         item_id: inp.item_id,
         item_cd: inp.item_cd,
         item_nm: inp.item_nm,
-        from_location_id: inp.from_location_id,
-        req_qty: String(inp.req_qty),
+        from_location_id: inp.from_location_id ?? '',
+        req_qty: inp.req_qty != null ? String(inp.req_qty) : '',
         consume_qty: '',
         lot: '',
       })
@@ -228,26 +268,20 @@ export function isBlankItemProcessRow(row: EditProcessRow): boolean {
   return row.wip_location_id === ''
 }
 
+/** Trailing row until item_id is resolved (partial Item Code/Name typing stays on sentinel row). */
 export function isBlankItemProcessInputRow(row: EditInputRow): boolean {
   return (
     row.item_id === '' &&
-    !row.item_cd.trim() &&
-    !row.item_nm.trim() &&
     row.from_location_id === '' &&
-    !row.req_qty.trim()
+    !String(row.req_qty ?? '').trim()
   )
 }
 
 export function isActiveItemProcessInputRow(row: EditInputRow): boolean {
-  return (
-    row.item_id !== '' &&
-    row.from_location_id !== '' &&
-    Boolean(row.req_qty.trim()) &&
-    Number(row.req_qty) > 0
-  )
+  return row.item_id !== ''
 }
 
-/** RM location: previous step WIP, row value, or first input From Location (first step). */
+/** RM location: previous step WIP, row value, first input From Location, or WIP (master without inputs). */
 export function resolveItemProcessRmLocation(
   row: EditProcessRow,
   processRows: EditProcessRow[],
@@ -259,17 +293,15 @@ export function resolveItemProcessRmLocation(
   const lineInputs = inputRows
     .filter((inp) => inp.line_no === row.line_no && isActiveItemProcessInputRow(inp))
     .sort((a, b) => a.key.localeCompare(b.key))
-  const fromId = lineInputs[0]?.from_location_id
-  return fromId !== '' && fromId != null ? fromId : ''
+  const fromInput = lineInputs.find((inp) => inp.from_location_id !== '')
+  const fromId = fromInput?.from_location_id
+  if (fromId !== '' && fromId != null) return fromId
+  // Item Process master may omit inputs; Production Order can define them later.
+  return row.wip_location_id !== '' ? row.wip_location_id : ''
 }
 
-function isActiveItemProcessRow(
-  row: EditProcessRow,
-  allRows: EditProcessRow[],
-  inputRows: EditInputRow[]
-): boolean {
-  if (row.wip_location_id === '') return false
-  return resolveItemProcessRmLocation(row, allRows, inputRows) !== ''
+function isActiveItemProcessRow(row: EditProcessRow): boolean {
+  return row.wip_location_id !== ''
 }
 
 function resolveItemProcessOutputItemId(
@@ -293,7 +325,7 @@ export function editRowsToItemProcessesSave(
   parentItemId: number
 ): ItemProcessesSave {
   const activeProcesses = processRows
-    .filter((row) => isActiveItemProcessRow(row, processRows, inputRows))
+    .filter((row) => isActiveItemProcessRow(row))
     .sort((a, b) => a.line_no - b.line_no)
   const processes = activeProcesses.map((proc) => {
       const rmId = resolveItemProcessRmLocation(proc, processRows, inputRows)
@@ -303,8 +335,9 @@ export function editRowsToItemProcessesSave(
         .map((inp, index) => ({
           input_no: index + 1,
           item_id: Number(inp.item_id),
-          from_location_id: Number(inp.from_location_id),
-          req_qty: Number(inp.req_qty),
+          from_location_id:
+            inp.from_location_id !== '' ? Number(inp.from_location_id) : null,
+          req_qty: editInputText(inp.req_qty).trim() ? Number(inp.req_qty) : null,
         }))
       return {
         line_no: proc.line_no,
@@ -315,6 +348,95 @@ export function editRowsToItemProcessesSave(
       }
     })
   return { processes }
+}
+
+export function itemProcessesSaveFromOut(data: ItemProcessesOut): ItemProcessesSave {
+  return {
+    processes: data.processes.map((proc) => ({
+      line_no: proc.line_no,
+      wip_location_id: proc.wip_location_id,
+      rm_location_id: proc.rm_location_id,
+      output_item_id: proc.output_item_id,
+      inputs: proc.inputs.map((inp) => ({
+        input_no: inp.input_no,
+        item_id: inp.item_id,
+        from_location_id: inp.from_location_id,
+        req_qty: inp.req_qty != null ? Number(inp.req_qty) : null,
+      })),
+    })),
+  }
+}
+
+export function serializeItemProcessesSave(payload: ItemProcessesSave): string {
+  const normalized = {
+    processes: [...payload.processes]
+      .sort((a, b) => a.line_no - b.line_no)
+      .map((proc) => ({
+        line_no: proc.line_no,
+        wip_location_id: proc.wip_location_id,
+        rm_location_id: proc.rm_location_id,
+        output_item_id: proc.output_item_id,
+        inputs: [...proc.inputs].sort((a, b) => a.input_no - b.input_no),
+      })),
+  }
+  return JSON.stringify(normalized)
+}
+
+/** Draft edit state (includes partial process/input rows) for dirty detection. */
+export function serializeItemProcessEditDraft(
+  processRows: EditProcessRow[],
+  inputRows: EditInputRow[],
+  itemId: number
+): string {
+  const processes = processRows
+    .filter((row) => !isBlankItemProcessRow(row))
+    .sort((a, b) => a.line_no - b.line_no)
+    .map((row) => ({
+      line_no: row.line_no,
+      wip_location_id: row.wip_location_id,
+      rm_location_id: row.rm_location_id,
+      output_item_id: row.output_item_id,
+    }))
+  const inputs = inputRows
+    .filter((row) => !isBlankItemProcessInputRow(row))
+    .sort((a, b) => a.line_no - b.line_no || a.key.localeCompare(b.key))
+    .map((row) => ({
+      line_no: row.line_no,
+      item_id: row.item_id,
+      item_cd: editInputText(row.item_cd).trim(),
+      item_nm: editInputText(row.item_nm).trim(),
+      from_location_id: row.from_location_id,
+      req_qty: editInputText(row.req_qty).trim(),
+    }))
+  return JSON.stringify({ item_id: itemId, processes, inputs })
+}
+
+export function isItemProcessEditDirty(
+  itemId: number,
+  processRows: EditProcessRow[],
+  inputRows: EditInputRow[],
+  savedDraftJsonByItemId: Map<number, string>
+): boolean {
+  const current = serializeItemProcessEditDraft(processRows, inputRows, itemId)
+  const saved = savedDraftJsonByItemId.get(itemId)
+  const empty = serializeItemProcessEditDraft([], [], itemId)
+  if (saved == null) return current !== empty
+  return current !== saved
+}
+
+export function isItemProcessPayloadDirty(
+  itemId: number,
+  processRows: EditProcessRow[],
+  inputRows: EditInputRow[],
+  savedPayloadJsonByItemId: Map<number, string>
+): boolean {
+  const current = serializeItemProcessesSave(
+    editRowsToItemProcessesSave(processRows, inputRows, itemId)
+  )
+  const saved = savedPayloadJsonByItemId.get(itemId)
+  const empty = serializeItemProcessesSave({ processes: [] })
+  if (saved == null) return current !== empty
+  return current !== saved
 }
 
 export function ensureItemProcessEditRows(

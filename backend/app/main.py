@@ -10,6 +10,8 @@ from sqlalchemy.exc import OperationalError
 from app.config import settings
 from app.db_schema import (
     ensure_itemprocs_tables,
+    ensure_itemproc_inputs_from_location_nullable,
+    ensure_itemproc_inputs_req_qty_nullable,
     ensure_m_customers_and_item_customer_cols,
     ensure_supplier_and_customer_codes,
     ensure_m_itemtyps_itemtyp_cd,
@@ -28,6 +30,8 @@ def _run_startup_schema_patches() -> None:
         ensure_m_customers_and_item_customer_cols,
         ensure_supplier_and_customer_codes,
         ensure_itemprocs_tables,
+        ensure_itemproc_inputs_from_location_nullable,
+        ensure_itemproc_inputs_req_qty_nullable,
         ensure_prd_orders_header_columns,
         ensure_prd_order_lines_columns,
         ensure_prd_order_inputs_columns,

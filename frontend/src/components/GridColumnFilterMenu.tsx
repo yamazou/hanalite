@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 type Props = {
@@ -8,7 +8,7 @@ type Props = {
   onApply: (selected: Set<string>) => void
   onClear: () => void
   onClose: () => void
-  anchorRect: DOMRect
+  anchorEl: HTMLElement | null
   searchPlaceholder?: string
   selectAllLabel?: string
 }
@@ -19,7 +19,7 @@ export function GridColumnFilterMenu({
   selected,
   onApply,
   onClose,
-  anchorRect,
+  anchorEl,
   searchPlaceholder = 'Search',
   selectAllLabel = '(Select All)',
 }: Props) {
@@ -27,6 +27,22 @@ export function GridColumnFilterMenu({
   const selectAllRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState<Set<string>>(() => new Set(selected))
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+
+  useLayoutEffect(() => {
+    if (!anchorEl) {
+      setAnchorRect(null)
+      return
+    }
+    const update = () => setAnchorRect(anchorEl.getBoundingClientRect())
+    update()
+    window.addEventListener('scroll', update, true)
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update, true)
+      window.removeEventListener('resize', update)
+    }
+  }, [anchorEl])
 
   useEffect(() => {
     setDraft(new Set(selected))
@@ -94,6 +110,7 @@ export function GridColumnFilterMenu({
   }
 
   const style = useMemo(() => {
+    if (!anchorRect) return null
     const width = 260
     let left = anchorRect.left
     let top = anchorRect.bottom + 2
@@ -107,7 +124,9 @@ export function GridColumnFilterMenu({
     return { left, top, width, maxHeight }
   }, [anchorRect])
 
-  const listMaxHeight = style.maxHeight - 108
+  const listMaxHeight = style ? style.maxHeight - 108 : 192
+
+  if (!style) return null
 
   return createPortal(
     <div

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
@@ -11,19 +11,30 @@ import {
   isActiveSupplierRow,
   isBlankSupplierRow,
   listRowsToEditSupplierRows,
+  supplierRowSnapshotsFromEditRows,
   type EditSupplierRow,
+  type SupplierRowSnapshot,
 } from '../../utils/supplierMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeSupplierImportRows } from '../../utils/supplierExcelImport'
 import { gridCellPlaceholder } from '../../utils/gridPlaceholder'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 
 export function SuppliersPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditSupplierRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, SupplierRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -36,14 +47,11 @@ export function SuppliersPage() {
     setError(null)
     try {
       const rows = await api.listSuppliersMaster()
+      const dataRows = listRowsToEditSupplierRows(rows)
+      setSavedSnapshots(supplierRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(
-          listRowsToEditSupplierRows(rows),
-          isBlankSupplierRow,
-          () => emptyEditSupplierRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankSupplierRow, () => emptyEditSupplierRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -109,13 +117,23 @@ export function SuppliersPage() {
           ensureTrailingBlankRow(rows, isBlankSupplierRow, () => emptyEditSupplierRow())
         )
         if (updated + added > 0) {
-          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
       },
     },
   })
+
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(grid.displayRows, isBlankSupplierRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditSupplierRow>) => {
     setEditRows((rows) =>
@@ -125,7 +143,7 @@ export function SuppliersPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected supplier(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'supplier(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -173,12 +191,25 @@ export function SuppliersPage() {
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveSupplierRow,
+      (row) => row.suppliers_id,
+      (row) => (isActiveSupplierRow(row) ? buildSupplierPayload(row) : null)
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'supplier'))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const payload = buildSupplierPayload(row)
         if (row.suppliers_id != null) {
           await api.updateSupplier(row.suppliers_id, payload)
@@ -186,7 +217,7 @@ export function SuppliersPage() {
           await api.createSupplier(payload)
         }
       }
-      setSuccess('Suppliers saved.')
+      setSuccess(savedCountMessage(toSave.length, 'supplier'))
       refreshMasterCatalog()
       await load()
     } catch (err) {
@@ -209,20 +240,20 @@ export function SuppliersPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
-            onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
-            }
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
+            onSelectAll={() => setSelectedKeys(new Set(selectableRows.map((row) => row.key)))}
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
-        toolbarLeft={
-          <MasterGridToolbar
+        toolbarRight={
+          <MasterGridToolbarActions
             submitting={submitting}
             rowError={rowError}
             statusMessage={success}
+            selectedCount={selectedCount}
             onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
           />
         }
         showSaveGridButton
@@ -249,6 +280,9 @@ export function SuppliersPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

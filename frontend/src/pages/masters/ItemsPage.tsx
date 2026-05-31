@@ -3,18 +3,21 @@ import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { ToolbarFeedback } from '../../components/ToolbarFeedback'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterItemEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import type { ItemTyp } from '../../types/masters'
 import {
   buildItemPayload,
+  changedActiveItemRows,
   emptyEditItemRow,
   isActiveItemRow,
   isBlankItemRow,
+  itemRowSnapshotsFromEditRows,
   listRowsToEditItemRows,
   type EditItemRow,
+  type ItemRowSnapshot,
 } from '../../utils/itemMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
@@ -26,6 +29,14 @@ import {
 } from '../../context/MasterCatalogContext'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
+import {
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import {
+  selectableDisplayRows as getSelectableDisplayRows,
+  selectedSelectableCount as countSelectedSelectable,
+} from '../../utils/gridRowSelection'
 
 export type ItemsTabFilter = 'ALL' | number
 
@@ -34,6 +45,9 @@ export function ItemsPage() {
   const { itemtyps, suppliers, customers } = useMasterCatalog()
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditItemRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, ItemRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -44,16 +58,19 @@ export function ItemsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
+    setRowError(null)
     try {
       const items = await api.listItemsMaster()
+      const dataRows = listRowsToEditItemRows(items)
+      setSavedSnapshots(itemRowSnapshotsFromEditRows(dataRows))
       setEditRows(
         ensureTrailingBlankRow(
-          listRowsToEditItemRows(items),
+          dataRows,
           isBlankItemRow,
           () => emptyEditItemRow(trailingRowItemtypId())
         )
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -94,6 +111,28 @@ export function ItemsPage() {
     return map
   }, [itemtyps])
 
+  const supplierLabelById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const s of suppliers) {
+      map.set(s.suppliers_id, `${s.suppliers_cd} / ${s.suppliers_nm}`)
+    }
+    return map
+  }, [suppliers])
+
+  const customerLabelById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const c of customers) {
+      map.set(c.customers_id, `${c.customers_cd} / ${c.customers_nm}`)
+    }
+    return map
+  }, [customers])
+
+  const partyFilterValue = useCallback(
+    (id: number | '', labelById: Map<number, string>): string =>
+      toFilterCellValue(id !== '' ? labelById.get(id) ?? null : null),
+    []
+  )
+
   const matchesItemTab = useCallback(
     (itemtypId: number | '' | undefined): boolean => {
       if (activeFilter === 'ALL') return true
@@ -128,16 +167,20 @@ export function ItemsPage() {
         case 'type':
           return toFilterCellValue(itemtypCodeById.get(row.itemtyp_id as number) ?? null)
         case 'supplier1':
+          return partyFilterValue(row.supplier_ids[0], supplierLabelById)
         case 'supplier2':
+          return partyFilterValue(row.supplier_ids[1], supplierLabelById)
         case 'supplier3':
+          return partyFilterValue(row.supplier_ids[2], supplierLabelById)
         case 'customer1':
+          return partyFilterValue(row.customer_ids[0], customerLabelById)
         case 'customer2':
-          return toFilterCellValue('')
+          return partyFilterValue(row.customer_ids[1], customerLabelById)
         default:
           return toFilterCellValue('')
       }
     },
-    [itemtypCodeById]
+    [itemtypCodeById, partyFilterValue, supplierLabelById, customerLabelById]
   )
 
   const itemExportValue = useCallback(
@@ -150,16 +193,30 @@ export function ItemsPage() {
         case 'type':
           return itemtypCodeById.get(row.itemtyp_id as number) ?? ''
         case 'supplier1':
+          return row.supplier_ids[0] !== ''
+            ? supplierLabelById.get(row.supplier_ids[0] as number) ?? ''
+            : ''
         case 'supplier2':
+          return row.supplier_ids[1] !== ''
+            ? supplierLabelById.get(row.supplier_ids[1] as number) ?? ''
+            : ''
         case 'supplier3':
+          return row.supplier_ids[2] !== ''
+            ? supplierLabelById.get(row.supplier_ids[2] as number) ?? ''
+            : ''
         case 'customer1':
+          return row.customer_ids[0] !== ''
+            ? customerLabelById.get(row.customer_ids[0] as number) ?? ''
+            : ''
         case 'customer2':
-          return ''
+          return row.customer_ids[1] !== ''
+            ? customerLabelById.get(row.customer_ids[1] as number) ?? ''
+            : ''
         default:
           return ''
       }
     },
-    [itemtypCodeById]
+    [itemtypCodeById, supplierLabelById, customerLabelById]
   )
 
   /** Type preset on trailing row: blank on All, selected tab's type otherwise. */
@@ -230,6 +287,16 @@ export function ItemsPage() {
       },
     },
   })
+
+  const selectableRows = useMemo(
+    () => getSelectableDisplayRows(grid.displayRows, isBlankItemRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => countSelectedSelectable(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const setSupplier = (key: string, index: number, value: number | '') => {
     setEditRows((rows) =>
@@ -331,7 +398,7 @@ export function ItemsPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected item(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -373,11 +440,17 @@ export function ItemsPage() {
         (row.item_cd.trim() || row.item_nm.trim() || row.itemtyp_id !== '')
     )
     if (incomplete.length > 0) {
-      setRowError('Enter Code, Name, and Type for each row, or clear empty rows.')
+      setRowError('Enter Item Code and Item Type for each row, or clear empty rows.')
       return
     }
     if (active.length === 0) {
       setRowError('Add at least one item row.')
+      return
+    }
+    const toSave = changedActiveItemRows(editRows, savedSnapshots)
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'item'))
       return
     }
     const codes = active.map((row) => row.item_cd.trim().toLowerCase())
@@ -391,7 +464,7 @@ export function ItemsPage() {
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const payload = buildItemPayload(row)
         if (row.item_id != null) {
           await api.updateItem(row.item_id, payload)
@@ -399,7 +472,7 @@ export function ItemsPage() {
           await api.createItem(payload)
         }
       }
-      setSuccess('Items saved.')
+      setSuccess(savedCountMessage(toSave.length, 'item'))
       await load()
       refreshMasterCatalog()
     } catch (err) {
@@ -410,39 +483,25 @@ export function ItemsPage() {
   }
 
   const toolbar = (
-    <div className="erp-detail-toolbar">
-      <div className="erp-toolbar-left">
+    <>
+      <button
+        type="button"
+        className={`erp-tab${activeFilter === 'ALL' ? ' active' : ''}`}
+        onClick={() => setActiveFilter('ALL')}
+      >
+        All
+      </button>
+      {itemtyps.map((t) => (
         <button
+          key={t.itemtyp_id}
           type="button"
-          className={`erp-tab${activeFilter === 'ALL' ? ' active' : ''}`}
-          onClick={() => setActiveFilter('ALL')}
+          className={`erp-tab${activeFilter === t.itemtyp_id ? ' active' : ''}`}
+          onClick={() => setActiveFilter(t.itemtyp_id)}
         >
-          All
+          {itemTypTabLabel(t)}
         </button>
-        {itemtyps.map((t) => (
-          <button
-            key={t.itemtyp_id}
-            type="button"
-            className={`erp-tab${activeFilter === t.itemtyp_id ? ' active' : ''}`}
-            onClick={() => setActiveFilter(t.itemtyp_id)}
-          >
-            {itemTypTabLabel(t)}
-          </button>
-        ))}
-      </div>
-      <div className="erp-detail-toolbar-actions">
-        <button
-          type="button"
-          className="btn erp-btn erp-btn-search btn-sm"
-          disabled={submitting}
-          onClick={() => void handleSave()}
-        >
-          {submitting ? 'Updating…' : 'Update'}
-        </button>
-        <ToolbarFeedback message={success} type="success" />
-        <ToolbarFeedback message={rowError} type="error" />
-      </div>
-    </div>
+      ))}
+    </>
   )
 
   return (
@@ -458,15 +517,25 @@ export function ItemsPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
             onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
+              setSelectedKeys(new Set(selectableRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
         toolbarLeft={toolbar}
+        toolbarRight={
+          <MasterGridToolbarActions
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
+            selectedCount={selectedCount}
+            onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
+          />
+        }
         showSaveGridButton
         panelClassName="erp-panel-grow"
         onLayoutReady={grid.onLayoutReady}
@@ -491,6 +560,9 @@ export function ItemsPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

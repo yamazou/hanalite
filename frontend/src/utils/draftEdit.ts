@@ -7,8 +7,6 @@ export const APPROVE_ITEM_CD_REQUIRED_MSG =
 export function isBlankDraftLine(row: EditLineRow): boolean {
   return (
     row.item_id === '' &&
-    !row.item_cd.trim() &&
-    !row.item_nm.trim() &&
     row.location_id === '' &&
     !row.lot.trim() &&
     !row.qty.trim()
@@ -17,7 +15,7 @@ export function isBlankDraftLine(row: EditLineRow): boolean {
 
 export function isActiveEditLine(row: EditLineRow): boolean {
   return (
-    (row.item_id !== '' || Boolean(row.item_cd.trim()) || Boolean(row.item_nm.trim())) &&
+    row.item_id !== '' &&
     row.location_id !== '' &&
     Boolean(row.lot.trim()) &&
     Boolean(row.qty)
@@ -86,7 +84,8 @@ export function findItemByCd(items: Item[], cd: string): Item | undefined {
 export function findItemByNm(items: Item[], nm: string): Item | undefined {
   const trimmed = nm.trim()
   if (!trimmed) return undefined
-  return items.find((i) => i.item_nm === trimmed)
+  const lower = trimmed.toLowerCase()
+  return items.find((i) => i.item_nm.toLowerCase() === lower)
 }
 
 export function itemCdFieldPatch(

@@ -20,6 +20,7 @@ import { ApiDocsPage } from './pages/ApiDocsPage'
 import { ProductionOrdersPage } from './pages/ProductionOrdersPage'
 import { ProductionEntryPage } from './pages/ProductionEntryPage'
 import { ProductionExcelImportPage } from './pages/ProductionExcelImportPage'
+import { SHOW_BOM_MASTER } from './config/features'
 
 function DraftDetailRedirect({ variant }: { variant: DraftVariant }) {
   const { id } = useParams()
@@ -54,7 +55,9 @@ export const appRouteObjects: RouteObject[] = [
   { path: 'masters/movetyps', element: <MoveTypesPage /> },
   { path: 'masters/locations', element: <LocationsPage /> },
   { path: 'masters/items', element: <ItemsPage /> },
-  { path: 'masters/boms', element: <BomsPage /> },
+  ...(SHOW_BOM_MASTER
+    ? [{ path: 'masters/boms', element: <BomsPage /> } satisfies RouteObject]
+    : [{ path: 'masters/boms', element: <Navigate to="/masters/items" replace /> } satisfies RouteObject]),
   { path: 'masters/item-processes', element: <ItemProcessesPage /> },
   { path: 'api-docs', element: <ApiDocsPage /> },
   { path: '*', element: <Navigate to="/" replace /> },

@@ -4,6 +4,8 @@ import type { ProductionOrderDetail } from '../types/production'
 import type { BomTreeLine, ProcessTreeHighlight } from './bomTree'
 import { formatQty } from './format'
 import {
+  editInputText,
+  isActiveInputRow,
   isBlankInputRow,
   isBlankProcessRow,
   sortEditInputRowsForDisplay,
@@ -15,6 +17,28 @@ import { processLinesFromDetail } from './productionProcessDisplay'
 export type ProductionTreeData = {
   title: string
   lines: BomTreeLine[]
+}
+
+export function isSameProductionTreeData(
+  data: ProductionTreeData,
+  title: string | null,
+  lines: BomTreeLine[]
+): boolean {
+  if (data.title !== title || data.lines.length !== lines.length) return false
+  return data.lines.every((line, index) => {
+    const prev = lines[index]
+    return (
+      line.indent === prev.indent &&
+      line.item_cd === prev.item_cd &&
+      line.item_nm === prev.item_nm &&
+      line.item_id === prev.item_id &&
+      line.kind === prev.kind &&
+      line.processLineNo === prev.processLineNo &&
+      line.suffix === prev.suffix &&
+      line.to_location_cd === prev.to_location_cd &&
+      line.from_location_cd === prev.from_location_cd
+    )
+  })
 }
 
 function itemtypIdFor(items: Item[], itemId: number | '' | null | undefined): number | undefined {
@@ -66,6 +90,23 @@ function inputTreeIndent(level: number | null | undefined): number {
   return lv <= 0 ? 2 : 1 + lv
 }
 
+function resolveInputTreeItemFields(
+  inp: {
+    item_id: number | ''
+    item_cd: string
+    item_nm: string
+  },
+  items: Item[]
+): { item_id?: number; item_cd: string; item_nm: string } {
+  const itemId = inp.item_id !== '' ? Number(inp.item_id) : undefined
+  const catalog = itemId != null ? items.find((item) => item.item_id === itemId) : undefined
+  return {
+    item_id: itemId,
+    item_cd: editInputText(inp.item_cd).trim() || catalog?.item_cd || '',
+    item_nm: editInputText(inp.item_nm).trim() || catalog?.item_nm || '',
+  }
+}
+
 export function buildInputTreeLine(
   inp: {
     line_no: number
@@ -80,20 +121,22 @@ export function buildInputTreeLine(
   items: Item[],
   indent?: number
 ): BomTreeLine {
-  const itemId = inp.item_id !== '' ? Number(inp.item_id) : undefined
-  const fromCd = inp.from_location_cd || '-'
+  const resolved = resolveInputTreeItemFields(inp, items)
+  const fromCd = editInputText(inp.from_location_cd).trim()
   const suffix = wipLocationCd
-    ? `(${wipLocationCd} ← ${fromCd}, In ${formatQty(inp.req_qty)})`
+    ? fromCd
+      ? `(${wipLocationCd} ← ${fromCd}, In ${formatQty(inp.req_qty)})`
+      : `(${wipLocationCd}, In ${formatQty(inp.req_qty)})`
     : `In ${formatQty(inp.req_qty)}`
   return {
     indent: indent ?? inputTreeIndent(inp.level),
     kind: 'input',
-    item_cd: inp.item_cd.trim() || '-',
-    item_nm: inp.item_nm.trim() || '',
-    item_id: itemId,
-    itemtyp_id: itemtypIdFor(items, itemId ?? ''),
+    item_cd: resolved.item_cd,
+    item_nm: resolved.item_nm,
+    item_id: resolved.item_id,
+    itemtyp_id: itemtypIdFor(items, resolved.item_id ?? ''),
     to_location_cd: wipLocationCd || undefined,
-    from_location_cd: fromCd !== '-' ? fromCd : undefined,
+    from_location_cd: fromCd || undefined,
     processLineNo: inp.line_no,
     suffix,
   }
@@ -143,7 +186,7 @@ export function buildProductionOrderTree(params: {
       if (processLine) lines.push(processLine)
 
       const inputs = sortEditInputRowsForDisplay(
-        inputRows.filter((row) => row.line_no === proc.line_no && !isBlankInputRow(row))
+        inputRows.filter((row) => row.line_no === proc.line_no && isActiveInputRow(row))
       )
       for (const inp of inputs) {
         const fromLoc = locations.find((loc) => loc.location_id === inp.from_location_id)

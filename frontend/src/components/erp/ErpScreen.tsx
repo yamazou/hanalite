@@ -8,9 +8,10 @@ type Props = {
   error?: string | null
   success?: string | null
   className?: string
-  /** Page title shown in the top title bar (same row as Save Grid / Refresh). */
+  /** Page title shown in the top title bar (same row as Save Grid / Reload). */
   title?: string
   titleActions?: ReactNode
+  /** Reload from server; discards unsaved grid edits on that screen. */
   onRefresh?: () => void
   refreshLabel?: string
   showSaveGridButton?: boolean

@@ -142,7 +142,15 @@ def _proc_to_read(db: Session, proc: ItemProc) -> ItemProcRead:
     input_reads: list[ItemProcInputRead] = []
     for inp in active_inputs:
         item = _get_item_or_error(db, inp.item_id)
-        from_loc = _get_location_or_error(db, inp.from_location_id)
+        if inp.from_location_id is not None:
+            from_loc = _get_location_or_error(db, inp.from_location_id)
+            from_location_id = from_loc.location_id
+            from_location_cd = from_loc.location_cd
+            from_location_nm = from_loc.location_nm
+        else:
+            from_location_id = None
+            from_location_cd = ""
+            from_location_nm = ""
         input_reads.append(
             ItemProcInputRead(
                 itemproc_input_id=inp.itemproc_input_id,
@@ -150,9 +158,9 @@ def _proc_to_read(db: Session, proc: ItemProc) -> ItemProcRead:
                 item_id=item.item_id,
                 item_cd=item.item_cd,
                 item_nm=item.item_nm,
-                from_location_id=from_loc.location_id,
-                from_location_cd=from_loc.location_cd,
-                from_location_nm=from_loc.location_nm,
+                from_location_id=from_location_id,
+                from_location_cd=from_location_cd,
+                from_location_nm=from_location_nm,
                 req_qty=inp.req_qty,
             )
         )
@@ -200,6 +208,8 @@ def expand_inputs_from_itemprocs(
         active_inputs = [inp for inp in step.inputs if inp.deleted_at is None]
         active_inputs.sort(key=lambda r: int(r.input_no))
         for inp in active_inputs:
+            if inp.from_location_id is None or inp.req_qty is None:
+                continue
             req_qty = Decimal(inp.req_qty)
             assigned_lot = pick_oldest_gr_lot_for_item(
                 db, int(inp.item_id), location_id=int(inp.from_location_id)
@@ -281,7 +291,12 @@ def _validate_process_writes(db: Session, processes: list[ItemProcWrite]) -> Non
                 )
             seen_input_nos.add(inp.input_no)
             _get_item_or_error(db, inp.item_id)
-            _get_location_or_error(db, inp.from_location_id)
+            if inp.from_location_id is not None:
+                _get_location_or_error(db, inp.from_location_id)
+            if inp.req_qty is not None and Decimal(inp.req_qty) <= 0:
+                raise ItemProcError(
+                    f"Input req_qty must be positive on process line {proc.line_no}."
+                )
 
 
 def save_item_processes(
@@ -316,8 +331,16 @@ def save_item_processes(
                     itemproc_id=proc.itemproc_id,
                     input_no=int(inp_write.input_no),
                     item_id=int(inp_write.item_id),
-                    from_location_id=int(inp_write.from_location_id),
-                    req_qty=Decimal(inp_write.req_qty),
+                    from_location_id=(
+                        int(inp_write.from_location_id)
+                        if inp_write.from_location_id is not None
+                        else None
+                    ),
+                    req_qty=(
+                        Decimal(inp_write.req_qty)
+                        if inp_write.req_qty is not None
+                        else None
+                    ),
                     created_at=now,
                     updated_at=now,
                 )

@@ -10,6 +10,7 @@ import {
   parseAppRoute,
   tabRouteKey,
 } from '../utils/appRoute'
+import { SHOW_BOM_MASTER } from '../config/features'
 
 type NavLink = { to: string; label: string }
 /** `to` = pathname (tab key); `search` = query string including `?` when set. */
@@ -97,7 +98,7 @@ const navGroups: NavGroup[] = [
       { to: '/masters/items', label: 'Items' },
       { to: '/masters/locations', label: 'Locations' },
       { to: '/masters/item-processes', label: 'Item Processes' },
-      { to: '/masters/boms', label: 'BOM' },
+      ...(SHOW_BOM_MASTER ? [{ to: '/masters/boms', label: 'BOM' } as NavLink] : []),
       { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/movetyps', label: 'Move Types' },
       { to: '/masters/suppliers', label: 'Suppliers' },
@@ -136,19 +137,23 @@ function normalizeAndDedupeTabs(
 ): OpenTab[] {
   const deduped = new Map<string, OpenTab>()
   for (const tab of rawTabs) {
-    const parsed = parseAppRoute(tab.to)
-    const to = parsed.pathname
-    const search = tab.search ?? parsed.search
-    const existing = deduped.get(to)
+    const normalized = normalizeOpenTab({
+      to: tab.to,
+      search: tab.search ?? '',
+      label: tab.label,
+      pinned: tab.pinned,
+    })
+    const key = tabRouteKey(normalized.to, normalized.search)
+    const existing = deduped.get(key)
     if (!existing) {
-      deduped.set(to, { to, search, label: tab.label, pinned: tab.pinned === true })
+      deduped.set(key, normalized)
       continue
     }
-    deduped.set(to, {
-      to,
-      search: existing.search || search,
-      label: existing.label || tab.label,
-      pinned: existing.pinned === true || tab.pinned === true,
+    deduped.set(key, {
+      to: normalized.to,
+      search: normalized.search,
+      label: existing.label || normalized.label,
+      pinned: existing.pinned === true || normalized.pinned === true,
     })
   }
   return Array.from(deduped.values())
@@ -245,12 +250,12 @@ export function Layout() {
 
   const activeRouteKey = tabRouteKey(currentPath, viewRoute.search)
 
-  const activeTab = useMemo(
-    () =>
-      tabs.find((t) => tabRouteKey(t.to, t.search) === activeRouteKey) ??
-      tabs.find((t) => t.to === currentPath),
-    [tabs, activeRouteKey, currentPath]
+  const activeTabIndex = useMemo(
+    () => tabs.findIndex((t) => tabRouteKey(t.to, t.search) === activeRouteKey),
+    [tabs, activeRouteKey]
   )
+
+  const activeTab = activeTabIndex >= 0 ? tabs[activeTabIndex] : undefined
 
   useEffect(() => {
     setTabs((prev) => {
@@ -274,19 +279,21 @@ export function Layout() {
   useEffect(() => {
     if (activeTab) return
     if (closingPathRef.current === currentPath) return
-    setTabs((prev) => [
-      ...prev,
-      {
-        to: currentPath,
-        search: viewRoute.search,
-        label: labelForPath(currentPath),
-        pinned: false,
-      },
-    ])
+    setTabs((prev) =>
+      normalizeAndDedupeTabs([
+        ...prev,
+        {
+          to: currentPath,
+          search: viewRoute.search,
+          label: labelForPath(currentPath),
+          pinned: false,
+        },
+      ])
+    )
   }, [currentPath, activeTab, viewRoute.search])
 
   useEffect(() => {
-    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs))
+    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(normalizeAndDedupeTabs(tabs)))
   }, [tabs])
 
   useEffect(() => {
@@ -342,20 +349,23 @@ export function Layout() {
 
   const openTab = (to: string, label?: string) => {
     const parsed = parseAppRoute(to)
-    const existing = tabs.find((t) => t.to === parsed.pathname)
+    const routeKey = tabRouteKey(parsed.pathname, parsed.search)
+    const existing = tabs.find((t) => tabRouteKey(t.to, t.search) === routeKey)
     if (existing) {
       requestRoute(tabRoute(existing))
       return
     }
-    setTabs((prev) => [
-      ...prev,
-      {
-        to: parsed.pathname,
-        search: parsed.search,
-        label: label ?? labelForPath(parsed.pathname),
-        pinned: false,
-      },
-    ])
+    setTabs((prev) =>
+      normalizeAndDedupeTabs([
+        ...prev,
+        {
+          to: parsed.pathname,
+          search: parsed.search,
+          label: label ?? labelForPath(parsed.pathname),
+          pinned: false,
+        },
+      ])
+    )
     requestRoute(formatAppRoute(parsed.pathname, parsed.search))
   }
 
@@ -521,8 +531,7 @@ export function Layout() {
             </button>
           </div>
           <div aria-hidden="true">&nbsp;</div>
-          <div>hanalite v1.0 powered by</div>
-          <div>PT.BAHTERA HISISTEM INDONESIA</div>
+          <div>hanalite v1.0 powered by PT.BHI</div>
         </div>
       </aside>
       <main className="main">
@@ -592,17 +601,17 @@ export function Layout() {
           </div>
         ) : (
           <div className="main-tab-panels">
-            {tabs.map((tab) => {
+            {tabs.map((tab, index) => {
               const routeKey = tabRouteKey(tab.to, tab.search)
-              const isActive = routeKey === activeRouteKey
+              const isActive = index === activeTabIndex
               return (
                 <div
-                  key={routeKey}
+                  key={`${routeKey}#${index}`}
                   className="main-tab-panel"
                   hidden={!isActive}
                   aria-hidden={!isActive}
                 >
-                  {isActive ? <TabPanelRoutes tab={tab} /> : null}
+                  <TabPanelRoutes tab={tab} />
                 </div>
               )
             })}

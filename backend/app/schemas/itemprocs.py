@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 class ItemProcInputWrite(BaseModel):
     input_no: int = Field(ge=1)
     item_id: int = Field(gt=0)
-    from_location_id: int = Field(gt=0)
-    req_qty: Decimal = Field(gt=0)
+    from_location_id: int | None = Field(default=None, gt=0)
+    req_qty: Decimal | None = Field(default=None, gt=0)
 
 
 class ItemProcInputRead(BaseModel):
@@ -17,10 +17,10 @@ class ItemProcInputRead(BaseModel):
     item_id: int
     item_cd: str
     item_nm: str
-    from_location_id: int
-    from_location_cd: str
-    from_location_nm: str
-    req_qty: Decimal
+    from_location_id: int | None = None
+    from_location_cd: str = ""
+    from_location_nm: str = ""
+    req_qty: Decimal | None = None
 
 
 class ItemProcWrite(BaseModel):

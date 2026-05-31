@@ -380,8 +380,8 @@ def ensure_itemprocs_tables() -> None:
                     itemproc_id       INT UNSIGNED NOT NULL,
                     input_no          INT UNSIGNED NOT NULL,
                     item_id           INT UNSIGNED NOT NULL,
-                    from_location_id  INT UNSIGNED NOT NULL,
-                    req_qty           DECIMAL(15, 3) NOT NULL,
+                    from_location_id  INT UNSIGNED NULL,
+                    req_qty           DECIMAL(15, 3) NULL,
                     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     deleted_at        DATETIME NULL DEFAULT NULL,
@@ -395,4 +395,39 @@ def ensure_itemprocs_tables() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+        )
+
+
+def ensure_itemproc_inputs_from_location_nullable() -> None:
+    insp = inspect(engine)
+    if not insp.has_table("m_itemproc_inputs"):
+        return
+    col = next(
+        (c for c in insp.get_columns("m_itemproc_inputs") if c["name"] == "from_location_id"),
+        None,
+    )
+    if col is not None and col.get("nullable") is True:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE m_itemproc_inputs "
+                "MODIFY COLUMN from_location_id INT UNSIGNED NULL"
+            )
+        )
+
+
+def ensure_itemproc_inputs_req_qty_nullable() -> None:
+    insp = inspect(engine)
+    if not insp.has_table("m_itemproc_inputs"):
+        return
+    col = next(
+        (c for c in insp.get_columns("m_itemproc_inputs") if c["name"] == "req_qty"),
+        None,
+    )
+    if col is not None and col.get("nullable") is True:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE m_itemproc_inputs MODIFY COLUMN req_qty DECIMAL(15, 3) NULL")
         )

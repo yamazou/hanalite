@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
+import { ItemSearchFilterInput } from '../components/ItemSearchFilterInput'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpScreen } from '../components/erp/ErpScreen'
 import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
@@ -21,7 +22,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { getDraftPageCopy, type DraftVariant } from '../config/draftPages'
 import type { DraftListItem, DraftStatus } from '../types'
 import { formatDate, formatDateTime } from '../utils/format'
-import { suggestDraftLots, suggestItems } from '../utils/searchSuggest'
+import { suggestDraftLots } from '../utils/searchSuggest'
 
 const sourceLabelByVariant = {
   receipt: { manual: 'Manual', excel: 'Excel', pdf: 'PDF' },
@@ -99,7 +100,6 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     { value: 'cancelled', label: copy.filterCancelled },
   ]
 
-  const fetchItemSuggestions = useCallback((q: string) => suggestItems(q), [])
   const fetchLotSuggestions = useCallback((q: string) => suggestDraftLots(q, variant), [variant])
 
   useEffect(() => {
@@ -141,10 +141,12 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     setMessage(null)
   }
 
-  const refreshDetail = () => {
+  const refreshDetail = useCallback(() => {
+    setError(null)
+    setMessage(null)
     setDetailRefresh((v) => v + 1)
     void load()
-  }
+  }, [load])
 
   const applySearchField = useCallback(
     (...keys: (keyof SearchFilters)[]) => {
@@ -463,8 +465,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
       error={error}
       success={message}
       title={copy.listTitle}
-      onRefresh={() => void load()}
-      refreshLabel={copy.refreshBtn}
+      onRefresh={() => refreshDetail()}
       showSaveGridButton
       onSaveGrid={handleSaveGrid}
       saveGridIsDirty={gridLayoutDirty}
@@ -517,14 +518,13 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
               clearLabel={copy.filterClear}
               onClear={() => clearSearchField({ item: '' })}
             >
-              <ErpSuggestInput
+              <ItemSearchFilterInput
                 value={searchInput.item}
                 onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
                 placeholder={`${copy.itemCdLabel} - ${copy.itemNmLabel}`}
                 ariaLabel={copy.itemLabel}
                 variant="inline"
                 fieldClassName="erp-suggest-in-filter"
-                fetchSuggestions={fetchItemSuggestions}
               />
             </SearchFilterField>
             <SearchFilterField

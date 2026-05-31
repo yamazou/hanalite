@@ -15,6 +15,7 @@ import type {
 } from '../types/production'
 
 import type { Item } from '../types'
+import type { ItemProcInput, ItemProcessesOut } from '../types/itemprocs'
 import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
 
 import { findItemByCd, findItemByNm } from './draftEdit'
@@ -30,6 +31,8 @@ export type EditProcessRow = {
   line_no: number
 
   wip_location_id: number | ''
+
+  wip_location_cd: string
 
   /** Kept for API payload; not shown in Process grid */
 
@@ -113,6 +116,8 @@ export function lineToEditProcessRow(
 
     wip_location_id: ln.wip_location_id,
 
+    wip_location_cd: ln.wip_location_cd ?? '',
+
     rm_location_id: ln.rm_location_id,
 
     output_item_id: ln.output_item_id ?? '',
@@ -154,6 +159,12 @@ export function consumeQtyForEdit(
 
 export type InputConsumeQtyContext = {
   status: ProductionStatus
+  orderPlannedQty: string | number
+  processRows?: EditProcessRow[]
+}
+
+export type ProcessPayloadContext = {
+  parentItemId: number
   orderPlannedQty: string | number
 }
 
@@ -212,6 +223,7 @@ export function emptyEditProcessRow(lineNo: number): EditProcessRow {
     key: newEditKey(),
     line_no: lineNo,
     wip_location_id: '',
+    wip_location_cd: '',
     rm_location_id: '',
     output_item_id: '',
     output_item_cd: '',
@@ -328,6 +340,47 @@ export function processWipLocationPatch(
   }
 }
 
+export function findLocationByCd(
+  locations: Array<{ location_id: number; location_cd: string }>,
+  cd: string
+): { location_id: number; location_cd: string } | undefined {
+  const trimmed = cd.trim()
+  if (!trimmed) return undefined
+  const lower = trimmed.toLowerCase()
+  return locations.find((loc) => loc.location_cd.toLowerCase() === lower)
+}
+
+export function processLocationCdDisplay(
+  row: EditProcessRow,
+  locations: Array<{ location_id: number; location_cd: string }>
+): string {
+  if (row.wip_location_cd.trim()) return row.wip_location_cd
+  if (row.wip_location_id !== '') {
+    return locations.find((loc) => loc.location_id === row.wip_location_id)?.location_cd ?? ''
+  }
+  return ''
+}
+
+export function processWipLocationCdFieldPatch(
+  locations: Array<{ location_id: number; location_cd: string; location_nm?: string }>,
+  value: string,
+  rowKey: string,
+  rows: EditProcessRow[]
+): Pick<EditProcessRow, 'wip_location_id' | 'wip_location_cd' | 'rm_location_id'> {
+  const match = findLocationByCd(locations, value)
+  if (match) {
+    return {
+      ...processWipLocationPatch(match.location_id, rowKey, rows),
+      wip_location_cd: match.location_cd,
+    }
+  }
+  return {
+    wip_location_id: '',
+    wip_location_cd: value,
+    rm_location_id: '',
+  }
+}
+
 export function resolveProcessOutputItemId(
   row: EditProcessRow,
   items?: Item[]
@@ -340,35 +393,67 @@ export function resolveProcessOutputItemId(
   return match ? match.item_id : ''
 }
 
+/** Process step is valid when WIP location is set (output item / plan qty filled on save). */
 export function isActiveProcessRow(
   row: EditProcessRow,
-  allRows?: EditProcessRow[],
-  items?: Item[]
+  _allRows?: EditProcessRow[],
+  _items?: Item[]
 ): boolean {
-  const rm =
-    row.rm_location_id !== ''
-      ? row.rm_location_id
-      : allRows
-        ? resolveRmLocationForProcessWip(row.wip_location_id, row.key, allRows)
-        : ''
-  const outputItemId = resolveProcessOutputItemId(row, items)
-  return (
-    row.wip_location_id !== '' &&
-    rm !== '' &&
-    outputItemId !== '' &&
-    Boolean(row.planned_qty.trim()) &&
-    Number(row.planned_qty) > 0
+  return row.wip_location_id !== '' && !isBlankProcessRow(row)
+}
+
+export function resolveProcessOutputItemIdForSave(
+  row: EditProcessRow,
+  activeRows: EditProcessRow[],
+  items: Item[] | undefined,
+  parentItemId: number
+): number {
+  const fromRow = resolveProcessOutputItemId(row, items)
+  if (fromRow !== '') return Number(fromRow)
+  const sorted = [...activeRows].sort((a, b) => a.line_no - b.line_no)
+  const idx = sorted.findIndex((entry) => entry.key === row.key)
+  if (idx < 0 || idx === sorted.length - 1) return parentItemId
+  const prevOut = resolveProcessOutputItemId(sorted[idx - 1], items)
+  return prevOut !== '' ? Number(prevOut) : parentItemId
+}
+
+function resolveProcessPlannedQty(
+  row: EditProcessRow,
+  orderPlannedQty: string | number
+): number {
+  const fromRow = Number(row.planned_qty)
+  if (row.planned_qty.trim() && Number.isFinite(fromRow) && fromRow > 0) return fromRow
+  const planned = Number(orderPlannedQty)
+  return Number.isFinite(planned) && planned > 0 ? planned : fromRow
+}
+
+export function resolveInputFromLocationId(
+  row: EditInputRow,
+  processRows: EditProcessRow[]
+): number | '' {
+  if (row.from_location_id !== '') return row.from_location_id
+  const proc = processRows.find(
+    (entry) => entry.line_no === row.line_no && !isBlankProcessRow(entry)
   )
+  if (!proc) return ''
+  const rm =
+    proc.rm_location_id !== ''
+      ? proc.rm_location_id
+      : resolveRmLocationForProcessWip(proc.wip_location_id, proc.key, processRows)
+  return rm !== '' ? rm : proc.wip_location_id
+}
+
+export function editInputText(value: string | number | null | undefined): string {
+  if (value == null) return ''
+  return String(value)
 }
 
 export function isBlankInputRow(row: EditInputRow): boolean {
   return (
     row.item_id === '' &&
-    !row.item_cd.trim() &&
-    !row.item_nm.trim() &&
-    !row.req_qty.trim() &&
-    !row.consume_qty.trim() &&
-    !row.lot.trim()
+    !editInputText(row.req_qty).trim() &&
+    !editInputText(row.consume_qty).trim() &&
+    !editInputText(row.lot).trim()
   )
 }
 
@@ -379,23 +464,14 @@ export function inputRowsWithSingleTrailingBlank(
   isBlank: (row: EditInputRow) => boolean = isBlankInputRow
 ): EditInputRow[] {
   const data = rows.filter((row) => !isBlank(row))
+  const blanks = rows.filter((row) => isBlank(row))
+  if (data.length === 0 && blanks.length === 1) return rows
   return ensureTrailingBlankRow(data, isBlank, createBlank)
 }
 
 export function isActiveInputRow(row: EditInputRow): boolean {
-
-  return (
-
-    row.item_id !== '' &&
-
-    row.from_location_id !== '' &&
-
-    Boolean(row.req_qty.trim()) &&
-
-    Number(row.req_qty) > 0
-
-  )
-
+  const reqQty = editInputText(row.req_qty).trim()
+  return row.item_id !== '' && Boolean(reqQty) && Number(reqQty) > 0
 }
 
 
@@ -416,7 +492,7 @@ export function itemCdFieldPatch(
 
   }
 
-  return { item_id: '', item_cd: value }
+  return { item_id: '', item_cd: value, item_nm: '' }
 
 }
 
@@ -438,7 +514,7 @@ export function itemNmFieldPatch(
 
   }
 
-  return { item_id: '', item_nm: value }
+  return { item_id: '', item_cd: '', item_nm: value }
 
 }
 
@@ -446,33 +522,43 @@ export function itemNmFieldPatch(
 
 export function buildProcessPayload(
   rows: EditProcessRow[],
-  items?: Item[]
+  items?: Item[],
+  context?: ProcessPayloadContext
 ): ProductionOrderLineWritePayload[] {
-  return rows.filter((row) => isActiveProcessRow(row, rows, items)).map((row, index) => {
+  const activeRows = rows
+    .filter((row) => isActiveProcessRow(row, rows, items))
+    .sort((a, b) => a.line_no - b.line_no)
+
+  return activeRows.map((row) => {
     const actualRaw = row.actual_qty.trim()
-    const rmId =
+    let rmId =
       row.rm_location_id !== ''
         ? row.rm_location_id
         : resolveRmLocationForProcessWip(row.wip_location_id, row.key, rows)
+    if (rmId === '') rmId = row.wip_location_id
+
+    const outputItemId =
+      context != null
+        ? resolveProcessOutputItemIdForSave(row, activeRows, items, context.parentItemId)
+        : Number(resolveProcessOutputItemId(row, items))
+
+    const plannedQty =
+      context != null
+        ? resolveProcessPlannedQty(row, context.orderPlannedQty)
+        : Number(row.planned_qty)
 
     return {
       ...(row.prd_order_line_id != null && row.prd_order_line_id > 0
         ? { prd_order_line_id: row.prd_order_line_id }
         : {}),
-      line_no: index + 1,
+      line_no: row.line_no,
       rm_location_id: Number(rmId),
       wip_location_id: Number(row.wip_location_id),
-
-      output_item_id: Number(resolveProcessOutputItemId(row, items)),
-
-      planned_qty: Number(row.planned_qty),
-
+      output_item_id: outputItemId,
+      planned_qty: plannedQty,
       actual_qty: actualRaw ? Number(actualRaw) : null,
-
     }
-
   })
-
 }
 
 
@@ -481,27 +567,28 @@ export function buildInputPayload(
   rows: EditInputRow[],
   context?: InputConsumeQtyContext
 ): ProductionOrderInputWritePayload[] {
+  const processRows = context?.processRows ?? []
 
-  return rows.filter(isActiveInputRow).map((row) => ({
-
-    ...(row.prd_order_input_id != null && row.prd_order_input_id > 0
-      ? { prd_order_input_id: row.prd_order_input_id }
-      : {}),
-
-    line_no: row.line_no,
-
-    item_id: Number(row.item_id),
-
-    from_location_id: Number(row.from_location_id),
-
-    req_qty: Number(row.req_qty),
-
-    consume_qty: resolveInputConsumeQty(row, context),
-
-    lot: row.lot.trim() || null,
-
-  }))
-
+  return rows
+    .filter(isActiveInputRow)
+    .map((row) => {
+      const fromLocationId = resolveInputFromLocationId(row, processRows)
+      if (fromLocationId === '') return null
+      const consumeQty = resolveInputConsumeQty(row, context)
+      if (!Number.isFinite(consumeQty) || consumeQty <= 0) return null
+      return {
+        ...(row.prd_order_input_id != null && row.prd_order_input_id > 0
+          ? { prd_order_input_id: row.prd_order_input_id }
+          : {}),
+        line_no: row.line_no,
+        item_id: Number(row.item_id),
+        from_location_id: Number(fromLocationId),
+        req_qty: Number(row.req_qty),
+        consume_qty: consumeQty,
+        lot: row.lot.trim() || null,
+      }
+    })
+    .filter((row): row is ProductionOrderInputWritePayload => row != null)
 }
 
 
@@ -514,6 +601,7 @@ export function bomPreviewToEditProcessRows(
     key: `preview-line-${ln.line_no}`,
     line_no: ln.line_no,
     wip_location_id: ln.wip_location_id,
+    wip_location_cd: ln.wip_location_cd ?? '',
     rm_location_id: ln.rm_location_id,
     output_item_id: ln.output_item_id ?? '',
     output_item_cd: ln.output_item_cd ?? '',
@@ -543,9 +631,12 @@ export function bomPreviewToEditInputRows(
 }
 
 /** Data rows first, trailing blank row(s) always last (stable for grid display/sort). */
-export function sortEditInputRowsForDisplay(rows: EditInputRow[]): EditInputRow[] {
-  const data = rows.filter((row) => !isBlankInputRow(row))
-  const blanks = rows.filter(isBlankInputRow)
+export function sortEditInputRowsForDisplay(
+  rows: EditInputRow[],
+  isBlank: (row: EditInputRow) => boolean = isBlankInputRow
+): EditInputRow[] {
+  const data = rows.filter((row) => !isBlank(row))
+  const blanks = rows.filter(isBlank)
   return [...data, ...blanks]
 }
 
@@ -609,18 +700,122 @@ export function detailToEditInputRows(detail: ProductionOrderDetail): EditInputR
 
 }
 
+/** Item Process master inputs → production order input edit rows (per process line_no). */
+export function itemProcInputsToEditInputRows(
+  inputs: ItemProcInput[],
+  lineNo: number,
+  _status: ProductionStatus,
+  _orderPlannedQty: string | number
+): EditInputRow[] {
+  return inputs
+    .slice()
+    .sort((a, b) => a.input_no - b.input_no)
+    .filter((inp) => inp.item_id && inp.req_qty != null && Number(inp.req_qty) > 0)
+    .map((inp) => ({
+      key: newEditKey(),
+      line_no: lineNo,
+      item_id: inp.item_id,
+      item_cd: inp.item_cd,
+      item_nm: inp.item_nm,
+      from_location_id: inp.from_location_id ?? '',
+      req_qty: String(inp.req_qty),
+      consume_qty: '',
+      lot: '*',
+    }))
+}
+
+/** Fill missing input rows from Item Process master when the order has none for a process step. */
+export function ensureEditInputRowsFromItemProcess(
+  inputRows: EditInputRow[],
+  processLineNos: number[],
+  itemProcesses: ItemProcessesOut | undefined,
+  status: ProductionStatus,
+  orderPlannedQty: string | number
+): EditInputRow[] {
+  if (!itemProcesses) return inputRows
+
+  let changed = false
+  let result = inputRows
+
+  for (const lineNo of processLineNos) {
+    const forLine = result.filter((row) => row.line_no === lineNo)
+    if (forLine.some((row) => !isBlankInputRow(row))) continue
+
+    const proc = itemProcesses.processes.find((p) => p.line_no === lineNo)
+    if (!proc?.inputs?.length) continue
+
+    const templateRows = itemProcInputsToEditInputRows(
+      proc.inputs,
+      lineNo,
+      status,
+      orderPlannedQty
+    )
+    if (templateRows.length === 0) continue
+
+    changed = true
+    result = result.filter((row) => row.line_no !== lineNo)
+    result = [
+      ...result,
+      ...inputRowsWithSingleTrailingBlank(templateRows, () => emptyEditInputRow(lineNo)),
+    ]
+  }
+
+  return changed ? result : inputRows
+}
 
 
-export function firstActiveProcessPlannedQty(rows: EditProcessRow[]): number | null {
 
+export function firstActiveProcessPlannedQty(
+  rows: EditProcessRow[],
+  fallback?: string | number
+): number | null {
   const row = rows.find((r) => isActiveProcessRow(r, rows))
-
   if (!row) return null
+  const fromRow = Number(row.planned_qty)
+  if (row.planned_qty.trim() && Number.isFinite(fromRow) && fromRow > 0) return fromRow
+  const planned = Number(fallback)
+  return Number.isFinite(planned) && planned > 0 ? planned : null
+}
 
-  const qty = Number(row.planned_qty)
+export type ReorderProcessRowsResult = {
+  processRows: EditProcessRow[]
+  lineNoRemap: Map<number, number>
+}
 
-  return Number.isFinite(qty) && qty > 0 ? qty : null
+/** Swap a process row up/down among filled rows; renumber line_no and refresh RM chain. */
+export function reorderProcessRows(
+  rows: EditProcessRow[],
+  key: string,
+  direction: 'up' | 'down',
+  isBlank: (row: EditProcessRow) => boolean,
+  createBlank: (existing: EditProcessRow[]) => EditProcessRow
+): ReorderProcessRowsResult | null {
+  const dataRows = rows.filter((row) => !isBlank(row)).sort((a, b) => a.line_no - b.line_no)
+  const index = dataRows.findIndex((row) => row.key === key)
+  if (index < 0) return null
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= dataRows.length) return null
 
+  const swapped = [...dataRows]
+  const moved = swapped[index]
+  swapped[index] = swapped[targetIndex]
+  swapped[targetIndex] = moved
+
+  const lineNoRemap = new Map<number, number>()
+  const renumbered = swapped.map((row, idx) => {
+    const newLineNo = idx + 1
+    lineNoRemap.set(row.line_no, newLineNo)
+    return { ...row, line_no: newLineNo, rm_location_id: '' as const }
+  })
+  const withRm = renumbered.map((row) => ({
+    ...row,
+    ...processWipLocationPatch(row.wip_location_id, row.key, renumbered),
+  }))
+
+  return {
+    processRows: ensureTrailingBlankRow(withRm, isBlank, createBlank),
+    lineNoRemap,
+  }
 }
 
 

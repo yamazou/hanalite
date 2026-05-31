@@ -1114,6 +1114,39 @@ input[type='file'] {
   font-size: 0.65rem;
 }
 
+.erp-col-row-move {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  padding: 1px 2px !important;
+}
+
+.erp-row-actions {
+  display: flex;
+  gap: 1px;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.erp-btn-row-move {
+  padding: 0;
+  min-width: 18px;
+  width: 18px;
+  height: 16px;
+  min-height: 16px;
+  line-height: 1;
+  font-size: 0.5rem;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.erp-btn-row-move:disabled {
+  opacity: 0.35;
+}
+
 .erp-screen-stacked .erp-panel-grow {
   flex: 1 1 0;
   min-height: 100px;
@@ -1179,27 +1212,47 @@ input[type='file'] {
   height: 100%;
 }
 
+/* Resizable split: percentage height:100% collapses when flex sizes panes — fill via flex instead. */
+.erp-production-detail-split.has-tree.erp-production-detail-split-resizable
+  .erp-production-detail-main
+  .erp-detail-panel,
+.erp-production-detail-split.has-tree.erp-production-detail-split-resizable
+  .erp-tree-panel-sidebar {
+  height: auto;
+}
+
+.erp-production-detail-main > .erp-panel,
+.erp-production-detail-main > .erp-detail-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .erp-production-detail-split.has-tree
   .erp-production-detail-section[data-production-grid='process']
   > .erp-production-detail-section-title,
 .erp-production-detail-split.has-tree
   .erp-production-detail-section-tree
   > .erp-production-detail-section-title {
-  min-height: 26px;
-  display: flex;
-  align-items: center;
+  height: 30px;
+  min-height: 30px;
   box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section-title
+  .btn.erp-btn {
+  padding: 1px 8px;
+  font-size: 0.68rem;
+  line-height: 16px;
+  height: 18px;
+  box-sizing: border-box;
 }
 
 .erp-production-detail-split.has-tree
   .erp-production-detail-section[data-production-grid='process']
-  > .erp-detail-toolbar,
-.erp-production-detail-split.has-tree
-  .erp-production-detail-section-tree
-  > .erp-detail-toolbar {
+  > .erp-detail-toolbar:not(:empty) {
   min-height: 30px;
   box-sizing: border-box;
   align-items: center;
@@ -1474,11 +1527,52 @@ input[type='file'] {
   align-self: flex-end;
 }
 
+/* Production Order Entry — single header panel (no double borders under title bar). */
+.erp-screen-production-entry > .erp-panel-title-bar {
+  border-bottom: none;
+  margin-bottom: -4px;
+  position: relative;
+  z-index: 1;
+}
+
+.erp-screen-production-entry > .erp-panel-production-entry-header {
+  border-top: none;
+  background: var(--erp-surface);
+}
+
+.erp-screen-production-entry .erp-panel-production-entry-header .erp-search-body {
+  padding: 0;
+  background: var(--erp-surface);
+}
+
+.erp-production-entry-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 4px 8px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--erp-border);
+  background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
+}
+
+.erp-production-entry-toolbar .erp-search-section-label {
+  margin-left: auto;
+}
+
 .erp-search-form-production-entry {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
   overflow: visible;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+}
+
+.erp-screen-production-entry .erp-panel-production-entry-header .erp-grid-empty {
+  padding: 6px 8px;
+  margin: 0;
 }
 
 .erp-production-entry-row {
@@ -2069,9 +2163,7 @@ select.erp-input option {
 }
 
 .erp-grid-resizable th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
+  position: relative;
   max-width: 0;
   background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
   font-weight: normal;
@@ -2205,6 +2297,10 @@ body.erp-col-dragging .erp-th-drag-handle {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+
+.erp-th-required-label {
+  color: #c62828;
 }
 
 .erp-grid-resizable th.erp-th-sortable {
@@ -2405,6 +2501,12 @@ body.erp-col-resizing {
   color: var(--erp-title-dark);
 }
 
+.erp-grid.erp-grid-resizable thead th {
+  position: relative;
+  top: auto;
+  z-index: 2;
+}
+
 .erp-grid tbody tr {
   cursor: pointer;
   background: #fff;
@@ -2562,8 +2664,7 @@ a.erp-link-cell:hover {
   padding: 3px 6px 3px 4px;
   background: linear-gradient(180deg, var(--erp-toolbar) 0%, var(--erp-label) 100%);
   border-bottom: 1px solid var(--erp-border);
-  flex-shrink: 0;
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
 }
 
@@ -2751,13 +2852,6 @@ a.erp-link-cell:hover {
   max-width: none !important;
 }
 
-.erp-row-actions {
-  display: flex;
-  gap: 3px;
-  justify-content: center;
-  flex-wrap: nowrap;
-}
-
 .erp-detail-content {
   flex: 1;
   min-height: 0;
@@ -2779,6 +2873,242 @@ a.erp-link-cell:hover {
   padding: 4px 8px;
   background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
   border-bottom: 1px solid var(--erp-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.erp-production-detail-section-title-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-production-detail-section-title .btn {
+  flex-shrink: 0;
+}
+
+/* Production detail / tree: single 1px rules — no stacked container borders. */
+.erp-production-detail-split .erp-panel,
+.erp-screen-production-entry > .erp-panel {
+  box-shadow: none;
+}
+
+.erp-production-detail-split.has-tree {
+  flex-direction: row;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.erp-production-detail-split.has-tree .erp-production-detail-main {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.erp-production-detail-split.has-tree .erp-production-detail-tree {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.erp-production-detail-split .erp-production-detail-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.erp-production-detail-split .erp-detail-panel .erp-detail-content {
+  min-height: 0;
+}
+
+.erp-production-detail-split .erp-grid-wrap {
+  min-width: 0;
+}
+
+/* Resizable split panes: grids scroll inside allocated height (overrides content-sized rule below). */
+.erp-production-detail-section-split > .erp-grid-wrap.erp-grid-wrap-detail,
+.erp-production-detail-section-split > .erp-grid-wrap.erp-grid-wrap-static {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Detail sections stack multiple grids — size each grid to its rows, not leftover panel height. */
+.erp-production-detail-split .erp-production-detail-section > .erp-grid-wrap.erp-grid-wrap-detail {
+  flex: none;
+  min-height: auto;
+}
+
+.erp-detail-content-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.erp-detail-content-split > .erp-production-detail-section[data-production-grid='final-item'] {
+  flex-shrink: 0;
+}
+
+.erp-detail-content-split > .erp-production-process-input-split,
+.erp-detail-content-split > .muted.erp-grid-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.erp-production-process-input-split {
+  flex: 1 1 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-production-detail-split-resizable {
+  gap: 0;
+}
+
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-main,
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-tree {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: none;
+}
+
+.erp-split-pane-first,
+.erp-split-pane-second {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-production-detail-section-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 1;
+  border-bottom: none;
+}
+
+.erp-production-process-input-split .erp-production-detail-section + .erp-production-detail-section {
+  border-top: none;
+}
+
+.erp-split-handle {
+  flex: 0 0 5px;
+  position: relative;
+  z-index: 2;
+  background: var(--erp-border);
+  touch-action: none;
+  user-select: none;
+}
+
+.erp-split-handle-col {
+  cursor: col-resize;
+  margin: 0 -1px;
+}
+
+.erp-split-handle-row {
+  cursor: row-resize;
+  margin: -1px 0;
+}
+
+.erp-split-handle-col:hover,
+.erp-split-handle-row:hover,
+body.erp-split-col-resizing .erp-split-handle-col,
+body.erp-split-row-resizing .erp-split-handle-row {
+  background: var(--erp-title);
+}
+
+body.erp-split-col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.erp-split-row-resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.erp-production-detail-split .erp-production-detail-section + .erp-production-detail-section {
+  border-top: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-split .erp-production-detail-section-title {
+  border-bottom: none;
+}
+
+.erp-production-detail-split .erp-production-detail-section-title:not(:has(+ .erp-detail-toolbar)) {
+  border-bottom: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-split
+  .erp-production-detail-section-title:has(+ .erp-detail-toolbar:empty) {
+  border-bottom: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-split .erp-detail-toolbar {
+  border-top: none;
+  border-bottom: 1px solid var(--erp-border);
+}
+
+.erp-production-detail-split .erp-detail-toolbar:empty {
+  border: none;
+  min-height: 0;
+  padding: 0;
+  background: none;
+}
+
+.erp-production-detail-split .erp-production-detail-section-title + .erp-grid-wrap .erp-grid thead th,
+.erp-production-detail-split .erp-detail-toolbar + .erp-grid-wrap .erp-grid thead th {
+  border-top: none;
+}
+
+.erp-production-detail-split
+  .erp-production-detail-section:has(+ .erp-production-detail-section)
+  .erp-grid-wrap:last-of-type
+  tbody
+  tr:last-child
+  td {
+  border-bottom: none;
+}
+
+/* Grid meets panel/section frame: one 1px line, not panel + cell stacked. */
+.erp-production-detail-split .erp-detail-panel .erp-grid th:first-child,
+.erp-production-detail-split .erp-detail-panel .erp-grid td:first-child {
+  border-left: none;
+}
+
+.erp-production-detail-split .erp-detail-panel .erp-grid th:last-child,
+.erp-production-detail-split .erp-detail-panel .erp-grid td:last-child {
+  border-right: none;
+}
+
+.erp-production-detail-split
+  .erp-detail-panel
+  .erp-production-detail-section:last-child
+  .erp-grid-wrap:last-of-type
+  tbody
+  tr:last-child
+  td {
+  border-bottom: none;
+}
+
+.erp-production-detail-tree .erp-tree-view,
+.erp-production-detail-tree .erp-tree-view.erp-tree-view-fill {
+  margin: 0;
+  border: none;
 }
 
 .erp-production-detail-toolbar {

@@ -1,4 +1,5 @@
 import type { MoveTypMaster } from '../types/masters'
+import { buildRecordSnapshotMap } from './gridRowChange'
 
 export type EditMoveTypRow = {
   key: string
@@ -49,4 +50,21 @@ export function buildMoveTypPayload(row: EditMoveTypRow) {
     movetyps_cd: row.movetyps_cd.trim(),
     movetyps_nm: name || null,
   }
+}
+
+export type MoveTypRowSnapshot = ReturnType<typeof buildMoveTypPayload>
+
+export function moveTypRowSnapshot(row: EditMoveTypRow): MoveTypRowSnapshot | null {
+  if (!isActiveMoveTypRow(row)) return null
+  return buildMoveTypPayload(row)
+}
+
+export function moveTypRowSnapshotsFromEditRows(
+  rows: EditMoveTypRow[]
+): Map<number, MoveTypRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.movetyps_id,
+    moveTypRowSnapshot
+  )
 }

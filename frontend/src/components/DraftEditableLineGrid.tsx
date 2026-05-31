@@ -13,7 +13,8 @@ import {
   type EditLineRow,
 } from '../utils/draftEdit'
 import { getDraftLineFilterValue } from '../utils/draftGridSort'
-import { gridCellPlaceholder } from '../utils/gridPlaceholder'
+import { gridCellPlaceholder, showItemMasterDatalist } from '../utils/gridPlaceholder'
+import { GridItemDatalistField, GridItemResolvedInput } from './GridItemDatalistField'
 import { GRID_SELECT_COLUMN } from './erp/masterGridColumns'
 import { GRID_ROWNUM_COLUMN, GridRowNumCell } from './GridRowNumCell'
 import { GridRowSelectButtons } from './GridRowSelectButtons'
@@ -154,53 +155,71 @@ export function DraftEditableLineGrid({
       case 'item_cd':
         return (
           <td key={colKey} className="erp-grid-cell-edit">
-            <input
-              className="erp-grid-input"
-              style={itemTextColorStyle(
-                colorForItemRef({
-                  itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
-                  itemId: row.item_id === '' ? null : row.item_id,
-                  itemCd: row.item_cd,
-                })
-              )}
-              value={row.item_cd}
-              list={`${datalistPrefix}-item-cd-${row.key}`}
-              placeholder={gridCellPlaceholder(copy.itemCdLabel, blank)}
-              onChange={(e) => onUpdateLine(row.key, itemCdFieldPatch(items, e.target.value))}
-            />
-            <datalist id={`${datalistPrefix}-item-cd-${row.key}`}>
-              {items.map((item) => (
-                <option key={item.item_id} value={item.item_cd}>
-                  {item.item_nm}
-                </option>
-              ))}
-            </datalist>
+            {showItemMasterDatalist(row.item_id) ? (
+              <GridItemDatalistField
+                mode="cd"
+                items={items}
+                listId={`${datalistPrefix}-item-cd-${row.key}`}
+                value={row.item_cd}
+                placeholder={gridCellPlaceholder(copy.itemCdLabel, blank)}
+                style={itemTextColorStyle(
+                  colorForItemRef({
+                    itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                    itemId: row.item_id === '' ? null : row.item_id,
+                    itemCd: row.item_cd,
+                  })
+                )}
+                onChange={(value) => onUpdateLine(row.key, itemCdFieldPatch(items, value))}
+              />
+            ) : (
+              <GridItemResolvedInput
+                value={row.item_cd}
+                placeholder={gridCellPlaceholder(copy.itemCdLabel, blank)}
+                style={itemTextColorStyle(
+                  colorForItemRef({
+                    itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                    itemId: row.item_id === '' ? null : row.item_id,
+                    itemCd: row.item_cd,
+                  })
+                )}
+                onChange={(value) => onUpdateLine(row.key, itemCdFieldPatch(items, value))}
+              />
+            )}
           </td>
         )
       case 'item_nm':
         return (
           <td key={colKey} className="erp-grid-cell-edit">
-            <input
-              className="erp-grid-input"
-              style={itemTextColorStyle(
-                colorForItemRef({
-                  itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
-                  itemId: row.item_id === '' ? null : row.item_id,
-                  itemCd: row.item_cd,
-                })
-              )}
-              value={row.item_nm}
-              list={`${datalistPrefix}-item-nm-${row.key}`}
-              placeholder={gridCellPlaceholder(copy.itemNmLabel, blank)}
-              onChange={(e) => onUpdateLine(row.key, itemNmFieldPatch(items, e.target.value))}
-            />
-            <datalist id={`${datalistPrefix}-item-nm-${row.key}`}>
-              {items.map((item) => (
-                <option key={item.item_id} value={item.item_nm}>
-                  {item.item_cd}
-                </option>
-              ))}
-            </datalist>
+            {showItemMasterDatalist(row.item_id) ? (
+              <GridItemDatalistField
+                mode="nm"
+                items={items}
+                listId={`${datalistPrefix}-item-nm-${row.key}`}
+                value={row.item_nm}
+                placeholder={gridCellPlaceholder(copy.itemNmLabel, blank)}
+                style={itemTextColorStyle(
+                  colorForItemRef({
+                    itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                    itemId: row.item_id === '' ? null : row.item_id,
+                    itemCd: row.item_cd,
+                  })
+                )}
+                onChange={(value) => onUpdateLine(row.key, itemNmFieldPatch(items, value))}
+              />
+            ) : (
+              <GridItemResolvedInput
+                value={row.item_nm}
+                placeholder={gridCellPlaceholder(copy.itemNmLabel, blank)}
+                style={itemTextColorStyle(
+                  colorForItemRef({
+                    itemtypId: row.itemtyp_id === '' ? null : row.itemtyp_id,
+                    itemId: row.item_id === '' ? null : row.item_id,
+                    itemCd: row.item_cd,
+                  })
+                )}
+                onChange={(value) => onUpdateLine(row.key, itemNmFieldPatch(items, value))}
+              />
+            )}
           </td>
         )
       case 'location':

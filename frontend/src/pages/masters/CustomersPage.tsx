@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
@@ -7,10 +7,12 @@ import { masterCustomerEditColumns } from '../../components/erp/masterGridColumn
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import {
   buildCustomerPayload,
+  customerRowSnapshotsFromEditRows,
   emptyEditCustomerRow,
   isActiveCustomerRow,
   isBlankCustomerRow,
   listRowsToEditCustomerRows,
+  type CustomerRowSnapshot,
   type EditCustomerRow,
 } from '../../utils/customerMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
@@ -18,12 +20,21 @@ import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeCustomerImportRows } from '../../utils/customerExcelImport'
 import { gridCellPlaceholder } from '../../utils/gridPlaceholder'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 
 export function CustomersPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditCustomerRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, CustomerRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -36,14 +47,11 @@ export function CustomersPage() {
     setError(null)
     try {
       const rows = await api.listCustomersMaster()
+      const dataRows = listRowsToEditCustomerRows(rows)
+      setSavedSnapshots(customerRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(
-          listRowsToEditCustomerRows(rows),
-          isBlankCustomerRow,
-          () => emptyEditCustomerRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankCustomerRow, () => emptyEditCustomerRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -109,13 +117,23 @@ export function CustomersPage() {
           ensureTrailingBlankRow(rows, isBlankCustomerRow, () => emptyEditCustomerRow())
         )
         if (updated + added > 0) {
-          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
       },
     },
   })
+
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(grid.displayRows, isBlankCustomerRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditCustomerRow>) => {
     setEditRows((rows) =>
@@ -125,7 +143,7 @@ export function CustomersPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected customer(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'customer(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -173,12 +191,25 @@ export function CustomersPage() {
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveCustomerRow,
+      (row) => row.customers_id,
+      (row) => (isActiveCustomerRow(row) ? buildCustomerPayload(row) : null)
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'customer'))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const payload = buildCustomerPayload(row)
         if (row.customers_id != null) {
           await api.updateCustomer(row.customers_id, payload)
@@ -186,7 +217,7 @@ export function CustomersPage() {
           await api.createCustomer(payload)
         }
       }
-      setSuccess('Customers saved.')
+      setSuccess(savedCountMessage(toSave.length, 'customer'))
       refreshMasterCatalog()
       await load()
     } catch (err) {
@@ -209,20 +240,20 @@ export function CustomersPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
-            onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
-            }
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
+            onSelectAll={() => setSelectedKeys(new Set(selectableRows.map((row) => row.key)))}
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
-        toolbarLeft={
-          <MasterGridToolbar
+        toolbarRight={
+          <MasterGridToolbarActions
             submitting={submitting}
             rowError={rowError}
             statusMessage={success}
+            selectedCount={selectedCount}
             onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
           />
         }
         showSaveGridButton
@@ -249,6 +280,9 @@ export function CustomersPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

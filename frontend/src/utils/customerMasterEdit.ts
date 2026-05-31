@@ -1,4 +1,5 @@
 import type { CustomerMaster } from '../types/masters'
+import { buildRecordSnapshotMap } from './gridRowChange'
 
 export type EditCustomerRow = {
   key: string
@@ -48,4 +49,21 @@ export function buildCustomerPayload(row: EditCustomerRow) {
     customers_cd: row.customers_cd.trim(),
     customers_nm: row.customers_nm.trim(),
   }
+}
+
+export type CustomerRowSnapshot = ReturnType<typeof buildCustomerPayload>
+
+export function customerRowSnapshot(row: EditCustomerRow): CustomerRowSnapshot | null {
+  if (!isActiveCustomerRow(row)) return null
+  return buildCustomerPayload(row)
+}
+
+export function customerRowSnapshotsFromEditRows(
+  rows: EditCustomerRow[]
+): Map<number, CustomerRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.customers_id,
+    customerRowSnapshot
+  )
 }

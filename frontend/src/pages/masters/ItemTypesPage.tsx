@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
@@ -10,23 +10,34 @@ import {
   emptyEditItemTypRow,
   isActiveItemTypRow,
   isBlankItemTypRow,
+  itemTypRowSnapshotsFromEditRows,
   listRowsToEditItemTypRows,
   type EditItemTypRow,
+  type ItemTypRowSnapshot,
 } from '../../utils/itemTypMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeItemTypImportRows } from '../../utils/itemTypExcelImport'
 import { normalizeItemTypColor } from '../../utils/itemTypColor'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { ItemTypColorCell } from '../../components/masters/ItemTypColorCell'
 import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 
 export function ItemTypesPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const { reload: reloadItemTypColors } = useItemTypColors()
   const [editRows, setEditRows] = useState<EditItemTypRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, ItemTypRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -37,16 +48,14 @@ export function ItemTypesPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
     try {
       const rows = await api.listItemtyps()
+      const dataRows = listRowsToEditItemTypRows(rows)
+      setSavedSnapshots(itemTypRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(
-          listRowsToEditItemTypRows(rows),
-          isBlankItemTypRow,
-          () => emptyEditItemTypRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankItemTypRow, () => emptyEditItemTypRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -116,13 +125,23 @@ export function ItemTypesPage() {
           ensureTrailingBlankRow(rows, isBlankItemTypRow, () => emptyEditItemTypRow())
         )
         if (updated + added > 0) {
-          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
       },
     },
   })
+
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(grid.displayRows, isBlankItemTypRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditItemTypRow>) => {
     setEditRows((rows) =>
@@ -164,7 +183,7 @@ export function ItemTypesPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected item type(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item type(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -227,12 +246,25 @@ export function ItemTypesPage() {
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveItemTypRow,
+      (row) => row.itemtyp_id,
+      (row) => (isActiveItemTypRow(row) ? buildItemTypPayload(row) : null)
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'item type'))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const payload = buildItemTypPayload(row)
         if (row.itemtyp_id != null) {
           await api.updateItemTyp(row.itemtyp_id, payload)
@@ -240,7 +272,7 @@ export function ItemTypesPage() {
           await api.createItemTyp(payload)
         }
       }
-      setSuccess('Item types saved.')
+      setSuccess(savedCountMessage(toSave.length, 'item type'))
       refreshMasterCatalog()
       await load()
       await reloadItemTypColors()
@@ -264,20 +296,20 @@ export function ItemTypesPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
-            onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
-            }
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
+            onSelectAll={() => setSelectedKeys(new Set(selectableRows.map((row) => row.key)))}
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
-        toolbarLeft={
-          <MasterGridToolbar
+        toolbarRight={
+          <MasterGridToolbarActions
             submitting={submitting}
             rowError={rowError}
             statusMessage={success}
+            selectedCount={selectedCount}
             onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
           />
         }
         showSaveGridButton
@@ -304,6 +336,9 @@ export function ItemTypesPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

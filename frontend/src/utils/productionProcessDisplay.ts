@@ -3,7 +3,8 @@ import type { ProductionOrderDetail } from '../types/production'
 export type ProcessLineView = {
   key: string
   no: number
-  process: string
+  processCd: string
+  processNm: string
   status: 'planned' | 'completed'
   outputItemId: number
   outputItemCd: string
@@ -18,7 +19,8 @@ export function processLinesFromDetail(detail: ProductionOrderDetail): ProcessLi
   return detail.lines.map((ln) => ({
     key: String(ln.prd_order_line_id),
     no: ln.line_no,
-    process: ln.process_nm,
+    processCd: ln.wip_location_cd,
+    processNm: ln.process_nm,
     status: ln.status,
     outputItemId: ln.output_item_id ?? detail.parent_item_id,
     outputItemCd: ln.output_item_cd ?? detail.parent_item_cd,

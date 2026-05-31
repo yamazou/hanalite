@@ -70,7 +70,7 @@ export function useExcelLikeGrid<T>({
   const [filterMenu, setFilterMenu] = useState<{
     key: string
     label: string
-    rect: DOMRect
+    anchor: HTMLElement
   } | null>(null)
   const [contextMenu, setContextMenu] = useState<GridContextMenuState>(null)
   const [contextMenuDeleteMode, setContextMenuDeleteMode] = useState(false)
@@ -184,7 +184,7 @@ export function useExcelLikeGrid<T>({
       setFilterMenu({
         key,
         label: col?.label ?? key,
-        rect: anchor.getBoundingClientRect(),
+        anchor,
       })
     },
   }
@@ -195,7 +195,7 @@ export function useExcelLikeGrid<T>({
         columnLabel={filterColumnLabel}
         options={filterOptions}
         selected={filters.getSelected(filterMenu.key, filterOptions)}
-        anchorRect={filterMenu.rect}
+        anchorEl={filterMenu.anchor}
         onApply={(selected) =>
           filters.applySelection(filterMenu.key, selected, filterOptions)
         }

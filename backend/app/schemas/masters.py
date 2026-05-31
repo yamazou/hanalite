@@ -120,13 +120,13 @@ class LocationOut(BaseModel):
 
 class LocationCreate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
-    location_nm: str = Field(min_length=1, max_length=200)
+    location_nm: str = Field(default="", max_length=200)
     location_type: LocationType
 
 
 class LocationUpdate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
-    location_nm: str = Field(min_length=1, max_length=200)
+    location_nm: str = Field(default="", max_length=200)
     location_type: LocationType
 
 
@@ -170,7 +170,7 @@ class ItemDetailOut(BaseModel):
 
 class ItemCreate(BaseModel):
     item_cd: str = Field(min_length=1, max_length=50)
-    item_nm: str = Field(min_length=1, max_length=200)
+    item_nm: str = Field(default="", max_length=200)
     itemtyp_id: int = Field(gt=0)
     supplier1_id: int | None = None
     supplier2_id: int | None = None
@@ -181,7 +181,7 @@ class ItemCreate(BaseModel):
 
 class ItemUpdate(BaseModel):
     item_cd: str = Field(min_length=1, max_length=50)
-    item_nm: str = Field(min_length=1, max_length=200)
+    item_nm: str = Field(default="", max_length=200)
     itemtyp_id: int = Field(gt=0)
     supplier1_id: int | None = None
     supplier2_id: int | None = None

@@ -1,5 +1,6 @@
 import type { ItemTyp } from '../types/masters'
 import { itemTypColorToDisplay, normalizeItemTypColor } from './itemTypColor'
+import { buildRecordSnapshotMap } from './gridRowChange'
 
 export type EditItemTypRow = {
   key: string
@@ -64,4 +65,21 @@ export function buildItemTypPayload(row: EditItemTypRow): ItemTypPayload {
     itemtyp_nm: row.itemtyp_nm.trim(),
     itemtyp_color: color || null,
   }
+}
+
+export type ItemTypRowSnapshot = ItemTypPayload
+
+export function itemTypRowSnapshot(row: EditItemTypRow): ItemTypRowSnapshot | null {
+  if (!isActiveItemTypRow(row)) return null
+  return buildItemTypPayload(row)
+}
+
+export function itemTypRowSnapshotsFromEditRows(
+  rows: EditItemTypRow[]
+): Map<number, ItemTypRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.itemtyp_id,
+    itemTypRowSnapshot
+  )
 }

@@ -1,4 +1,5 @@
 import type { LocationMaster } from '../types/masters'
+import { buildRecordSnapshotMap } from './gridRowChange'
 
 export type EditLocationRow = {
   key: string
@@ -40,11 +41,7 @@ export function isBlankLocationRow(row: EditLocationRow): boolean {
 }
 
 export function isActiveLocationRow(row: EditLocationRow): boolean {
-  return (
-    row.location_cd.trim() !== '' &&
-    row.location_nm.trim() !== '' &&
-    row.location_type !== ''
-  )
+  return row.location_cd.trim() !== '' && row.location_type !== ''
 }
 
 export function listRowsToEditLocationRows(rows: LocationMaster[]): EditLocationRow[] {
@@ -57,4 +54,21 @@ export function buildLocationPayload(row: EditLocationRow) {
     location_nm: row.location_nm.trim(),
     location_type: row.location_type as LocationMaster['location_type'],
   }
+}
+
+export type LocationRowSnapshot = ReturnType<typeof buildLocationPayload>
+
+export function locationRowSnapshot(row: EditLocationRow): LocationRowSnapshot | null {
+  if (!isActiveLocationRow(row)) return null
+  return buildLocationPayload(row)
+}
+
+export function locationRowSnapshotsFromEditRows(
+  rows: EditLocationRow[]
+): Map<number, LocationRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.location_id,
+    locationRowSnapshot
+  )
 }

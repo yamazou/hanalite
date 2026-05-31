@@ -19,7 +19,7 @@ type Props = {
   showSaveGridButton?: boolean
   /** Custom save (e.g. multiple grids). When omitted, saves this panel's column layout. */
   onSaveGrid?: () => void
-  /** When true, title / Save Grid / Refresh are rendered by a parent ErpScreen instead. */
+  /** When true, title / Save Grid / Reload are rendered by a parent ErpScreen instead. */
   hidePanelTitleBar?: boolean
   panelClassName?: string
   onLayoutReady?: (layout: GridColumnLayout) => void

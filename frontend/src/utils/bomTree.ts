@@ -104,6 +104,27 @@ export type ProcessTreeHighlight =
   | { kind: 'process'; processLineNo: number; wipLocationCd?: string }
   | { kind: 'input'; itemId: number; processLineNo: number; wipLocationCd?: string }
 
+export function isSameProcessTreeHighlight(
+  a: ProcessTreeHighlight | null | undefined,
+  b: ProcessTreeHighlight | null | undefined
+): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return false
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'parent' && b.kind === 'parent') return a.itemId === b.itemId
+  if (a.kind === 'process' && b.kind === 'process') {
+    return a.processLineNo === b.processLineNo && a.wipLocationCd === b.wipLocationCd
+  }
+  if (a.kind === 'input' && b.kind === 'input') {
+    return (
+      a.itemId === b.itemId &&
+      a.processLineNo === b.processLineNo &&
+      a.wipLocationCd === b.wipLocationCd
+    )
+  }
+  return false
+}
+
 export function isBomTreeLineHighlighted(
   line: BomTreeLine,
   highlight: ProcessTreeHighlight | null | undefined

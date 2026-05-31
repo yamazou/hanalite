@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { ErpGridPanel } from '../../components/erp/ErpGridPanel'
 import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterLocationEditColumns } from '../../components/erp/masterGridColumns'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import type { LocationMaster } from '../../types/masters'
@@ -15,17 +15,28 @@ import {
   isActiveLocationRow,
   isBlankLocationRow,
   listRowsToEditLocationRows,
+  locationRowSnapshotsFromEditRows,
   type EditLocationRow,
+  type LocationRowSnapshot,
 } from '../../utils/locationMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeLocationImportRows } from '../../utils/locationExcelImport'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 
 const LOCATION_TYPES: LocationMaster['location_type'][] = ['RM', 'Process', 'NG', 'FG']
 
 export function LocationsPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditLocationRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, LocationRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -36,16 +47,14 @@ export function LocationsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
     try {
       const rows = await api.listLocationsMaster()
+      const dataRows = listRowsToEditLocationRows(rows)
+      setSavedSnapshots(locationRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(
-          listRowsToEditLocationRows(rows),
-          isBlankLocationRow,
-          () => emptyEditLocationRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankLocationRow, () => emptyEditLocationRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -110,7 +119,7 @@ export function LocationsPage() {
           ensureTrailingBlankRow(rows, isBlankLocationRow, () => emptyEditLocationRow())
         )
         if (updated + added > 0) {
-          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
@@ -122,6 +131,16 @@ export function LocationsPage() {
       onDelete: () => deleteRowsRef.current(),
     },
   })
+
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(grid.displayRows, isBlankLocationRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditLocationRow>) => {
     setEditRows((rows) =>
@@ -158,7 +177,7 @@ export function LocationsPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected location(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'location(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -193,7 +212,7 @@ export function LocationsPage() {
       (row) => !isBlankLocationRow(row) && !isActiveLocationRow(row)
     )
     if (incomplete.length > 0) {
-      setRowError('Enter Code, Name, and Type for each row, or clear empty rows.')
+      setRowError('Enter Location Code and Location Type for each row, or clear empty rows.')
       return
     }
     if (active.length === 0) {
@@ -206,12 +225,25 @@ export function LocationsPage() {
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveLocationRow,
+      (row) => row.location_id,
+      (row) => (isActiveLocationRow(row) ? buildLocationPayload(row) : null)
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'location'))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const payload = buildLocationPayload(row)
         if (row.location_id != null) {
           await api.updateLocation(
@@ -228,7 +260,7 @@ export function LocationsPage() {
           )
         }
       }
-      setSuccess('Locations saved.')
+      setSuccess(savedCountMessage(toSave.length, 'location'))
       refreshMasterCatalog()
       await load()
     } catch (err) {
@@ -251,20 +283,20 @@ export function LocationsPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
-            onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
-            }
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
+            onSelectAll={() => setSelectedKeys(new Set(selectableRows.map((row) => row.key)))}
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
-        toolbarLeft={
-          <MasterGridToolbar
+        toolbarRight={
+          <MasterGridToolbarActions
             submitting={submitting}
             rowError={rowError}
             statusMessage={success}
+            selectedCount={selectedCount}
             onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
           />
         }
         showSaveGridButton
@@ -291,6 +323,9 @@ export function LocationsPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

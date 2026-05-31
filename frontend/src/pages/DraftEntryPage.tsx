@@ -100,6 +100,20 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
     )
   }, [draftId, variant])
 
+  const handleReload = useCallback(async () => {
+    if (!draftId) return
+    setError(null)
+    setMessage(null)
+    setLoading(true)
+    try {
+      await loadDraft()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : copy.loadFail)
+    } finally {
+      setLoading(false)
+    }
+  }, [draftId, loadDraft, copy.loadFail])
+
   useEffect(() => {
     const prev = document.title
     document.title = isEdit && draftId ? copy.entryEditTitle(draftId) : copy.entryNewTitle
@@ -433,7 +447,7 @@ export function DraftEntryPage({ variant = 'receipt' }: Props) {
       error={error}
       success={message}
       title={pageTitle}
-      onRefresh={isEdit && draftId != null ? () => void loadDraft() : undefined}
+      onRefresh={isEdit && draftId != null ? () => void handleReload() : undefined}
       onSaveGrid={handleSaveGrid}
     >
       {entryBody}

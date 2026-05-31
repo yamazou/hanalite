@@ -7,7 +7,6 @@ type BomTreePanelProps = {
   title: string | null
   lines: BomTreeLine[]
   onClose?: () => void
-  onReset?: () => void
   className?: string
   /** Fill parent column height (Production List sidebar). */
   sidebar?: boolean
@@ -18,7 +17,6 @@ export function BomTreePanel({
   title,
   lines,
   onClose,
-  onReset,
   className,
   sidebar = false,
   highlight = null,
@@ -81,7 +79,7 @@ export function BomTreePanel({
 
   if (sidebar) {
     return (
-      <ProductionTreeSidebar title={title} onReset={onReset}>
+      <ProductionTreeSidebar title={title}>
         {treeView}
       </ProductionTreeSidebar>
     )

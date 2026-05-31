@@ -9,6 +9,9 @@ type Props = {
   saving?: boolean
   onAddRow?: () => void
   onSave?: () => void
+  secondaryLabel?: string
+  secondaryDisabled?: boolean
+  onSecondary?: () => void
 }
 
 export function ProductionGridToolbar({
@@ -20,16 +23,38 @@ export function ProductionGridToolbar({
   saving = false,
   onAddRow,
   onSave,
+  secondaryLabel,
+  secondaryDisabled = false,
+  onSecondary,
 }: Props) {
+  const hasAddRow = Boolean(onAddRow && addRowLabel)
+  const hasActions = Boolean(
+    onSave ||
+      (onSecondary && secondaryLabel) ||
+      statusMessage ||
+      (rowError && rowErrorMessage)
+  )
+  if (!hasAddRow && !hasActions) return null
+
   return (
     <div className="erp-detail-toolbar">
-      {onAddRow && addRowLabel && (
+      {hasAddRow && (
         <button type="button" className="btn erp-btn erp-btn-new btn-sm" onClick={onAddRow}>
           {addRowLabel}
         </button>
       )}
-      {(onSave || statusMessage || (rowError && rowErrorMessage)) && (
+      {hasActions && (
         <div className="erp-detail-toolbar-actions">
+          {onSecondary && secondaryLabel && (
+            <button
+              type="button"
+              className="btn erp-btn erp-btn-clear btn-sm"
+              disabled={secondaryDisabled}
+              onClick={onSecondary}
+            >
+              {secondaryLabel}
+            </button>
+          )}
           {onSave && (
             <button
               type="button"

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api/client'
 import { BomTreePanel } from '../../components/BomTreePanel'
+import { ProductionDetailSplit } from '../../components/ProductionDetailSplit'
 import { ProductionProcessInputPanels } from '../../components/ProductionProcessInputPanels'
+import { useProductionPanelSplitLayout } from '../../hooks/useProductionPanelSplitLayout'
 import { ProductionTreeSidebar } from '../../components/ProductionTreeSidebar'
 import { ErpScreen } from '../../components/erp/ErpScreen'
-import { ToolbarFeedback } from '../../components/ToolbarFeedback'
+import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { erpRowClass } from '../../components/erp/ErpGridPanel'
 import { itemProcessFinalItemColumns } from '../../components/erp/masterGridColumns'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
@@ -30,6 +33,9 @@ import {
   finalItemCdFieldPatch,
   finalItemFieldsFromCatalogItem,
   finalItemNmFieldPatch,
+  finalItemRowSnapshot,
+  finalItemRowSnapshotsFromEditRows,
+  isItemProcessEditDirty,
   mergeFinalItemRowsForDisplay,
   isActiveFinalItemRow,
   isBlankFinalItemRow,
@@ -37,9 +43,24 @@ import {
   isDraftFinalItemKey,
   itemProcessesToEditInputRows,
   itemProcessesToEditProcessRows,
+  serializeItemProcessEditDraft,
   stableFinalItemKey,
   type EditFinalItemRow,
+  type FinalItemRowSnapshot,
 } from '../../utils/itemProcessEdit'
+import { changedActiveRows, deleteSelectedConfirm, savedCountMessage } from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
+import { GridItemDatalistField, GridItemResolvedInput } from '../../components/GridItemDatalistField'
+import { showItemMasterDatalist } from '../../utils/gridPlaceholder'
+import {
+  allowedItemtypIds,
+  filterItemListRowsByItemtypIds,
+  findItemtypByKind,
+  ITEM_PROCESS_INPUT_ITEMTYP_CDS,
+  ITEM_PROCESS_OUTPUT_ITEMTYP_CDS,
+  itemTypTabLabel,
+  type OutputItemTypFilter,
+} from '../../utils/itemTypDisplay'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
 import {
   createBlankProcessRowForDetail,
@@ -52,12 +73,12 @@ import {
   collectWipItemProcessIds,
   isWipItem,
 } from '../../utils/itemProcessTree'
-import type { ProductionTreeData } from '../../utils/productionOrderTree'
+import { isSameProductionTreeData, type ProductionTreeData } from '../../utils/productionOrderTree'
 import { parentTreeHighlight } from '../../utils/productionTreeHighlight'
 
 const FINAL_ITEM_LAYOUT_OPTS = gridColumnLayoutOptions({
   headerFilterable: true,
-  pinFirst: ['rownum'],
+  pinFirst: ['rownum', 'select'],
 })
 
 function itemToSearchRow(item: ItemListRow): ItemSearchRow {
@@ -96,6 +117,8 @@ function itemProcessDetail(item: ItemSearchRow): ProductionOrderDetail {
   }
 }
 
+const PANEL_SPLIT_LAYOUT_ID = 'item-process-panels-v1'
+
 export function ItemProcessesPage() {
   const {
     itemsMaster,
@@ -112,6 +135,15 @@ export function ItemProcessesPage() {
     emptyEditFinalItemRow(),
   ])
   const [selectedFinalItemKey, setSelectedFinalItemKey] = useState<string | null>(null)
+  const [selectedOutputItemKeys, setSelectedOutputItemKeys] = useState<Set<string>>(
+    () => new Set()
+  )
+  const [savedFinalItemSnapshots, setSavedFinalItemSnapshots] = useState<
+    Map<number, FinalItemRowSnapshot>
+  >(() => new Map())
+  const [savedProcessSnapshots, setSavedProcessSnapshots] = useState<Map<number, string>>(
+    () => new Map()
+  )
   const [items, setItems] = useState<ItemListRow[]>([])
   const [locations, setLocations] = useState<Awaited<ReturnType<typeof api.listLocationsMaster>>>([])
   const [processRows, setProcessRows] = useState<EditProcessRow[]>([])
@@ -125,14 +157,13 @@ export function ItemProcessesPage() {
   const [rowError, setRowError] = useState<string | null>(null)
   const [treeTitle, setTreeTitle] = useState<string | null>(null)
   const [treeLines, setTreeLines] = useState<BomTreeLine[]>([])
+  const [outputItemFilter, setOutputItemFilter] = useState<OutputItemTypFilter>('FG')
   const [treeOnSelect, setTreeOnSelect] = useState(true)
   const [treeHighlight, setTreeHighlight] = useState<ProcessTreeHighlight | null>(null)
   const [itemProcessCache, setItemProcessCache] = useState<Map<number, ItemProcessesOut>>(
     () => new Map()
   )
-  const resetProcessSelectionRef = useRef<(() => void) | null>(null)
-  const finalItemRowsRef = useRef(finalItemRows)
-  finalItemRowsRef.current = finalItemRows
+  const deleteOutputRowsRef = useRef<() => void>(() => {})
 
   const selectedFinalItemRow = useMemo(
     () => finalItemRows.find((row) => row.key === selectedFinalItemKey) ?? null,
@@ -162,6 +193,80 @@ export function ItemProcessesPage() {
     () => buildFinalItemCatalogLookups(itemtyps, customers),
     [itemtyps, customers]
   )
+
+  const outputItemtypIds = useMemo(
+    () => allowedItemtypIds(itemtyps, ITEM_PROCESS_OUTPUT_ITEMTYP_CDS),
+    [itemtyps]
+  )
+  const inputItemtypIds = useMemo(
+    () => allowedItemtypIds(itemtyps, ITEM_PROCESS_INPUT_ITEMTYP_CDS),
+    [itemtyps]
+  )
+
+  const outputItemDatalistCatalog = useMemo(
+    () =>
+      filterItemListRowsByItemtypIds(itemsMaster, outputItemtypIds).map((row) => ({
+        item_id: row.item_id,
+        item_cd: row.item_cd,
+        item_nm: row.item_nm,
+      })),
+    [itemsMaster, outputItemtypIds]
+  )
+
+  const inputItemDatalistCatalog = useMemo(
+    () =>
+      filterItemListRowsByItemtypIds(itemsMaster, inputItemtypIds).map((row) => ({
+        item_id: row.item_id,
+        item_cd: row.item_cd,
+        item_nm: row.item_nm,
+      })),
+    [itemsMaster, inputItemtypIds]
+  )
+
+  const wipItemtyp = useMemo(() => findItemtypByKind(itemtyps, 'WIP'), [itemtyps])
+  const fgItemtyp = useMemo(() => findItemtypByKind(itemtyps, 'FG'), [itemtyps])
+
+  const matchesOutputItemTab = useCallback(
+    (row: EditFinalItemRow): boolean => {
+      if (outputItemFilter === 'ALL') return true
+      if (row.item_id === '') return false
+      const item = items.find((entry) => entry.item_id === row.item_id)
+      const targetId =
+        outputItemFilter === 'WIP' ? wipItemtyp?.itemtyp_id : fgItemtyp?.itemtyp_id
+      if (item && targetId != null) return item.itemtyp_id === targetId
+      const cd = row.itemtyp_cd.trim().toUpperCase()
+      if (outputItemFilter === 'WIP') return cd === 'WIP'
+      return cd === 'FG'
+    },
+    [outputItemFilter, items, wipItemtyp?.itemtyp_id, fgItemtyp?.itemtyp_id]
+  )
+
+  const tabFilteredFinalItemRows = useMemo(() => {
+    if (finalItemRows.length === 0) return []
+    const last = finalItemRows[finalItemRows.length - 1]
+    const hasSentinel = isBlankFinalItemRow(last)
+    const dataRows = hasSentinel ? finalItemRows.slice(0, -1) : finalItemRows
+    const sentinel = hasSentinel ? last : null
+    const matched = dataRows.filter((row) => matchesOutputItemTab(row))
+    if (!sentinel) return matched
+    return [...matched, sentinel]
+  }, [finalItemRows, matchesOutputItemTab])
+
+  useEffect(() => {
+    if (!selectedFinalItemKey) return
+    const selected = tabFilteredFinalItemRows.find((row) => row.key === selectedFinalItemKey)
+    if (selected && !isBlankFinalItemRow(selected)) return
+    const firstActive = tabFilteredFinalItemRows.find((row) => isActiveFinalItemRow(row))
+    setSelectedFinalItemKey(firstActive?.key ?? null)
+  }, [outputItemFilter, tabFilteredFinalItemRows, selectedFinalItemKey])
+
+  useEffect(() => {
+    const valid = new Set(finalItemRows.map((row) => row.key))
+    setSelectedOutputItemKeys((prev) => {
+      const next = new Set([...prev].filter((key) => valid.has(key)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [finalItemRows])
 
   const outputItemRoots = useMemo(
     () =>
@@ -221,16 +326,54 @@ export function ItemProcessesPage() {
     [resolveFinalItemCd]
   )
 
+  const { finalItemDataRows, finalItemTrailingRow } = useMemo(() => {
+    if (tabFilteredFinalItemRows.length === 0) {
+      return { finalItemDataRows: [], finalItemTrailingRow: null as EditFinalItemRow | null }
+    }
+    const last = tabFilteredFinalItemRows[tabFilteredFinalItemRows.length - 1]
+    if (isBlankFinalItemRow(last)) {
+      return {
+        finalItemDataRows: tabFilteredFinalItemRows.slice(0, -1),
+        finalItemTrailingRow: last,
+      }
+    }
+    return { finalItemDataRows: tabFilteredFinalItemRows, finalItemTrailingRow: null }
+  }, [tabFilteredFinalItemRows])
+
   const finalItemGrid = useExcelLikeGrid({
     columns: itemProcessFinalItemColumns,
-    rows: finalItemRows,
+    rows: finalItemDataRows,
     getFilterValue: finalItemFilterValue,
+    rowDelete: {
+      label: 'Delete row',
+      getSelectedCount: () => selectedOutputItemKeys.size,
+      onDelete: () => deleteOutputRowsRef.current(),
+    },
   })
 
+  const finalItemDisplayRows = useMemo(
+    () =>
+      finalItemTrailingRow
+        ? [...finalItemGrid.displayRows, finalItemTrailingRow]
+        : finalItemGrid.displayRows,
+    [finalItemGrid.displayRows, finalItemTrailingRow]
+  )
+
+  const selectableOutputRows = useMemo(
+    () => selectableDisplayRows(finalItemDisplayRows, isBlankFinalItemRow),
+    [finalItemDisplayRows]
+  )
+
+  const selectedOutputCount = useMemo(
+    () =>
+      selectedSelectableCount(selectableOutputRows, selectedOutputItemKeys, (row) => row.key),
+    [selectableOutputRows, selectedOutputItemKeys]
+  )
+
   const finalItemLayout = useGridColumnLayout(
-    'item-process-final-item-v4',
+    'item-process-final-item-v5',
     itemProcessFinalItemColumns,
-    { ...FINAL_ITEM_LAYOUT_OPTS, rowCount: finalItemGrid.displayRows.length }
+    { ...FINAL_ITEM_LAYOUT_OPTS, rowCount: finalItemDisplayRows.length }
   )
 
   useEffect(() => {
@@ -275,6 +418,9 @@ export function ItemProcessesPage() {
         nextKey = firstActive?.key ?? null
       }
       setFinalItemRows(withBlank)
+      setSavedFinalItemSnapshots(
+        finalItemRowSnapshotsFromEditRows(withBlank.filter(isActiveFinalItemRow))
+      )
       setSelectedFinalItemKey(nextKey)
     },
     []
@@ -351,32 +497,45 @@ export function ItemProcessesPage() {
       updateFinalItemRow(key, { ...patch, key: nextKey })
       if (patch.item_id !== '') {
         setSelectedFinalItemKey(nextKey)
-      } else if (selectedFinalItemKey === key || selectedFinalItemKey === nextKey) {
-        setSelectedFinalItemKey(null)
       }
     },
-    [itemIdUsedInOtherRow, selectedFinalItemKey, updateFinalItemRow]
+    [itemIdUsedInOtherRow, updateFinalItemRow]
   )
 
   const activateFinalItemRow = useCallback((row: EditFinalItemRow) => {
     setSelectedFinalItemKey(row.key)
   }, [])
 
-  const applyProcessesToGrids = useCallback((data: Awaited<ReturnType<typeof api.getItemProcesses>>) => {
-    const procRows = itemProcessesToEditProcessRows(data.processes)
-    const inputData = itemProcessesToEditInputRows(data.processes)
-    const lineNos = data.processes.map((proc) => proc.line_no)
-    const normalized = ensureItemProcessEditRows(procRows, inputData, lineNos)
-    setProcessRows(
-      ensureTrailingBlankRow(
+  const applyProcessesToGrids = useCallback(
+    (data: Awaited<ReturnType<typeof api.getItemProcesses>>, itemId?: number) => {
+      const procRows = itemProcessesToEditProcessRows(data.processes)
+      const inputData = itemProcessesToEditInputRows(data.processes)
+      const lineNos = data.processes.map((proc) => proc.line_no)
+      const normalized = ensureItemProcessEditRows(procRows, inputData, lineNos)
+      const processRowsFinal = ensureTrailingBlankRow(
         normalized.processRows,
         isBlankItemProcessRow,
         (rows) => createBlankProcessRowForDetail(rows)
       )
-    )
-    setInputRows(normalized.inputRows)
-    setRowError(null)
-  }, [])
+      setProcessRows(processRowsFinal)
+      setInputRows(normalized.inputRows)
+      setRowError(null)
+      const snapshotItemId = itemId ?? data.item_id
+      setSavedProcessSnapshots((prev) => {
+        const next = new Map(prev)
+        next.set(
+          snapshotItemId,
+          serializeItemProcessEditDraft(
+            processRowsFinal,
+            normalized.inputRows,
+            snapshotItemId
+          )
+        )
+        return next
+      })
+    },
+    []
+  )
 
   const ensureSavedFinalItemRow = useCallback(
     (item: ItemSearchRow) => {
@@ -525,7 +684,7 @@ export function ItemProcessesPage() {
     void loadProcesses(selectedItem.item_id)
   }, [selectedItem?.item_id, loadProcesses])
 
-  const handleRefresh = useCallback(async () => {
+  const handleReload = useCallback(async () => {
     const selectId = selectedItem?.item_id
     setRefreshing(true)
     setError(null)
@@ -539,13 +698,13 @@ export function ItemProcessesPage() {
       applyFinalItemRowsFromApi(
         apiFinalItems,
         snapshot.itemsMaster,
-        finalItemRowsRef.current,
+        [],
         buildFinalItemCatalogLookups(snapshot.itemtyps, snapshot.customers),
         selectId
       )
       setItemProcessCache(new Map())
       if (selectId != null) {
-        loadedProcessItemIdRef.current = selectId
+        loadedProcessItemIdRef.current = null
         await loadProcesses(selectId)
       } else {
         loadedProcessItemIdRef.current = null
@@ -553,28 +712,18 @@ export function ItemProcessesPage() {
         setInputRows([])
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to refresh')
+      setError(e instanceof Error ? e.message : 'Failed to reload')
     } finally {
       setRefreshing(false)
     }
   }, [selectedItem?.item_id, applyFinalItemRowsFromApi, loadProcesses, refreshCatalog])
 
   const handleTreeDataChange = useCallback((data: ProductionTreeData) => {
-    setTreeTitle(data.title)
-    setTreeLines(data.lines)
-  }, [])
-
-  const handleResetProcessSelection = useCallback(() => {
-    resetProcessSelectionRef.current?.()
-  }, [])
-
-  const handleResetHandlerChange = useCallback((handler: (() => void) | null) => {
-    resetProcessSelectionRef.current = handler
+    setTreeTitle((prev) => (prev === data.title ? prev : data.title))
+    setTreeLines((prev) => (isSameProductionTreeData(data, data.title, prev) ? prev : data.lines))
   }, [])
 
   const handleSave = async () => {
-    if (!selectedItem) return
-
     const activeFinalRows = finalItemRows.filter(isActiveFinalItemRow)
     const seenItemIds = new Set<number>()
     for (const row of activeFinalRows) {
@@ -586,13 +735,41 @@ export function ItemProcessesPage() {
       seenItemIds.add(itemId)
     }
 
-    const payload = editRowsToItemProcessesSave(
-      processRows,
-      inputRows,
-      selectedItem.item_id
+    const changedOutputRows = changedActiveRows(
+      finalItemRows,
+      savedFinalItemSnapshots,
+      isActiveFinalItemRow,
+      (row) => (row.item_id !== '' ? Number(row.item_id) : undefined),
+      finalItemRowSnapshot
     )
+
+    const selectedId = selectedItem?.item_id ?? null
+    const processDirty =
+      selectedId != null &&
+      isItemProcessEditDirty(selectedId, processRows, inputRows, savedProcessSnapshots)
+
+    if (!processDirty && changedOutputRows.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'item process'))
+      return
+    }
+
+    if (selectedId == null) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'item process'))
+      return
+    }
+
+    if (!processDirty) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'item process'))
+      return
+    }
+
+    const payload = editRowsToItemProcessesSave(processRows, inputRows, selectedId)
     if (payload.processes.length === 0) {
       setRowError('process_validation')
+      setSuccess(null)
       return
     }
 
@@ -601,14 +778,14 @@ export function ItemProcessesPage() {
     setSuccess(null)
     setRowError(null)
     try {
-      const saved = await api.saveItemProcesses(selectedItem.item_id, payload)
-      applyProcessesToGrids(saved)
+      const saved = await api.saveItemProcesses(selectedId, payload)
+      applyProcessesToGrids(saved, selectedId)
       setItemProcessCache((prev) => {
         const next = new Map(prev)
         next.set(saved.item_id, saved)
         return next
       })
-      ensureSavedFinalItemRow(selectedItem)
+      ensureSavedFinalItemRow(selectedItem!)
       setFinalItemRows((rows) => {
         const active = rows.filter(isActiveFinalItemRow)
         const normalized = active.map((row) => ({
@@ -619,10 +796,18 @@ export function ItemProcessesPage() {
           itemtyp_cd: row.itemtyp_cd.trim(),
           customer_cd: row.customer_cd.trim(),
         }))
-        return ensureTrailingBlankRow(normalized, isBlankFinalItemRow, emptyEditFinalItemRow)
+        const withBlank = ensureTrailingBlankRow(
+          normalized,
+          isBlankFinalItemRow,
+          emptyEditFinalItemRow
+        )
+        setSavedFinalItemSnapshots(
+          finalItemRowSnapshotsFromEditRows(withBlank.filter(isActiveFinalItemRow))
+        )
+        return withBlank
       })
-      loadedProcessItemIdRef.current = selectedItem.item_id
-      setSuccess('Output item, process, and input items saved.')
+      loadedProcessItemIdRef.current = selectedId
+      setSuccess(savedCountMessage(1, 'item process'))
       refreshMasterCatalog()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save item processes')
@@ -631,13 +816,72 @@ export function ItemProcessesPage() {
     }
   }
 
+  const deleteSelectedOutputItems = async () => {
+    if (selectedOutputItemKeys.size === 0) return
+    if (!confirm(deleteSelectedConfirm(selectedOutputItemKeys.size, 'output item(s)'))) return
+
+    setSubmitting(true)
+    setError(null)
+    setSuccess(null)
+    setRowError(null)
+    try {
+      const targets = finalItemRows.filter(
+        (row) => selectedOutputItemKeys.has(row.key) && isActiveFinalItemRow(row)
+      )
+      const deletedKeys = new Set(targets.map((row) => row.key))
+      const deletedIds = new Set(targets.map((row) => Number(row.item_id)))
+
+      for (const row of targets) {
+        await api.saveItemProcesses(Number(row.item_id), { processes: [] })
+      }
+
+      setFinalItemRows((rows) => {
+        const next = ensureTrailingBlankRow(
+          rows.filter((row) => !deletedKeys.has(row.key)),
+          isBlankFinalItemRow,
+          emptyEditFinalItemRow
+        )
+        setSavedFinalItemSnapshots(
+          finalItemRowSnapshotsFromEditRows(next.filter(isActiveFinalItemRow))
+        )
+        return next
+      })
+      setSelectedOutputItemKeys(new Set())
+      if (selectedFinalItemKey && deletedKeys.has(selectedFinalItemKey)) {
+        setSelectedFinalItemKey(null)
+        loadedProcessItemIdRef.current = null
+        setProcessRows([])
+        setInputRows([])
+      }
+      setItemProcessCache((prev) => {
+        const next = new Map(prev)
+        for (const id of deletedIds) next.delete(id)
+        return next
+      })
+      setSavedProcessSnapshots((prev) => {
+        const next = new Map(prev)
+        for (const id of deletedIds) next.delete(id)
+        return next
+      })
+      setSuccess(
+        targets.length === 1 ? '1 output item deleted.' : `${targets.length} output items deleted.`
+      )
+      refreshMasterCatalog()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete output items')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  deleteOutputRowsRef.current = () => void deleteSelectedOutputItems()
+
   const saveErrorMessage = (() => {
     if (!rowError) return null
     if (rowError === 'final_item_duplicate') {
       return 'This item is already listed in Output Item.'
     }
     if (rowError === 'process_validation') {
-      return 'Enter at least one valid process step before saving.'
+      return 'Enter at least one process location before saving.'
     }
     return rowError
   })()
@@ -646,39 +890,96 @@ export function ItemProcessesPage() {
     saveLayouts: () => void
     isDirty: boolean
   } | null>(null)
+  const panelSplit = useProductionPanelSplitLayout(PANEL_SPLIT_LAYOUT_ID)
+  const [processInputGridDirty, setProcessInputGridDirty] = useState(false)
 
   const handleProcessInputGridLayoutsReady = useCallback(
     (api: { saveLayouts: () => void; isDirty: boolean }) => {
       processInputLayoutApiRef.current = api
+      setProcessInputGridDirty(api.isDirty)
     },
     []
   )
 
   const handleSaveAllGridLayouts = useCallback(() => {
     finalItemLayout.saveLayout()
+    panelSplit.saveLayout()
     processInputLayoutApiRef.current?.saveLayouts()
-  }, [finalItemLayout.saveLayout])
+  }, [finalItemLayout.saveLayout, panelSplit.saveLayout])
+
+  const saveGridIsDirty =
+    panelSplit.isDirty ||
+    processInputGridDirty ||
+    finalItemLayout.isDirty
 
   return (
     <ErpScreen
       error={error}
       className="erp-screen-stacked"
       title="Item Processes"
-      onRefresh={() => void handleRefresh()}
+      onRefresh={() => void handleReload()}
       onSaveGrid={handleSaveAllGridLayouts}
+      saveGridIsDirty={saveGridIsDirty}
     >
       {finalItemGrid.filterMenuElement}
+      {finalItemGrid.contextMenuElement}
       {pageLoading ? (
         <p className="muted erp-grid-empty">Loading…</p>
       ) : (
-      <div className={`erp-production-detail-split${treeOnSelect ? ' has-tree' : ''}`}>
-        <div className="erp-production-detail-main">
+      <ProductionDetailSplit
+        hasTree={treeOnSelect}
+        treeWidthRatio={panelSplit.layout.treeWidthRatio}
+        onTreeWidthRatioChange={panelSplit.setTreeWidthRatio}
+        tree={
+          treeTitle && treeLines.length > 0 ? (
+            <BomTreePanel
+              sidebar
+              title={treeTitle}
+              lines={treeLines}
+              highlight={treeHighlight}
+            />
+          ) : (
+            <ProductionTreeSidebar title="Tree">
+              <p className="muted erp-grid-empty">
+                {selectedItem
+                  ? 'Enter process steps to show tree.'
+                  : 'Select an output item to show tree.'}
+              </p>
+            </ProductionTreeSidebar>
+          )
+        }
+      >
           <div className="erp-panel erp-panel-grow erp-detail-panel">
-            <div className="erp-panel-content erp-detail-content">
+            <div className="erp-panel-content erp-detail-content erp-detail-content-split">
               <section className="erp-production-detail-section" data-production-grid="final-item">
                 <div className="erp-production-detail-section-title">Output Item</div>
                 <div className="erp-detail-toolbar erp-production-detail-toolbar">
-                  <div className="erp-toolbar-select-tree">
+                  <div className="erp-toolbar-left">
+                    <button
+                      type="button"
+                      className={`erp-tab${outputItemFilter === 'ALL' ? ' active' : ''}`}
+                      onClick={() => setOutputItemFilter('ALL')}
+                    >
+                      All
+                    </button>
+                    {wipItemtyp ? (
+                      <button
+                        type="button"
+                        className={`erp-tab${outputItemFilter === 'WIP' ? ' active' : ''}`}
+                        onClick={() => setOutputItemFilter('WIP')}
+                      >
+                        {itemTypTabLabel(wipItemtyp)}
+                      </button>
+                    ) : null}
+                    {fgItemtyp ? (
+                      <button
+                        type="button"
+                        className={`erp-tab${outputItemFilter === 'FG' ? ' active' : ''}`}
+                        onClick={() => setOutputItemFilter('FG')}
+                      >
+                        {itemTypTabLabel(fgItemtyp)}
+                      </button>
+                    ) : null}
                     <label className="erp-toolbar-tree-toggle">
                       Tree
                       <input
@@ -689,95 +990,169 @@ export function ItemProcessesPage() {
                     </label>
                   </div>
                   <div className="erp-detail-toolbar-actions">
-                    <button
-                      className="btn erp-btn erp-btn-search btn-sm"
-                      type="button"
-                      disabled={!selectedItem || submitting || refreshing}
-                      onClick={() => void handleSave()}
-                    >
-                      {submitting ? 'Updating…' : 'Update'}
-                    </button>
-                    <ToolbarFeedback message={success} type="success" />
-                    <ToolbarFeedback message={saveErrorMessage} type="error" />
+                    <MasterGridToolbarActions
+                      submitting={submitting || refreshing}
+                      rowError={saveErrorMessage}
+                      statusMessage={success}
+                      selectedCount={selectedOutputCount}
+                      onSave={() => void handleSave()}
+                      onDelete={() => void deleteSelectedOutputItems()}
+                    />
                   </div>
                 </div>
                 <div className="erp-grid-wrap erp-grid-wrap-detail">
-                  <ResizableGridTable layout={finalItemLayout} {...finalItemGrid.tableProps}>
+                  <ResizableGridTable
+                    layout={finalItemLayout}
+                    selectColumnHeader={
+                      <GridRowSelectButtons
+                        rowCount={selectableOutputRows.length}
+                        selectedCount={selectedOutputCount}
+                        onSelectAll={() =>
+                          setSelectedOutputItemKeys(
+                            new Set(selectableOutputRows.map((row) => row.key))
+                          )
+                        }
+                        onClearSelection={() => setSelectedOutputItemKeys(new Set())}
+                      />
+                    }
+                    {...finalItemGrid.tableProps}
+                  >
                     <tbody>
-                      {finalItemGrid.displayRows.map((row, index) => (
+                      {finalItemDisplayRows.map((row, index) => {
+                        const isSentinel = isBlankFinalItemRow(row)
+                        const isRowSelected = selectedOutputItemKeys.has(row.key)
+                        const isActiveRow = selectedFinalItemKey === row.key
+                        return (
                         <tr
                           key={row.key}
-                          className={erpRowClass(index, selectedFinalItemKey === row.key) ?? undefined}
+                          className={
+                            [
+                              erpRowClass(index, isActiveRow),
+                              isRowSelected ? ' selected' : '',
+                              isSentinel ? ' erp-grid-row-sentinel' : '',
+                            ]
+                              .filter(Boolean)
+                              .join('') || undefined
+                          }
                           onClick={() => activateFinalItemRow(row)}
                         >
                           {finalItemLayout.orderedColumns.map((col) => {
                             switch (col.key) {
                               case 'rownum':
                                 return <GridRowNumCell key={col.key} index={index} />
+                              case 'select':
+                                if (isSentinel) {
+                                  return <td key={col.key} className="erp-col-check" />
+                                }
+                                return (
+                                  <td
+                                    key={col.key}
+                                    className="erp-col-check"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isRowSelected}
+                                      aria-label={`Select ${row.item_cd || 'row'}`}
+                                      onChange={(e) => {
+                                        setSelectedOutputItemKeys((prev) => {
+                                          const next = new Set(prev)
+                                          if (e.target.checked) next.add(row.key)
+                                          else next.delete(row.key)
+                                          return next
+                                        })
+                                      }}
+                                    />
+                                  </td>
+                                )
                               case 'item_cd':
                                 return (
                                   <td key={col.key} className="erp-grid-cell-edit">
-                                    <>
-                                      <input
-                                        className="erp-grid-input"
+                                    {showItemMasterDatalist(row.item_id) ? (
+                                      <GridItemDatalistField
+                                        mode="cd"
+                                        items={outputItemDatalistCatalog}
+                                        listId={`item-process-final-item-cd-${row.key}`}
+                                        value={row.item_cd}
                                         style={itemTextColorStyle(
                                           colorForItem(
                                             row.item_id === '' ? null : row.item_id
                                           )
                                         )}
-                                        value={row.item_cd}
-                                        list={`item-process-final-item-cd-${row.key}`}
                                         onFocus={() => activateFinalItemRow(row)}
-                                        onChange={(e) => {
+                                        onChange={(value) => {
                                           const patch = finalItemCdFieldPatch(
-                                            items,
+                                            itemsMaster,
                                             finalItemLookups,
-                                            e.target.value
+                                            value
                                           )
                                           applyFinalItemPatch(row.key, patch)
                                         }}
                                       />
-                                      <datalist id={`item-process-final-item-cd-${row.key}`}>
-                                        {items.map((item) => (
-                                          <option key={item.item_id} value={item.item_cd}>
-                                            {item.item_nm}
-                                          </option>
-                                        ))}
-                                      </datalist>
-                                    </>
+                                    ) : (
+                                      <GridItemResolvedInput
+                                        value={row.item_cd}
+                                        style={itemTextColorStyle(
+                                          colorForItem(
+                                            row.item_id === '' ? null : row.item_id
+                                          )
+                                        )}
+                                        onFocus={() => activateFinalItemRow(row)}
+                                        onChange={(value) => {
+                                          const patch = finalItemCdFieldPatch(
+                                            itemsMaster,
+                                            finalItemLookups,
+                                            value
+                                          )
+                                          applyFinalItemPatch(row.key, patch)
+                                        }}
+                                      />
+                                    )}
                                   </td>
                                 )
                               case 'item_nm':
                                 return (
                                   <td key={col.key} className="erp-grid-cell-edit">
-                                    <>
-                                      <input
-                                        className="erp-grid-input"
+                                    {showItemMasterDatalist(row.item_id) ? (
+                                      <GridItemDatalistField
+                                        mode="nm"
+                                        items={outputItemDatalistCatalog}
+                                        listId={`item-process-final-item-nm-${row.key}`}
+                                        value={row.item_nm}
                                         style={itemTextColorStyle(
                                           colorForItem(
                                             row.item_id === '' ? null : row.item_id
                                           )
                                         )}
-                                        value={row.item_nm}
-                                        list={`item-process-final-item-nm-${row.key}`}
                                         onFocus={() => activateFinalItemRow(row)}
-                                        onChange={(e) => {
+                                        onChange={(value) => {
                                           const patch = finalItemNmFieldPatch(
-                                            items,
+                                            itemsMaster,
                                             finalItemLookups,
-                                            e.target.value
+                                            value
                                           )
                                           applyFinalItemPatch(row.key, patch)
                                         }}
                                       />
-                                      <datalist id={`item-process-final-item-nm-${row.key}`}>
-                                        {items.map((item) => (
-                                          <option key={item.item_id} value={item.item_nm}>
-                                            {item.item_cd}
-                                          </option>
-                                        ))}
-                                      </datalist>
-                                    </>
+                                    ) : (
+                                      <GridItemResolvedInput
+                                        value={row.item_nm}
+                                        style={itemTextColorStyle(
+                                          colorForItem(
+                                            row.item_id === '' ? null : row.item_id
+                                          )
+                                        )}
+                                        onFocus={() => activateFinalItemRow(row)}
+                                        onChange={(value) => {
+                                          const patch = finalItemNmFieldPatch(
+                                            itemsMaster,
+                                            finalItemLookups,
+                                            value
+                                          )
+                                          applyFinalItemPatch(row.key, patch)
+                                        }}
+                                      />
+                                    )}
                                   </td>
                                 )
                               case 'final_item_cd':
@@ -807,7 +1182,8 @@ export function ItemProcessesPage() {
                             }
                           })}
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </ResizableGridTable>
                 </div>
@@ -820,8 +1196,10 @@ export function ItemProcessesPage() {
                   detail={detail}
                   loading={loading}
                   canEdit
-                  autoSelectFirstProcess
+                  autoSelectProcess="last"
                   items={items}
+                  outputItemDatalistCatalog={outputItemDatalistCatalog}
+                  inputItemDatalistCatalog={inputItemDatalistCatalog}
                   locations={locations}
                   processRows={processRows}
                   inputRows={inputRows}
@@ -830,40 +1208,23 @@ export function ItemProcessesPage() {
                   rowError={rowError}
                   lineGridId="item-process-lines-v1"
                   inputGridId="item-process-inputs-v1"
-                  processEditGridId="item-process-process-edit-v1"
+                  processEditGridId="item-process-process-edit-v3"
                   inputEditGridId="item-process-input-edit-v1"
                   onTreeHighlightChange={setTreeHighlight}
                   onTreeDataChange={handleTreeDataChange}
-                  onResetHandlerChange={handleResetHandlerChange}
                   onGridLayoutsReady={handleProcessInputGridLayoutsReady}
                   itemProcessCache={itemProcessCache}
+                  processInputSplit={{
+                    processHeightRatio: panelSplit.layout.processHeightRatio,
+                    onProcessHeightRatioChange: panelSplit.setProcessHeightRatio,
+                  }}
                 />
               ) : (
                 <p className="muted erp-grid-empty">Select an output item to edit item processes.</p>
               )}
             </div>
           </div>
-        </div>
-        {treeOnSelect ? (
-          <aside className="erp-production-detail-tree" aria-label="Item process tree">
-            {treeTitle && treeLines.length > 0 ? (
-              <BomTreePanel
-                sidebar
-                title={treeTitle}
-                lines={treeLines}
-                highlight={treeHighlight}
-                onReset={handleResetProcessSelection}
-              />
-            ) : (
-              <ProductionTreeSidebar title="Tree" onReset={handleResetProcessSelection}>
-                <p className="muted erp-grid-empty">
-                  {selectedItem ? 'Enter process steps to show tree.' : 'Select an output item to show tree.'}
-                </p>
-              </ProductionTreeSidebar>
-            )}
-          </aside>
-        ) : null}
-      </div>
+      </ProductionDetailSplit>
       )}
     </ErpScreen>
   )

@@ -172,7 +172,7 @@ export function useMasterCatalog(): MasterCatalogValue {
   return ctx
 }
 
-/** Call after saving a master so open tabs get fresh dropdown options without Refresh. */
+/** Call after saving a master so open tabs get fresh dropdown options without Reload. */
 export function useRefreshMasterCatalogAfterSave(): () => void {
   const { refresh } = useMasterCatalog()
   return useCallback(() => {

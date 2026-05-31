@@ -1,4 +1,5 @@
 import type { SupplierMaster } from '../types/masters'
+import { buildRecordSnapshotMap } from './gridRowChange'
 
 export type EditSupplierRow = {
   key: string
@@ -48,4 +49,21 @@ export function buildSupplierPayload(row: EditSupplierRow) {
     suppliers_cd: row.suppliers_cd.trim(),
     suppliers_nm: row.suppliers_nm.trim(),
   }
+}
+
+export type SupplierRowSnapshot = ReturnType<typeof buildSupplierPayload>
+
+export function supplierRowSnapshot(row: EditSupplierRow): SupplierRowSnapshot | null {
+  if (!isActiveSupplierRow(row)) return null
+  return buildSupplierPayload(row)
+}
+
+export function supplierRowSnapshotsFromEditRows(
+  rows: EditSupplierRow[]
+): Map<number, SupplierRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.suppliers_id,
+    supplierRowSnapshot
+  )
 }

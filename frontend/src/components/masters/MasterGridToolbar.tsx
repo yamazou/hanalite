@@ -1,41 +1,65 @@
 import type { ReactNode } from 'react'
 import { ToolbarFeedback } from '../ToolbarFeedback'
 
-type Props = {
+type ActionsProps = {
   submitting: boolean
   rowError: string | null
   statusMessage?: string | null
+  selectedCount?: number
   onSave?: () => void
-  extraLeft?: ReactNode
+  onDelete?: () => void
 }
 
-export function MasterGridToolbar({
+/** Update / Delete actions for ErpGridPanel toolbarRight. */
+export function MasterGridToolbarActions({
   submitting,
   rowError,
   statusMessage,
+  selectedCount = 0,
   onSave,
-  extraLeft,
-}: Props) {
-  const hasActions = Boolean(onSave || rowError || statusMessage)
+  onDelete,
+}: ActionsProps) {
+  return (
+    <div className="erp-detail-toolbar-actions">
+      {onSave ? (
+        <button
+          type="button"
+          className="btn erp-btn erp-btn-search btn-sm"
+          disabled={submitting}
+          onClick={onSave}
+        >
+          {submitting ? 'Updating…' : 'Update'}
+        </button>
+      ) : null}
+      {onDelete ? (
+        <button
+          type="button"
+          className="btn erp-btn erp-btn-clear btn-sm"
+          disabled={submitting || selectedCount === 0}
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      ) : null}
+      <ToolbarFeedback message={statusMessage} type="success" />
+      <ToolbarFeedback message={rowError} type="error" />
+    </div>
+  )
+}
+
+type Props = ActionsProps & {
+  extraLeft?: ReactNode
+}
+
+/** Optional left extras (tabs, filters) with actions on the right inside one toolbar row. */
+export function MasterGridToolbar({ extraLeft, ...actions }: Props) {
+  const hasActions = Boolean(
+    actions.onSave || actions.onDelete || actions.rowError || actions.statusMessage
+  )
   return (
     <div className="erp-detail-toolbar">
-      {extraLeft}
-      {hasActions ? (
-        <div className="erp-detail-toolbar-actions">
-          {onSave ? (
-            <button
-              type="button"
-              className="btn erp-btn erp-btn-search btn-sm"
-              disabled={submitting}
-              onClick={onSave}
-            >
-              {submitting ? 'Updating…' : 'Update'}
-            </button>
-          ) : null}
-          <ToolbarFeedback message={statusMessage} type="success" />
-          <ToolbarFeedback message={rowError} type="error" />
-        </div>
-      ) : null}
+      {extraLeft ? <div className="erp-toolbar-left">{extraLeft}</div> : null}
+      {hasActions ? <MasterGridToolbarActions {...actions} /> : null}
     </div>
   )
 }

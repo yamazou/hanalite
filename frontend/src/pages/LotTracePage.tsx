@@ -213,7 +213,7 @@ export function LotTracePage() {
   const historyLayoutRef = useRef<GridColumnLayout | null>(null)
   const balanceLayoutRef = useRef<GridColumnLayout | null>(null)
 
-  const handleRefresh = () => {
+  const handleReload = () => {
     if (lot.trim()) void runTrace(lot, locationText)
   }
 
@@ -228,7 +228,7 @@ export function LotTracePage() {
       error={error}
       className="erp-screen-stacked"
       title="Lot Trace"
-      onRefresh={handleRefresh}
+      onRefresh={handleReload}
       onSaveGrid={result ? handleSaveAllGridLayouts : undefined}
     >
       {currentGrid.filterMenuElement}

@@ -5,7 +5,7 @@ type Props = {
   children?: ReactNode
 }
 
-/** Panel header: title on the left, actions (Save Grid, Refresh, …) on the right. */
+/** Panel header: title on the left, actions (Save Grid, Reload, …) on the right. */
 export function ErpPanelTitleBar({ title, children }: Props) {
   return (
     <div className="erp-panel-title-bar">

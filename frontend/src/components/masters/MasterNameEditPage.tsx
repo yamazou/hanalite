@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ErpGridPanel } from '../erp/ErpGridPanel'
 import { ErpScreen } from '../erp/ErpScreen'
 import { GridRowNumCell } from '../GridRowNumCell'
@@ -9,13 +9,21 @@ import {
   isActiveNameMasterRow,
   isBlankNameMasterRow,
   listRowToEditNameMasterRow,
+  nameMasterRowSnapshotsFromEditRows,
   type EditNameMasterRow,
+  type NameMasterRowSnapshot,
 } from '../../utils/nameMasterEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeNameMasterImportRows } from '../../utils/nameMasterExcelImport'
 import { GridRowSelectButtons } from '../GridRowSelectButtons'
-import { MasterGridToolbar } from './MasterGridToolbar'
+import { MasterGridToolbarActions } from './MasterGridToolbar'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 
 type NameRecord = { id: number; name: string }
 
@@ -32,6 +40,19 @@ type Props = {
   deleteRecord: (id: number) => Promise<void>
 }
 
+function entityLabelsFromTitle(title: string): { plural: string; singular: string } {
+  const lower = title.toLowerCase()
+  let singular = lower
+  if (lower.endsWith('ies')) {
+    singular = `${lower.slice(0, -3)}y`
+  } else if (lower.endsWith('ses') || lower.endsWith('xes') || lower.endsWith('zes')) {
+    singular = lower.slice(0, -2)
+  } else if (lower.endsWith('s')) {
+    singular = lower.slice(0, -1)
+  }
+  return { plural: `${singular}(s)`, singular }
+}
+
 export function MasterNameEditPage({
   title,
   gridId,
@@ -44,7 +65,11 @@ export function MasterNameEditPage({
   updateRecord,
   deleteRecord,
 }: Props) {
+  const entityLabels = useMemo(() => entityLabelsFromTitle(title), [title])
   const [editRows, setEditRows] = useState<EditNameMasterRow[]>([])
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, NameMasterRowSnapshot>>(
+    () => new Map()
+  )
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -59,16 +84,14 @@ export function MasterNameEditPage({
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
     try {
       const records = await loadRecords()
+      const dataRows = records.map((r) => listRowToEditNameMasterRow(r.id, r.name))
+      setSavedSnapshots(nameMasterRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(
-          records.map((r) => listRowToEditNameMasterRow(r.id, r.name)),
-          isBlankNameMasterRow,
-          () => emptyEditNameMasterRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankNameMasterRow, () => emptyEditNameMasterRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -120,13 +143,23 @@ export function MasterNameEditPage({
           ensureTrailingBlankRow(rows, isBlankNameMasterRow, () => emptyEditNameMasterRow())
         )
         if (updated + added > 0) {
-          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Save to persist.`)
+          setSuccess(`Import: ${added} added, ${updated} updated in grid. Click Update to persist.`)
         } else {
           setSuccess('No rows were imported from the file.')
         }
       },
     },
   })
+
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(grid.displayRows, isBlankNameMasterRow),
+    [grid.displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditNameMasterRow>) => {
     setEditRows((rows) =>
@@ -163,7 +196,7 @@ export function MasterNameEditPage({
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm(`Delete selected ${title.toLowerCase()}?`)) return
+    if (!confirm(deleteSelectedConfirm(selectedCount, entityLabels.plural))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -211,12 +244,25 @@ export function MasterNameEditPage({
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveNameMasterRow,
+      (row) => row.record_id,
+      (row) => (isActiveNameMasterRow(row) ? { name: row.name.trim() } : null)
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, entityLabels.singular))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
+      for (const row of toSave) {
         const name = row.name.trim()
         if (row.record_id != null) {
           await updateRecord(row.record_id, name)
@@ -224,7 +270,7 @@ export function MasterNameEditPage({
           await createRecord(name)
         }
       }
-      setSuccess('Saved.')
+      setSuccess(savedCountMessage(toSave.length, entityLabels.singular))
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -246,20 +292,20 @@ export function MasterNameEditPage({
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={grid.displayRows.length}
-            selectedCount={selectedKeys.size}
-            onSelectAll={() =>
-              setSelectedKeys(new Set(grid.displayRows.map((row) => row.key)))
-            }
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
+            onSelectAll={() => setSelectedKeys(new Set(selectableRows.map((row) => row.key)))}
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
-        toolbarLeft={
-          <MasterGridToolbar
+        toolbarRight={
+          <MasterGridToolbarActions
             submitting={submitting}
             rowError={rowError}
             statusMessage={success}
+            selectedCount={selectedCount}
             onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
           />
         }
         showSaveGridButton
@@ -286,6 +332,9 @@ export function MasterNameEditPage({
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input

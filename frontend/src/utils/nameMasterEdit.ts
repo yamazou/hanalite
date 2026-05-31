@@ -1,3 +1,5 @@
+import { buildRecordSnapshotMap } from './gridRowChange'
+
 export type EditNameMasterRow = {
   key: string
   record_id?: number
@@ -32,4 +34,21 @@ export function listRowToEditNameMasterRow(
     record_id,
     name,
   }
+}
+
+export type NameMasterRowSnapshot = { name: string }
+
+export function nameMasterRowSnapshot(row: EditNameMasterRow): NameMasterRowSnapshot | null {
+  if (!isActiveNameMasterRow(row)) return null
+  return { name: row.name.trim() }
+}
+
+export function nameMasterRowSnapshotsFromEditRows(
+  rows: EditNameMasterRow[]
+): Map<number, NameMasterRowSnapshot> {
+  return buildRecordSnapshotMap(
+    rows,
+    (row) => row.record_id,
+    nameMasterRowSnapshot
+  )
 }

@@ -4,10 +4,10 @@ export interface ItemProcInput {
   item_id: number
   item_cd: string
   item_nm: string
-  from_location_id: number
+  from_location_id: number | null
   from_location_cd: string
   from_location_nm: string
-  req_qty: string | number
+  req_qty: string | number | null
 }
 
 export interface ItemProc {
@@ -37,8 +37,8 @@ export interface ItemProcessesOut {
 export interface ItemProcInputWrite {
   input_no: number
   item_id: number
-  from_location_id: number
-  req_qty: number
+  from_location_id: number | null
+  req_qty: number | null
 }
 
 export interface ItemProcWrite {

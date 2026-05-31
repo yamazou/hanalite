@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { ItemSearchFilterInput } from '../components/ItemSearchFilterInput'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
 import { ErpScreen } from '../components/erp/ErpScreen'
@@ -12,7 +13,7 @@ import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { formatDate, formatDateTime, formatQty } from '../utils/format'
 import { ColoredItemCode, ColoredItemName } from '../components/ColoredItemText'
 import { toFilterCellValue } from '../utils/gridColumnFilter'
-import { suggestCurrentLots, suggestItems, suggestLocations } from '../utils/searchSuggest'
+import { suggestCurrentLots, suggestLocations } from '../utils/searchSuggest'
 
 type SearchFilters = {
   item: string
@@ -138,13 +139,12 @@ export function CurrentStockPage() {
       {grid.contextMenuElement}
       <ErpSearchPanel>
         <form onSubmit={onSearch} className={searchFormClass}>
-          <ErpSuggestInput
+          <ItemSearchFilterInput
             value={searchInput.item}
             onChange={(item) => setSearchInput((prev) => ({ ...prev, item }))}
             placeholder="Item code - Item name"
             ariaLabel="Item code - Item name"
             fieldClassName="erp-search-field-item"
-            fetchSuggestions={suggestItems}
           />
           <ErpSuggestInput
             value={searchInput.lot}

@@ -7,6 +7,8 @@ export type GridColumnDef = {
   defaultWidth: number
   minWidth?: number
   className?: string
+  /** When true, header label is styled as a required field. */
+  headerRequired?: boolean
 }
 
 type Props = {
@@ -138,7 +140,9 @@ export function ResizableGridTable({
                   </span>
                 )}
                 {!isSelectHeader && (
-                  <span className="erp-th-text">
+                  <span
+                    className={`erp-th-text${col.headerRequired ? ' erp-th-required-label' : ''}`}
+                  >
                     {col.label}
                     {sortMark?.(col.key) ?? ''}
                   </span>

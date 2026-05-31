@@ -24,7 +24,7 @@ export function ErpTitleBarActions({
   saveGridSuccessMessage,
   saveGridNoChangesMessage,
   onRefresh,
-  refreshLabel = 'Refresh',
+  refreshLabel = 'Reload',
 }: Props) {
   const showSaveGrid = showSaveGridButton || onSaveGrid != null
   if (!titleActions && !showSaveGrid && !onRefresh) return null

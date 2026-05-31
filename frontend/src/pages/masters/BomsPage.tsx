@@ -5,44 +5,50 @@ import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterBomEditColumns } from '../../components/erp/masterGridColumns'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
-import { MasterGridToolbar } from '../../components/masters/MasterGridToolbar'
-import { ToolbarFeedback } from '../../components/ToolbarFeedback'
+import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import type { BomCreatePayload } from '../../types/boms'
 import {
   useMasterCatalog,
   useRefreshMasterCatalogAfterSave,
 } from '../../context/MasterCatalogContext'
-import type { ItemSearchRow } from '../../types/masters'
+import { findItemByCd } from '../../utils/draftEdit'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import {
+  bomChildCdFieldPatch,
+  bomParentCdFieldPatch,
+  bomRowSnapshot,
+  bomRowSnapshotsFromEditRows,
   emptyEditBomRow,
   isActiveBomRow,
   isBlankBomRow,
   listRowsToEditBomRows,
+  type BomRowSnapshot,
   type EditBomRow,
 } from '../../utils/bomMasterEdit'
+import {
+  changedActiveRows,
+  deleteSelectedConfirm,
+  savedCountMessage,
+} from '../../utils/gridRowChange'
+import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import { mergeBomImportRows } from '../../utils/bomExcelImport'
 import { ColoredItemName } from '../../components/ColoredItemText'
+import { GridItemDatalistField } from '../../components/GridItemDatalistField'
 import { BomTreePanel } from '../../components/BomTreePanel'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
 import { loadBomTreeForParent, type BomTreeLine } from '../../utils/bomTree'
 
-async function resolveItemCd(cd: string): Promise<ItemSearchRow | null> {
-  const trimmed = cd.trim()
-  if (!trimmed) return null
-  const hits = await api.searchItems(trimmed, 15)
-  const exact = hits.find((h) => h.item_cd.toLowerCase() === trimmed.toLowerCase())
-  return exact ?? hits[0] ?? null
-}
-
 export function BomsPage() {
   const { colorForItemRef } = useItemTypColors()
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
   const [editRows, setEditRows] = useState<EditBomRow[]>([])
-  const { locations } = useMasterCatalog()
+  const [savedSnapshots, setSavedSnapshots] = useState<Map<number, BomRowSnapshot>>(
+    () => new Map()
+  )
+  const { items, locations } = useMasterCatalog()
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -57,14 +63,15 @@ export function BomsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setSuccess(null)
+    setRowError(null)
     try {
       const data = await api.listBoms()
+      const dataRows = listRowsToEditBomRows(data)
+      setSavedSnapshots(bomRowSnapshotsFromEditRows(dataRows))
       setEditRows(
-        ensureTrailingBlankRow(listRowsToEditBomRows(data), isBlankBomRow, () =>
-          emptyEditBomRow()
-        )
+        ensureTrailingBlankRow(dataRows, isBlankBomRow, () => emptyEditBomRow())
       )
-      setSelectedKeys(new Set())
       setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
@@ -222,24 +229,15 @@ export function BomsPage() {
     return [...grid.displayRows, sentinelRow]
   }, [grid.displayRows, sentinelRow])
 
-  const resolveItemNames = async (
-    key: string,
-    field: 'parent' | 'child',
-    cd: string
-  ) => {
-    const item = await resolveItemCd(cd)
-    if (field === 'parent') {
-      updateRow(key, {
-        p_item_nm: item?.item_nm ?? '',
-        p_itemtyp_id: item?.itemtyp_id,
-      })
-    } else {
-      updateRow(key, {
-        c_item_nm: item?.item_nm ?? '',
-        c_itemtyp_id: item?.itemtyp_id,
-      })
-    }
-  }
+  const selectableRows = useMemo(
+    () => selectableDisplayRows(displayRows, isBlankBomRow),
+    [displayRows]
+  )
+
+  const selectedCount = useMemo(
+    () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
+    [selectableRows, selectedKeys]
+  )
 
   const updateRow = (key: string, patch: Partial<EditBomRow>) => {
     setEditRows((rows) =>
@@ -272,7 +270,7 @@ export function BomsPage() {
 
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
-    if (!confirm('Delete selected BOM line(s)?')) return
+    if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'BOM line(s)'))) return
     setSubmitting(true)
     setError(null)
     setSuccess(null)
@@ -301,9 +299,9 @@ export function BomsPage() {
   }
   deleteRowsRef.current = () => void deleteSelected()
 
-  const buildPayload = async (row: EditBomRow): Promise<BomCreatePayload> => {
-    const parent = await resolveItemCd(row.p_item_cd)
-    const child = await resolveItemCd(row.c_item_cd)
+  const buildPayload = (row: EditBomRow): BomCreatePayload => {
+    const parent = findItemByCd(items, row.p_item_cd)
+    const child = findItemByCd(items, row.c_item_cd)
     if (!parent) throw new Error(`Parent item not found: ${row.p_item_cd}`)
     if (!child) throw new Error(`Child item not found: ${row.c_item_cd}`)
     const levelNo = Number(row.level)
@@ -336,20 +334,33 @@ export function BomsPage() {
       return
     }
 
+    const toSave = changedActiveRows(
+      editRows,
+      savedSnapshots,
+      isActiveBomRow,
+      (row) => row.bom_id,
+      bomRowSnapshot
+    )
+    if (toSave.length === 0) {
+      setRowError(null)
+      setSuccess(savedCountMessage(0, 'BOM line'))
+      return
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setRowError(null)
     try {
-      for (const row of active) {
-        const payload = await buildPayload(row)
+      for (const row of toSave) {
+        const payload = buildPayload(row)
         if (row.bom_id != null) {
           await api.updateBom(row.bom_id, payload)
         } else {
           await api.createBom(payload)
         }
       }
-      setSuccess('BOM updated.')
+      setSuccess(savedCountMessage(toSave.length, 'BOM line'))
       refreshMasterCatalog()
       await load()
     } catch (err) {
@@ -373,43 +384,33 @@ export function BomsPage() {
         onRefresh={() => void load()}
         selectColumnHeader={
           <GridRowSelectButtons
-            rowCount={displayRows.length}
-            selectedCount={selectedKeys.size}
+            rowCount={selectableRows.length}
+            selectedCount={selectedCount}
             onSelectAll={() =>
-              setSelectedKeys(new Set(displayRows.map((row) => row.key)))
+              setSelectedKeys(new Set(selectableRows.map((row) => row.key)))
             }
             onClearSelection={() => setSelectedKeys(new Set())}
           />
         }
         toolbarLeft={
-          <MasterGridToolbar
-            submitting={submitting}
-            rowError={rowError}
-            extraLeft={
-              <label className="erp-toolbar-tree-toggle">
-                Tree
-                <input
-                  type="checkbox"
-                  checked={treeOnSelect}
-                  onChange={(e) => handleTreeOnSelectChange(e.target.checked)}
-                />
-              </label>
-            }
-          />
+          <label className="erp-toolbar-tree-toggle">
+            Tree
+            <input
+              type="checkbox"
+              checked={treeOnSelect}
+              onChange={(e) => handleTreeOnSelectChange(e.target.checked)}
+            />
+          </label>
         }
         toolbarRight={
-          <div className="erp-detail-toolbar-actions">
-            <button
-              type="button"
-              className="btn erp-btn erp-btn-search btn-sm"
-              disabled={submitting}
-              onClick={() => void handleSave()}
-            >
-              {submitting ? 'Updating…' : 'Update'}
-            </button>
-            <ToolbarFeedback message={success} type="success" />
-            <ToolbarFeedback message={rowError} type="error" />
-          </div>
+          <MasterGridToolbarActions
+            submitting={submitting}
+            rowError={rowError}
+            statusMessage={success}
+            selectedCount={selectedCount}
+            onSave={() => void handleSave()}
+            onDelete={() => void deleteSelected()}
+          />
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
@@ -437,6 +438,9 @@ export function BomsPage() {
                       case 'rownum':
                         return <GridRowNumCell key={col.key} index={index} />
                       case 'select':
+                        if (isSentinel) {
+                          return <td key={col.key} className="erp-col-check" />
+                        }
                         return (
                           <td key={col.key} className="erp-col-check">
                             <input
@@ -461,21 +465,20 @@ export function BomsPage() {
                       case 'parent_cd':
                         return (
                           <td key={col.key} className="erp-grid-cell-edit">
-                            <input
-                              className="erp-grid-input"
+                            <GridItemDatalistField
+                              mode="cd"
+                              items={items}
+                              listId={`bom-parent-cd-${row.key}`}
+                              value={row.p_item_cd}
+                              dataCellAttr={`${row.key}:parent_cd`}
                               style={itemTextColorStyle(
                                 colorForItemRef({
                                   itemtypId: row.p_itemtyp_id,
                                   itemCd: row.p_item_cd,
                                 })
                               )}
-                              value={row.p_item_cd}
-                              data-bom-grid-cell={`${row.key}:parent_cd`}
-                              onChange={(e) =>
-                                updateRow(row.key, { p_item_cd: e.target.value })
-                              }
-                              onBlur={(e) =>
-                                void resolveItemNames(row.key, 'parent', e.target.value)
+                              onChange={(value) =>
+                                updateRow(row.key, bomParentCdFieldPatch(items, value))
                               }
                               onKeyDown={(e) => handleCellKeyDown(e, row)}
                             />
@@ -495,21 +498,20 @@ export function BomsPage() {
                       case 'child_cd':
                         return (
                           <td key={col.key} className="erp-grid-cell-edit">
-                            <input
-                              className="erp-grid-input"
+                            <GridItemDatalistField
+                              mode="cd"
+                              items={items}
+                              listId={`bom-child-cd-${row.key}`}
+                              value={row.c_item_cd}
+                              dataCellAttr={`${row.key}:child_cd`}
                               style={itemTextColorStyle(
                                 colorForItemRef({
                                   itemtypId: row.c_itemtyp_id,
                                   itemCd: row.c_item_cd,
                                 })
                               )}
-                              value={row.c_item_cd}
-                              data-bom-grid-cell={`${row.key}:child_cd`}
-                              onChange={(e) =>
-                                updateRow(row.key, { c_item_cd: e.target.value })
-                              }
-                              onBlur={(e) =>
-                                void resolveItemNames(row.key, 'child', e.target.value)
+                              onChange={(value) =>
+                                updateRow(row.key, bomChildCdFieldPatch(items, value))
                               }
                               onKeyDown={(e) => handleCellKeyDown(e, row)}
                             />
