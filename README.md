@@ -28,7 +28,7 @@ C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_delivery_drafts.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_rename_pch_receipt_tables.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_rename_m_master_tables.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_item_cd.sql
-C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_boms.sql
+C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_drop_m_boms.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_locations.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_delivery_drafts.sql
 C:\xampp82\mysql\bin\mysql.exe -u root hanalite < sql\schema_inventory_locations.sql
@@ -53,7 +53,7 @@ Swagger: http://127.0.0.1:8000/docs
 | `m_suppliers` | 仕入先 |
 | `m_locations` | ロケーション（倉庫・保管場所） |
 | `m_items` | 品目（`item_cd` 業務コード + 仕入先5件まで） |
-| `m_boms` | BOM（親品目 → 子品目、子必要量） |
+| `m_itemprocs` / `m_itemproc_inputs` | 品目工程（FG → 工程・投入品目） |
 | `m_movetyps` | 移動種別（GR / GI / MV） |
 
 ### トランザクション
@@ -92,7 +92,7 @@ ER 図・API 対応表: [docs/ER_DIAGRAM.md](docs/ER_DIAGRAM.md)
 | **Purchase → Receipt** | Receipt Drafts, New Receipt, Excel Import, PDF Import |
 | **Sales → Delivery** | Delivery Drafts, New Delivery, Excel Import |
 | **Inventory** | Current Stock, GR/GI Movements, Lot Trace, Period Balances |
-| **Masters** | Item Types, Suppliers, Move Types, Locations, Items, BOM |
+| **Masters** | Item Types, Suppliers, Move Types, Locations, Items, Item Processes |
 
 詳細なルート一覧: [frontend/README.md](frontend/README.md)
 

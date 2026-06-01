@@ -16,8 +16,8 @@ MySQL データベース `hanalite` の主要テーブル関係（2026-05 時点
 erDiagram
     m_itemtyps ||--o{ m_items : "itemtyp_id"
     m_suppliers ||--o{ m_items : "supplier1..5"
-    m_items ||--o{ m_boms : "p_item_id (parent)"
-    m_items ||--o{ m_boms : "c_item_id (child)"
+    m_items ||--o{ m_itemprocs : "item_id (FG)"
+    m_itemprocs ||--o{ m_itemproc_inputs : "itemproc_id"
     m_items ||--o{ inv_currents : "item_id"
     m_items ||--o{ inv_grgi : "item_id"
     m_items ||--o{ inv_balances : "item_id"
@@ -50,11 +50,19 @@ erDiagram
         int supplier1_id FK
     }
 
-    m_boms {
-        int bom_id PK
-        int p_item_id FK
-        int c_item_id FK
-        decimal c_req_qty
+    m_itemprocs {
+        int itemproc_id PK
+        int item_id FK
+        int line_no
+        int wip_location_id FK
+        int output_item_id FK
+    }
+
+    m_itemproc_inputs {
+        int itemproc_input_id PK
+        int itemproc_id FK
+        int item_id FK
+        decimal req_qty
     }
 
     pch_receipt_draft {
@@ -125,5 +133,5 @@ inv_grgi (GR) ──► inv_currents
 |----------|----------|
 | `pch_receipt_draft` / `pch_receipt_draft_lines` | `/api/v1/pch-receipt-drafts` |
 | `m_items`, `m_itemtyps`, `m_suppliers`, `m_movetyps` | `/api/v1/masters/*` |
-| `m_boms` | `/api/v1/boms` |
+| `m_itemprocs`, `m_itemproc_inputs` | `/api/v1/masters/items/{id}/processes` |
 | `inv_currents`, `inv_grgi`, `inv_balances` | `/api/v1/inventory/*` |

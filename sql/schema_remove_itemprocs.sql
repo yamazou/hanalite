@@ -1,5 +1,5 @@
 -- Remove item process master and related dependencies
--- Run once on existing DBs that already migrated to BOM-based production lines
+-- Run once on existing DBs that already migrated to Item Process–based production lines
 
 SET NAMES utf8mb4;
 

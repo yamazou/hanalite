@@ -1,16 +1,29 @@
 import type { ReactNode } from 'react'
+import { TreeExpandAllToggle } from './TreeExpandAllToggle'
 
 type ProductionTreeSidebarProps = {
-  title: string
+  expandAll: boolean
+  expandAllDisabled?: boolean
+  onExpandAllChange: (checked: boolean) => void
   children: ReactNode
 }
 
-export function ProductionTreeSidebar({ title, children }: ProductionTreeSidebarProps) {
+export function ProductionTreeSidebar({
+  expandAll,
+  expandAllDisabled = false,
+  onExpandAllChange,
+  children,
+}: ProductionTreeSidebarProps) {
   return (
     <div className="erp-panel erp-tree-panel-sidebar">
       <section className="erp-production-detail-section erp-production-detail-section-tree">
-        <div className="erp-production-detail-section-title" title={title}>
-          <span className="erp-production-detail-section-title-label">{title}</span>
+        <div className="erp-production-detail-section-title">
+          <span className="erp-production-detail-section-title-label">Tree</span>
+          <TreeExpandAllToggle
+            checked={expandAll}
+            disabled={expandAllDisabled}
+            onChange={onExpandAllChange}
+          />
         </div>
         <div className="erp-tree-panel-body">{children}</div>
       </section>

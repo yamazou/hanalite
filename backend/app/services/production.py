@@ -15,7 +15,6 @@ from app.models.production import (
     ProductionOrderOutput,
 )
 from app.schemas.production import (
-    ProductionOrderBomPreview,
     ProductionOrderCreate,
     ProductionOrderInputRead,
     ProductionOrderInputWrite,
@@ -32,6 +31,7 @@ from app.services.itemprocs import (
     ItemProcError,
     collect_itemproc_steps,
     expand_inputs_from_itemprocs,
+    resolve_rm_location_id_for_itemproc_step,
 )
 from app.services.masters import MasterError
 
@@ -123,7 +123,7 @@ def _line_read(
     wip = _get_location_or_error(db, line.wip_location_id)
     process_no = line.line_no
     process_nm = wip.location_cd
-    # Prefer item stored on the line (user edits); fall back to BOM default by step.
+    # Prefer item stored on the line (user edits); fall back to Item Process default by step.
     if line.output_item_id is not None:
         resolved_output_item_id = int(line.output_item_id)
     elif bom_output_item_id is not None:
@@ -261,17 +261,18 @@ def _create_lines_from_itemprocs(
     except ItemProcError as e:
         raise ProductionError(str(e)) from e
     if not proc_rows:
-        raise ProductionError("No item process rows found for selected FG item.")
+        return []
     now = _now()
     lines: list[ProductionOrderLine] = []
     for proc in proc_rows:
-        _get_location_or_error(db, proc.rm_location_id)
+        rm_location_id = resolve_rm_location_id_for_itemproc_step(db, proc, proc_rows)
+        _get_location_or_error(db, rm_location_id)
         _get_location_or_error(db, proc.wip_location_id)
         _get_item_or_error(db, proc.output_item_id)
         line = ProductionOrderLine(
             production_order_id=order.production_order_id,
             line_no=int(proc.line_no),
-            rm_location_id=proc.rm_location_id,
+            rm_location_id=rm_location_id,
             wip_location_id=proc.wip_location_id,
             output_item_id=int(proc.output_item_id),
             planned_qty=Decimal(order.planned_qty),
@@ -541,7 +542,8 @@ def create_order(
         )
     except ItemProcError as e:
         raise ProductionError(str(e)) from e
-    _replace_inputs(db, row, expanded)
+    if expanded:
+        _replace_inputs(db, row, expanded)
     return get_order(db, row.production_order_id)
 
 
@@ -556,24 +558,6 @@ def _order_inputs(db: Session, order_id: int) -> list[ProductionOrderInput]:
             .order_by(ProductionOrderInput.line_no.asc())
         ).all()
     )
-
-
-def _has_any_actual_quantities(db: Session, order_id: int) -> bool:
-    """True when at least one process Actual Qty or input Actual Input Qty was entered."""
-    for ln in _order_lines(db, order_id):
-        if ln.actual_qty is not None and Decimal(ln.actual_qty) > 0:
-            return True
-    for inp in _order_inputs(db, order_id):
-        if Decimal(inp.consume_qty) != Decimal(inp.req_qty):
-            return True
-    return False
-
-
-def _maybe_mark_started(db: Session, order: ProductionOrder) -> None:
-    if order.status not in ("approved", "started"):
-        return
-    if _has_any_actual_quantities(db, order.production_order_id):
-        order.status = "started"
 
 
 def _patch_approved_actuals(
@@ -615,12 +599,13 @@ def _patch_approved_actuals(
 
 def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> ProductionOrderRead:
     row = _active_order_or_error(db, order_id)
-    if row.status in ("approved", "started"):
+    if row.status == "approved":
         if any(
             v is not None
             for v in (
                 payload.production_date,
                 payload.reference_no,
+                payload.parent_item_id,
                 payload.planned_qty,
                 payload.lot,
                 payload.notes,
@@ -633,7 +618,6 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
         if payload.lines is None and payload.inputs is None and payload.actual_qty is None:
             raise ProductionError("No actual quantity fields to update.")
         _patch_approved_actuals(db, row, payload)
-        _maybe_mark_started(db, row)
         row.updated_at = _now()
         db.flush()
         return get_order(db, order_id)
@@ -654,7 +638,31 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
         row.notes = payload.notes.strip() or None
     if payload.status is not None:
         row.status = payload.status
+
+    parent_item_changed = False
+    if payload.parent_item_id is not None:
+        new_parent_id = int(payload.parent_item_id)
+        if new_parent_id != int(row.parent_item_id):
+            if _has_posted_lines(db, row.production_order_id):
+                raise ProductionError("Cannot change Item after a process step is completed.")
+            _get_item_or_error(db, new_parent_id)
+            row.parent_item_id = new_parent_id
+            parent_item_changed = True
+
     row.updated_at = _now()
+
+    if parent_item_changed and payload.lines is None:
+        _replace_lines(db, row, [])
+        _create_lines_from_itemprocs(db, row, int(row.parent_item_id))
+        try:
+            expanded = expand_inputs_from_itemprocs(
+                db,
+                parent_item_id=int(row.parent_item_id),
+                basis_qty=Decimal(row.planned_qty),
+            )
+        except ItemProcError as e:
+            raise ProductionError(str(e)) from e
+        _replace_inputs(db, row, expanded or [])
 
     if payload.lines is not None:
         _replace_lines(db, row, payload.lines)
@@ -665,134 +673,6 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
 
     db.flush()
     return get_order(db, order_id)
-
-
-def reload_order_from_bom(db: Session, order_id: int) -> ProductionOrderRead:
-    """Rebuild process lines and input items from the current BOM."""
-    row = _active_order_or_error(db, order_id)
-    if row.status != "registered":
-        raise ProductionError("Only registered orders can reload from BOM.")
-    if _has_posted_lines(db, order_id):
-        raise ProductionError("Cannot reload from BOM after a process step is completed.")
-    line_writes, expanded = _itemproc_reload_writes(db, row)
-    _replace_lines(db, row, line_writes)
-    _replace_inputs(db, row, expanded)
-    row.updated_at = _now()
-    db.flush()
-    return get_order(db, order_id)
-
-
-def preview_order_from_bom(
-    db: Session,
-    order_id: int,
-    *,
-    planned_qty: Decimal | None = None,
-) -> ProductionOrderBomPreview:
-    """Return BOM-expanded process/input rows without persisting."""
-    row = _active_order_or_error(db, order_id)
-    if row.status != "registered":
-        raise ProductionError("Only registered orders can reload from BOM.")
-    if _has_posted_lines(db, order_id):
-        raise ProductionError("Cannot reload from BOM after a process step is completed.")
-    basis = Decimal(planned_qty) if planned_qty is not None else Decimal(row.planned_qty)
-    line_writes, expanded = _itemproc_reload_writes(db, row, basis_qty=basis)
-    proc_steps = collect_itemproc_steps(db, row.parent_item_id)
-    if not proc_steps:
-        raise ProductionError("No item process rows found for this item.")
-    level_by_line_no = {int(proc.line_no): int(proc.line_no) for proc in proc_steps}
-    itemtyp_fields_by_id = _itemtyp_fields_by_id(db)
-
-    lines: list[ProductionOrderLineRead] = []
-    for idx, line_write in enumerate(line_writes, start=1):
-        rm = _get_location_or_error(db, line_write.rm_location_id)
-        wip = _get_location_or_error(db, line_write.wip_location_id)
-        output_item = _get_item_or_error(db, line_write.output_item_id)
-        lines.append(
-            ProductionOrderLineRead(
-                prd_order_line_id=0,
-                line_no=idx,
-                process_no=idx,
-                process_nm=wip.location_cd,
-                output_item_id=output_item.item_id,
-                output_item_cd=output_item.item_cd,
-                output_item_nm=output_item.item_nm,
-                planned_qty=line_write.planned_qty,
-                rm_location_id=rm.location_id,
-                rm_location_cd=rm.location_cd,
-                wip_location_id=wip.location_id,
-                wip_location_cd=wip.location_cd,
-                status="planned",
-                actual_qty=None,
-                completed_at=None,
-            )
-        )
-
-    input_reads: list[tuple[int, int, int, ProductionOrderInputRead]] = []
-    for inp in expanded:
-        item = _get_item_or_error(db, inp.item_id)
-        cd, itemtyp_nm = itemtyp_fields_by_id.get(int(item.itemtyp_id), ("", ""))
-        typ_sort = _itemtyp_sort_key(cd, itemtyp_nm)
-        from_loc = _get_location_or_error(db, inp.from_location_id)
-        line_no = int(inp.line_no or 1)
-        input_reads.append(
-            (
-                level_by_line_no.get(line_no, 0),
-                typ_sort,
-                line_no,
-                ProductionOrderInputRead(
-                    prd_order_input_id=0,
-                    line_no=line_no,
-                    level=level_by_line_no.get(line_no, 0),
-                    itemtyp_nm=itemtyp_nm,
-                    item_id=inp.item_id,
-                    item_cd=item.item_cd,
-                    item_nm=item.item_nm,
-                    from_location_id=from_loc.location_id,
-                    from_location_cd=from_loc.location_cd,
-                    from_location_nm=from_loc.location_nm,
-                    req_qty=inp.req_qty,
-                    consume_qty=inp.consume_qty,
-                    lot=inp.lot,
-                ),
-            )
-        )
-    input_reads.sort(key=lambda t: (t[0], t[1], t[2]))
-    return ProductionOrderBomPreview(
-        lines=lines,
-        inputs=[read for _, _, _, read in input_reads],
-    )
-
-
-def _itemproc_reload_writes(
-    db: Session,
-    row: ProductionOrder,
-    *,
-    basis_qty: Decimal | None = None,
-) -> tuple[list[ProductionOrderLineWrite], list[ProductionOrderInputWrite]]:
-    proc_steps = collect_itemproc_steps(db, row.parent_item_id)
-    if not proc_steps:
-        raise ProductionError("No item process rows found for this item.")
-    basis = basis_qty if basis_qty is not None else Decimal(row.planned_qty)
-    line_writes = [
-        ProductionOrderLineWrite(
-            line_no=int(proc.line_no),
-            rm_location_id=int(proc.rm_location_id),
-            wip_location_id=int(proc.wip_location_id),
-            output_item_id=int(proc.output_item_id),
-            planned_qty=basis,
-            actual_qty=None,
-        )
-        for proc in proc_steps
-    ]
-    try:
-        expanded = expand_inputs_from_itemprocs(
-            db,
-            parent_item_id=row.parent_item_id,
-            basis_qty=basis,
-        )
-    except ItemProcError as e:
-        raise ProductionError(str(e)) from e
-    return line_writes, expanded
 
 
 def recalculate_inputs(
@@ -824,7 +704,7 @@ def recalculate_inputs(
                 from_loc = proc.rm_location_id
             if from_loc is None:
                 raise ProductionError(
-                    f"Input line {ln.line_no} is missing from location; reload from BOM."
+                    f"Input line {ln.line_no} is missing from location."
                 )
             next_inputs.append(
                 ProductionOrderInputWrite(
@@ -860,10 +740,8 @@ def complete_line(
     db: Session, order_id: int, line_id: int, *, actual_qty: Decimal
 ) -> ProductionOrderRead:
     row = _active_order_or_error(db, order_id)
-    if row.status == "cancelled":
-        raise ProductionError("Cancelled order cannot be posted.")
-    if row.status in ("approved", "started"):
-        raise ProductionError("Ordered/Started orders cannot be posted via process complete.")
+    if row.status == "approved":
+        raise ProductionError("Ordered orders cannot be posted via process complete.")
     if row.status != "registered":
         raise ProductionError("Only registered orders can post process steps.")
 
@@ -1095,54 +973,17 @@ def approve_order(db: Session, order_id: int) -> ProductionOrderRead:
     return get_order(db, order_id)
 
 
-def _reset_actual_quantities(db: Session, order: ProductionOrder) -> None:
-    """Clear all Actual Qty / Actual Input Qty entries (Started → Ordered)."""
-    now = _now()
-    order.actual_qty = None
-    for line in _order_lines(db, order.production_order_id):
-        line.actual_qty = None
-        line.updated_at = now
-    for inp in _order_inputs(db, order.production_order_id):
-        inp.consume_qty = Decimal(inp.req_qty)
-        inp.updated_at = now
-
-
 def cancel_order(db: Session, order_id: int) -> ProductionOrderRead:
+    """Reverse an ordered (approved) production order back to registered."""
     row = _active_order_or_error(db, order_id)
-    if row.status == "cancelled":
-        raise ProductionError("Order is already cancelled.")
+    if row.status != "approved":
+        raise ProductionError("Only ordered orders can be reversed to registered.")
 
     now = _now()
-    if row.status == "started":
-        _reset_actual_quantities(db, row)
-        row.status = "approved"
-        row.cancelled_at = None
-    elif row.status == "approved":
-        _reverse_all_posted_steps(db, row, actual_at=now)
-        row.status = "registered"
-        row.approved_at = None
-        row.actual_qty = None
-        row.cancelled_at = None
-    elif row.status == "registered":
-        if _has_posted_lines(db, order_id):
-            _reverse_all_posted_steps(db, row, actual_at=now)
-        row.status = "cancelled"
-        row.cancelled_at = now
-    else:
-        raise ProductionError(f"Order cannot be cancelled (current: {row.status}).")
-
-    row.updated_at = now
-    db.flush()
-    return get_order(db, order_id)
-
-
-def restore_order(db: Session, order_id: int) -> ProductionOrderRead:
-    row = _active_order_or_error(db, order_id)
-    if row.status != "cancelled":
-        raise ProductionError("Only cancelled orders can be restored to registered.")
-
-    now = _now()
+    _reverse_all_posted_steps(db, row, actual_at=now)
     row.status = "registered"
+    row.approved_at = None
+    row.actual_qty = None
     row.cancelled_at = None
     row.updated_at = now
     db.flush()
@@ -1151,10 +992,12 @@ def restore_order(db: Session, order_id: int) -> ProductionOrderRead:
 
 def delete_order(db: Session, order_id: int) -> None:
     row = _active_order_or_error(db, order_id)
-    if row.status != "cancelled":
-        raise ProductionError("Only cancelled orders can be deleted.")
+    if row.status != "registered":
+        raise ProductionError("Only registered orders can be deleted.")
 
     now = _now()
+    if _has_posted_lines(db, order_id):
+        _reverse_all_posted_steps(db, row, actual_at=now)
     for line in _order_lines(db, order_id):
         line.deleted_at = now
         line.updated_at = now

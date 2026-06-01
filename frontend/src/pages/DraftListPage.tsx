@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
-import { useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
+import { useAppNavigate, useTabPanelRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ItemSearchFilterInput } from '../components/ItemSearchFilterInput'
 import { ErpSuggestInput } from '../components/ErpSuggestInput'
 import { ErpScreen } from '../components/erp/ErpScreen'
+import { ListDetailSplitLayout } from '../components/ListDetailSplitLayout'
 import { DraftDetailPanel, type LineGridLayoutApi } from '../components/DraftDetailPanel'
 import { DraftHeaderEditCell } from '../components/DraftHeaderEditCells'
 import { useDraftEdit } from '../hooks/useDraftEdit'
@@ -12,6 +13,7 @@ import { SearchDateInput, SearchFilterField } from '../components/erp/SearchFilt
 import { ResizableGridTable, type GridColumnDef } from '../components/ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
+import { useProductionPanelSplitLayout } from '../hooks/useProductionPanelSplitLayout'
 import { getDraftListFilterValue } from '../utils/draftGridSort'
 import {
   APPROVE_ITEM_CD_REQUIRED_MSG,
@@ -62,7 +64,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   const listSavesLinesOnly = true
   const sourceLabel = sourceLabelByVariant[variant]
   const navigate = useAppNavigate()
-  const { search } = useAppViewRoute()
+  const { search } = useTabPanelRoute()
   const [status, setStatus] = useState<'' | DraftStatus>('')
   const [searchInput, setSearchInput] = useState<SearchFilters>(emptySearchFilters)
   const [appliedSearch, setAppliedSearch] = useState<SearchFilters>(emptySearchFilters)
@@ -288,12 +290,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
   }, [copy])
 
   const headerGridId = `${variant}-header-v5`
-
-  const handleSaveGrid = () => {
-    headerLayout.saveLayout()
-    lineGridLayoutApi?.saveLayout()
-    setGridLayoutTick((n) => n + 1)
-  }
+  const panelSplitLayoutId = `${variant}-list-panels-v1`
+  const panelSplit = useProductionPanelSplitLayout(panelSplitLayoutId)
 
   const handleSaveDraft = async () => {
     setError(null)
@@ -364,7 +362,15 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
     rowCount: headerGrid.displayRows.length,
   })
 
-  const gridLayoutDirty = headerLayout.isDirty || (lineGridLayoutApi?.isDirty ?? false)
+  const handleSaveGrid = () => {
+    headerLayout.saveLayout()
+    lineGridLayoutApi?.saveLayout()
+    panelSplit.saveLayout()
+    setGridLayoutTick((n) => n + 1)
+  }
+
+  const gridLayoutDirty =
+    headerLayout.isDirty || (lineGridLayoutApi?.isDirty ?? false) || panelSplit.isDirty
 
   useEffect(() => {
     headerGrid.onLayoutReady(headerLayout)
@@ -465,6 +471,7 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
       error={error}
       success={message}
       title={copy.listTitle}
+      className="erp-screen-stacked"
       onRefresh={() => refreshDetail()}
       showSaveGridButton
       onSaveGrid={handleSaveGrid}
@@ -550,7 +557,11 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
         </div>
       </div>
 
-      <div className="erp-panel erp-panel-grow">
+      <ListDetailSplitLayout
+        listHeightRatio={panelSplit.layout.listHeightRatio}
+        onListHeightRatioChange={panelSplit.setListHeightRatio}
+        list={
+      <div className="erp-panel erp-panel-grow erp-panel-list-header">
         <div className="erp-panel-content">
         <div className="erp-toolbar">
           <div className="erp-toolbar-left">
@@ -671,7 +682,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
         )}
         </div>
       </div>
-
+        }
+        detail={
       <div className="erp-panel erp-panel-grow erp-detail-panel">
         <div className="erp-panel-body erp-panel-content">
           <DraftDetailPanel
@@ -686,6 +698,8 @@ export function DraftListPage({ variant = 'receipt' }: Props) {
           />
         </div>
       </div>
+        }
+      />
     </ErpScreen>
   )
 }

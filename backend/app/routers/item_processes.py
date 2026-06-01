@@ -4,12 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.itemprocs import ItemProcessFinalItemRead, ItemProcessesOut, ItemProcessesSave
+from app.schemas.itemprocs import (
+    ItemProcessFinalItemRead,
+    ItemProcessFinalItemsSave,
+    ItemProcessesOut,
+    ItemProcessesSave,
+)
 from app.services.itemprocs import (
     ItemProcError,
     get_item_processes,
-    import_from_bom,
     list_item_process_final_items,
+    save_item_process_final_items,
     save_item_processes,
 )
 
@@ -23,6 +28,20 @@ def _handle_error(e: ItemProcError) -> HTTPException:
 @router.get("/processes/final-items", response_model=list[ItemProcessFinalItemRead])
 def api_list_item_process_final_items(db: Annotated[Session, Depends(get_db)]):
     return list_item_process_final_items(db)
+
+
+@router.put("/processes/final-items", response_model=list[ItemProcessFinalItemRead])
+def api_save_item_process_final_items(
+    payload: ItemProcessFinalItemsSave,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        rows = save_item_process_final_items(db, payload)
+        db.commit()
+        return rows
+    except ItemProcError as e:
+        db.rollback()
+        raise _handle_error(e) from e
 
 
 @router.get("/{item_id}/processes", response_model=ItemProcessesOut)
@@ -48,15 +67,3 @@ def api_save_item_processes(
         raise _handle_error(e) from e
 
 
-@router.post("/{item_id}/processes/import-from-bom", response_model=ItemProcessesOut)
-def api_import_item_processes_from_bom(
-    item_id: int,
-    db: Annotated[Session, Depends(get_db)],
-):
-    try:
-        row = import_from_bom(db, item_id)
-        db.commit()
-        return row
-    except ItemProcError as e:
-        db.rollback()
-        raise _handle_error(e) from e

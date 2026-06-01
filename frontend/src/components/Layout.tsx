@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useLocation, useNavigate, useRoutes, type Location } from 'react-router-dom'
 import { appRouteObjects } from '../appRoutes'
-import { AppShellProvider } from '../context/AppNavigateContext'
+import { AppShellProvider, TabPanelRouteProvider } from '../context/AppNavigateContext'
 import { ItemTypColorProvider } from '../context/ItemTypColorContext'
 import { MasterCatalogProvider } from '../context/MasterCatalogContext'
 import {
@@ -10,7 +10,6 @@ import {
   parseAppRoute,
   tabRouteKey,
 } from '../utils/appRoute'
-import { SHOW_BOM_MASTER } from '../config/features'
 
 type NavLink = { to: string; label: string }
 /** `to` = pathname (tab key); `search` = query string including `?` when set. */
@@ -76,8 +75,7 @@ const navGroups: NavGroup[] = [
     id: 'Production',
     label: 'Production',
     items: [
-      { to: '/production/orders', label: 'Production List' },
-      { to: '/production/new', label: 'Production Order Entry' },
+      { to: '/production/orders', label: 'Production Order List' },
       { to: '/production/import', label: 'Excel Import' },
     ],
   },
@@ -98,7 +96,6 @@ const navGroups: NavGroup[] = [
       { to: '/masters/items', label: 'Items' },
       { to: '/masters/locations', label: 'Locations' },
       { to: '/masters/item-processes', label: 'Item Processes' },
-      ...(SHOW_BOM_MASTER ? [{ to: '/masters/boms', label: 'BOM' } as NavLink] : []),
       { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/movetyps', label: 'Move Types' },
       { to: '/masters/suppliers', label: 'Suppliers' },
@@ -198,7 +195,18 @@ function normalizeOpenTab(tab: OpenTab): OpenTab {
 
 function TabPanelRoutes({ tab }: { tab: OpenTab }): ReactElement | null {
   const location = useMemo(() => tabPanelLocation(tab), [tab.to, tab.search])
-  return useRoutes(appRouteObjects, location)
+  const panelRoute = useMemo(
+    (): { pathname: string; search: string } => ({
+      pathname: tab.to,
+      search: tab.search,
+    }),
+    [tab.to, tab.search]
+  )
+  return (
+    <TabPanelRouteProvider route={panelRoute}>
+      {useRoutes(appRouteObjects, location)}
+    </TabPanelRouteProvider>
+  )
 }
 
 export function Layout() {
@@ -531,7 +539,7 @@ export function Layout() {
             </button>
           </div>
           <div aria-hidden="true">&nbsp;</div>
-          <div>hanalite v1.0 powered by PT.BHI</div>
+          <div>hanalite v1.0 powered by BHI</div>
         </div>
       </aside>
       <main className="main">

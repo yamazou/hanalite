@@ -1,3 +1,5 @@
+import type { MouseEvent } from 'react'
+
 type Props = {
   rowCount: number
   selectedCount: number
@@ -23,7 +25,8 @@ export function GridRowSelectButtons({
   const allSelected = rowCount > 0 && selectedCount >= rowCount
   const title = allSelected ? clearTitle : selectAllTitle
 
-  const handleClick = () => {
+  const handleClick = (event: MouseEvent) => {
+    event.stopPropagation()
     if (allSelected) onClearSelection()
     else onSelectAll()
   }

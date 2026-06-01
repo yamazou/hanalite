@@ -1,6 +1,6 @@
-import type { CustomerMaster, ItemListRow, ItemTyp } from '../types/masters'
+import type { CustomerMaster, ItemListRow, ItemTyp, LocationMaster } from '../types/masters'
 import type { ItemProcessesOut, ItemProcessesSave } from '../types/itemprocs'
-import { buildRecordSnapshotMap } from './gridRowChange'
+import { buildRecordSnapshotMap, isChangedActiveRow } from './gridRowChange'
 import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
 import { itemTypDropdownLabel } from './itemTypDisplay'
 import {
@@ -10,7 +10,6 @@ import {
   emptyEditInputRow,
   inputRowsWithSingleTrailingBlank,
   isBlankInputRow,
-  resolveRmLocationForProcessWip,
   type EditInputRow,
   type EditProcessRow,
 } from './productionEdit'
@@ -136,6 +135,23 @@ export function finalItemRowSnapshotsFromEditRows(
   )
 }
 
+export function isOutputItemListDirty(
+  rows: EditFinalItemRow[],
+  savedSnapshots: Map<number, FinalItemRowSnapshot>
+): boolean {
+  const active = rows.filter(isActiveFinalItemRow)
+  if (active.length !== savedSnapshots.size) return true
+  return active.some((row) =>
+    isChangedActiveRow(
+      row,
+      isActiveFinalItemRow,
+      (r) => (r.item_id !== '' ? Number(r.item_id) : undefined),
+      finalItemRowSnapshot,
+      savedSnapshots
+    )
+  )
+}
+
 export function finalItemListToEditRows(
   items: Pick<
     EditFinalItemRow,
@@ -233,7 +249,7 @@ export function itemProcessesToEditProcessRows(processes: ItemProcessesOut['proc
     line_no: proc.line_no,
     wip_location_id: proc.wip_location_id,
     wip_location_cd: proc.wip_location_cd,
-    rm_location_id: proc.rm_location_id,
+    rm_location_id: '',
     output_item_id: proc.output_item_id,
     output_item_cd: proc.output_item_cd,
     output_item_nm: proc.output_item_nm,
@@ -268,36 +284,107 @@ export function isBlankItemProcessRow(row: EditProcessRow): boolean {
   return row.wip_location_id === ''
 }
 
+/** First process step issues from RM location; later steps from previous WIP. */
+export function resolveItemProcessInputFromLocationId(
+  lineNo: number,
+  processRows: EditProcessRow[],
+  locations: LocationMaster[]
+): number | '' {
+  const activeProcesses = processRows
+    .filter((row) => !isBlankItemProcessRow(row))
+    .sort((a, b) => a.line_no - b.line_no)
+  const idx = activeProcesses.findIndex((p) => p.line_no === lineNo)
+  if (idx <= 0) {
+    const rm = locations.find((loc) => loc.location_type === 'RM')
+    return rm?.location_id ?? ''
+  }
+  const prev = activeProcesses[idx - 1]
+  return prev.wip_location_id !== '' ? prev.wip_location_id : ''
+}
+
+export function resolveItemProcessInputFromLocationCd(
+  lineNo: number,
+  processRows: EditProcessRow[],
+  locations: LocationMaster[]
+): string {
+  const locId = resolveItemProcessInputFromLocationId(lineNo, processRows, locations)
+  if (locId === '') return ''
+  return locations.find((loc) => loc.location_id === locId)?.location_cd ?? ''
+}
+
 /** Trailing row until item_id is resolved (partial Item Code/Name typing stays on sentinel row). */
 export function isBlankItemProcessInputRow(row: EditInputRow): boolean {
-  return (
-    row.item_id === '' &&
-    row.from_location_id === '' &&
-    !String(row.req_qty ?? '').trim()
-  )
+  return row.item_id === '' && !String(row.req_qty ?? '').trim()
 }
 
 export function isActiveItemProcessInputRow(row: EditInputRow): boolean {
   return row.item_id !== ''
 }
 
-/** RM location: previous step WIP, row value, first input From Location, or WIP (master without inputs). */
-export function resolveItemProcessRmLocation(
-  row: EditProcessRow,
-  processRows: EditProcessRow[],
+export function isCompleteItemProcessInputRow(row: EditInputRow): boolean {
+  return row.item_id !== '' && editInputText(row.req_qty).trim() !== ''
+}
+
+/** Fill item_id / item_nm from Items master when Item Code matches. */
+export function resolveItemProcessInputRowsFromCatalog(
+  items: ItemListRow[],
   inputRows: EditInputRow[]
-): number | '' {
-  const chained = resolveRmLocationForProcessWip(row.wip_location_id, row.key, processRows)
-  if (chained !== '') return chained
-  if (row.rm_location_id !== '') return row.rm_location_id
-  const lineInputs = inputRows
-    .filter((inp) => inp.line_no === row.line_no && isActiveItemProcessInputRow(inp))
-    .sort((a, b) => a.key.localeCompare(b.key))
-  const fromInput = lineInputs.find((inp) => inp.from_location_id !== '')
-  const fromId = fromInput?.from_location_id
-  if (fromId !== '' && fromId != null) return fromId
-  // Item Process master may omit inputs; Production Order can define them later.
-  return row.wip_location_id !== '' ? row.wip_location_id : ''
+): EditInputRow[] {
+  return inputRows.map((row) => {
+    if (row.item_id !== '') return row
+    const cd = editInputText(row.item_cd).trim()
+    if (!cd) return row
+    const lower = cd.toLowerCase()
+    const match = items.find((item) => item.item_cd.trim().toLowerCase() === lower)
+    if (!match) return row
+    return {
+      ...row,
+      item_id: match.item_id,
+      item_cd: match.item_cd,
+      item_nm: match.item_nm,
+    }
+  })
+}
+
+/** Returns a user-facing reason when inputs are missing or incomplete. */
+export function itemProcessInputSaveValidationMessage(
+  processRows: EditProcessRow[],
+  inputRows: EditInputRow[],
+  items: ItemListRow[],
+  options?: { requireInputsWhenProcessesExist?: boolean }
+): string | null {
+  const activeProcesses = processRows
+    .filter((row) => !isBlankItemProcessRow(row))
+    .sort((a, b) => a.line_no - b.line_no)
+  if (activeProcesses.length === 0) return null
+
+  const processLabel = (lineNo: number) => {
+    const proc = activeProcesses.find((p) => p.line_no === lineNo)
+    const wip = proc?.wip_location_cd?.trim()
+    return wip ? `Process line ${lineNo} (${wip})` : `Process line ${lineNo}`
+  }
+
+  const resolvedInputs = resolveItemProcessInputRowsFromCatalog(items, inputRows)
+  const attempted = resolvedInputs.filter((row) => !isBlankItemProcessInputRow(row))
+  const completeInputs = resolvedInputs.filter((row) => isCompleteItemProcessInputRow(row))
+
+  for (const row of attempted) {
+    if (isCompleteItemProcessInputRow(row)) continue
+    const cd = editInputText(row.item_cd).trim()
+    if (row.item_id === '' && cd) {
+      return `${processLabel(row.line_no)}: item code "${cd}" was not found in Items master.`
+    }
+    if (row.item_id !== '' && !editInputText(row.req_qty).trim()) {
+      return `${processLabel(row.line_no)}: enter Req Qty for ${cd || 'input item'} before saving.`
+    }
+    return `${processLabel(row.line_no)}: complete Item Code and Req Qty before saving.`
+  }
+
+  if (options?.requireInputsWhenProcessesExist && completeInputs.length === 0) {
+    return 'Enter at least one input item before saving.'
+  }
+
+  return null
 }
 
 function isActiveItemProcessRow(row: EditProcessRow): boolean {
@@ -307,6 +394,7 @@ function isActiveItemProcessRow(row: EditProcessRow): boolean {
 function resolveItemProcessOutputItemId(
   proc: EditProcessRow,
   activeRows: EditProcessRow[],
+  inputRows: EditInputRow[],
   parentItemId: number
 ): number {
   if (proc.output_item_id !== '') return Number(proc.output_item_id)
@@ -314,9 +402,61 @@ function resolveItemProcessOutputItemId(
   const idx = sorted.findIndex((row) => row.key === proc.key)
   if (idx < 0) return parentItemId
   if (idx === sorted.length - 1) return parentItemId
-  const prev = sorted[idx - 1]
-  if (prev.output_item_id !== '') return Number(prev.output_item_id)
+
+  const nextProc = sorted[idx + 1]
+  const nextInputs = inputRows
+    .filter(
+      (row) => row.line_no === nextProc.line_no && isActiveItemProcessInputRow(row)
+    )
+    .sort((a, b) => a.key.localeCompare(b.key))
+  if (nextInputs.length > 0) return Number(nextInputs[0].item_id)
+
+  if (idx > 0) {
+    const prev = sorted[idx - 1]
+    if (prev.output_item_id !== '') return Number(prev.output_item_id)
+  }
+
+  const lineInputs = inputRows
+    .filter((row) => row.line_no === proc.line_no && isActiveItemProcessInputRow(row))
+    .sort((a, b) => a.key.localeCompare(b.key))
+  if (lineInputs.length > 0) return Number(lineInputs[0].item_id)
+
   return parentItemId
+}
+
+/** Normalize all process lines, resolve item ids, and infer output items before save. */
+export function prepareItemProcessDraftForSave(
+  processRows: EditProcessRow[],
+  inputRows: EditInputRow[],
+  parentItemId: number,
+  items: ItemListRow[]
+): { processRows: EditProcessRow[]; inputRows: EditInputRow[] } {
+  const lineNos = processRows
+    .filter((row) => !isBlankItemProcessRow(row))
+    .map((row) => row.line_no)
+  const normalized = ensureItemProcessEditRows(processRows, inputRows, lineNos)
+  const resolvedInputs = resolveItemProcessInputRowsFromCatalog(items, normalized.inputRows)
+  const activeProcesses = normalized.processRows.filter((row) => !isBlankItemProcessRow(row))
+
+  const processWithOutput = normalized.processRows.map((proc) => {
+    if (isBlankItemProcessRow(proc)) return proc
+    const outputItemId = resolveItemProcessOutputItemId(
+      proc,
+      activeProcesses,
+      resolvedInputs,
+      parentItemId
+    )
+    if (proc.output_item_id !== '') return proc
+    const item = items.find((entry) => entry.item_id === outputItemId)
+    return {
+      ...proc,
+      output_item_id: outputItemId,
+      output_item_cd: item?.item_cd ?? proc.output_item_cd,
+      output_item_nm: item?.item_nm ?? proc.output_item_nm,
+    }
+  })
+
+  return { processRows: processWithOutput, inputRows: resolvedInputs }
 }
 
 export function editRowsToItemProcessesSave(
@@ -328,21 +468,22 @@ export function editRowsToItemProcessesSave(
     .filter((row) => isActiveItemProcessRow(row))
     .sort((a, b) => a.line_no - b.line_no)
   const processes = activeProcesses.map((proc) => {
-      const rmId = resolveItemProcessRmLocation(proc, processRows, inputRows)
-      const outputItemId = resolveItemProcessOutputItemId(proc, activeProcesses, parentItemId)
+      const outputItemId = resolveItemProcessOutputItemId(
+        proc,
+        activeProcesses,
+        inputRows,
+        parentItemId
+      )
       const inputs = inputRows
         .filter((row) => row.line_no === proc.line_no && isActiveItemProcessInputRow(row))
         .map((inp, index) => ({
           input_no: index + 1,
           item_id: Number(inp.item_id),
-          from_location_id:
-            inp.from_location_id !== '' ? Number(inp.from_location_id) : null,
           req_qty: editInputText(inp.req_qty).trim() ? Number(inp.req_qty) : null,
         }))
       return {
         line_no: proc.line_no,
         wip_location_id: Number(proc.wip_location_id),
-        rm_location_id: Number(rmId),
         output_item_id: outputItemId,
         inputs,
       }
@@ -355,12 +496,10 @@ export function itemProcessesSaveFromOut(data: ItemProcessesOut): ItemProcessesS
     processes: data.processes.map((proc) => ({
       line_no: proc.line_no,
       wip_location_id: proc.wip_location_id,
-      rm_location_id: proc.rm_location_id,
       output_item_id: proc.output_item_id,
       inputs: proc.inputs.map((inp) => ({
         input_no: inp.input_no,
         item_id: inp.item_id,
-        from_location_id: inp.from_location_id,
         req_qty: inp.req_qty != null ? Number(inp.req_qty) : null,
       })),
     })),
@@ -374,7 +513,6 @@ export function serializeItemProcessesSave(payload: ItemProcessesSave): string {
       .map((proc) => ({
         line_no: proc.line_no,
         wip_location_id: proc.wip_location_id,
-        rm_location_id: proc.rm_location_id,
         output_item_id: proc.output_item_id,
         inputs: [...proc.inputs].sort((a, b) => a.input_no - b.input_no),
       })),
@@ -394,7 +532,6 @@ export function serializeItemProcessEditDraft(
     .map((row) => ({
       line_no: row.line_no,
       wip_location_id: row.wip_location_id,
-      rm_location_id: row.rm_location_id,
       output_item_id: row.output_item_id,
     }))
   const inputs = inputRows
@@ -405,7 +542,6 @@ export function serializeItemProcessEditDraft(
       item_id: row.item_id,
       item_cd: editInputText(row.item_cd).trim(),
       item_nm: editInputText(row.item_nm).trim(),
-      from_location_id: row.from_location_id,
       req_qty: editInputText(row.req_qty).trim(),
     }))
   return JSON.stringify({ item_id: itemId, processes, inputs })

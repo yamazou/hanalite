@@ -16,9 +16,6 @@ export interface ItemProc {
   wip_location_id: number
   wip_location_cd: string
   wip_location_nm: string
-  rm_location_id: number
-  rm_location_cd: string
-  rm_location_nm: string
   output_item_id: number
   output_item_cd: string
   output_item_nm: string
@@ -37,14 +34,12 @@ export interface ItemProcessesOut {
 export interface ItemProcInputWrite {
   input_no: number
   item_id: number
-  from_location_id: number | null
   req_qty: number | null
 }
 
 export interface ItemProcWrite {
   line_no: number
   wip_location_id: number
-  rm_location_id: number
   output_item_id: number
   inputs: ItemProcInputWrite[]
 }
@@ -59,4 +54,8 @@ export interface ItemProcessFinalItem {
   item_nm: string
   itemtyp_cd: string
   customer_cd: string
+}
+
+export interface ItemProcessFinalItemsSave {
+  item_ids: number[]
 }

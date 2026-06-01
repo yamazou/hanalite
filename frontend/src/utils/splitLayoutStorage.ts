@@ -1,11 +1,15 @@
 export type StoredPanelSplitLayout = {
   processHeightRatio: number
   treeWidthRatio: number
+  outputItemHeightRatio: number
+  listHeightRatio: number
 }
 
 export const DEFAULT_PANEL_SPLIT_LAYOUT: StoredPanelSplitLayout = {
   processHeightRatio: 0.45,
   treeWidthRatio: 0.38,
+  outputItemHeightRatio: 0.35,
+  listHeightRatio: 0.38,
 }
 
 export function splitLayoutStorageKey(layoutId: string): string {
@@ -30,6 +34,10 @@ export function loadPanelSplitLayout(
         parsed.processHeightRatio ?? defaults.processHeightRatio
       ),
       treeWidthRatio: clampRatio(parsed.treeWidthRatio ?? defaults.treeWidthRatio),
+      outputItemHeightRatio: clampRatio(
+        parsed.outputItemHeightRatio ?? defaults.outputItemHeightRatio
+      ),
+      listHeightRatio: clampRatio(parsed.listHeightRatio ?? defaults.listHeightRatio),
     }
   } catch {
     return { ...defaults }
@@ -49,6 +57,8 @@ export function panelSplitLayoutsEqual(
 ): boolean {
   return (
     a.processHeightRatio === b.processHeightRatio &&
-    a.treeWidthRatio === b.treeWidthRatio
+    a.treeWidthRatio === b.treeWidthRatio &&
+    a.outputItemHeightRatio === b.outputItemHeightRatio &&
+    a.listHeightRatio === b.listHeightRatio
   )
 }

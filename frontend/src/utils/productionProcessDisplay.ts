@@ -14,7 +14,7 @@ export type ProcessLineView = {
   lineNos: number[]
 }
 
-/** One Process grid row per BOM step (no merge by location code). */
+/** One Process grid row per item process step (no merge by location code). */
 export function processLinesFromDetail(detail: ProductionOrderDetail): ProcessLineView[] {
   return detail.lines.map((ln) => ({
     key: String(ln.prd_order_line_id),

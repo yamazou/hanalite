@@ -9,9 +9,7 @@ from app.database import Base
 ProductionStatus = Enum(
     "registered",
     "approved",
-    "started",
     "completed",
-    "cancelled",
     name="production_status",
 )
 

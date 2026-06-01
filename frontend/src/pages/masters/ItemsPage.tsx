@@ -31,6 +31,7 @@ import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
 import {
   deleteSelectedConfirm,
+  removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import {
@@ -396,6 +397,17 @@ export function ItemsPage() {
     commitSentinelRowOnEnter(row)
   }
 
+  const removeSelectedFromGrid = () => {
+    if (selectedKeys.size === 0) return
+    setEditRows((rows) =>
+      removeSelectedGridRows(rows, selectedKeys, isBlankItemRow, () =>
+        emptyEditItemRow(trailingRowItemtypId())
+      )
+    )
+    setSelectedKeys(new Set())
+  }
+  deleteRowsRef.current = removeSelectedFromGrid
+
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item(s)'))) return
@@ -405,15 +417,12 @@ export function ItemsPage() {
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.item_id != null)
-      const toDrop = new Set(selected.map((row) => row.key))
       for (const row of toDelete) {
         await api.deleteItem(row.item_id!)
       }
       setEditRows((rows) =>
-        ensureTrailingBlankRow(
-          rows.filter((row) => !toDrop.has(row.key)),
-          isBlankItemRow,
-          () => emptyEditItemRow(trailingRowItemtypId())
+        removeSelectedGridRows(rows, selectedKeys, isBlankItemRow, () =>
+          emptyEditItemRow(trailingRowItemtypId())
         )
       )
       setSelectedKeys(new Set())
@@ -429,7 +438,6 @@ export function ItemsPage() {
       setSubmitting(false)
     }
   }
-  deleteRowsRef.current = () => void deleteSelected()
 
   const handleSave = async () => {
     const active = editRows.filter(isActiveItemRow)
@@ -474,7 +482,7 @@ export function ItemsPage() {
       }
       setSuccess(savedCountMessage(toSave.length, 'item'))
       await load()
-      refreshMasterCatalog()
+      await refreshMasterCatalog()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {

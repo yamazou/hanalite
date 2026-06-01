@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS prd_orders (
   CONSTRAINT fk_prd_orders_parent FOREIGN KEY (parent_item_id) REFERENCES m_items (item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Process steps (from BOM) per order
+-- Process steps (from Item Process master) per order
 CREATE TABLE IF NOT EXISTS prd_order_lines (
   prd_order_line_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   production_order_id INT UNSIGNED NOT NULL,

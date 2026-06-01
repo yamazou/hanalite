@@ -1,7 +1,9 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Alert } from '../Alert'
 import { ErpPanelTitleBar } from './ErpPanelTitleBar'
 import { ErpTitleBarActions } from './ErpTitleBarActions'
+
+const FEEDBACK_AUTO_HIDE_MS = 4000
 
 type Props = {
   children: ReactNode
@@ -12,8 +14,10 @@ type Props = {
   title?: string
   titleActions?: ReactNode
   /** Reload from server; discards unsaved grid edits on that screen. */
-  onRefresh?: () => void
+  onRefresh?: () => void | Promise<void>
   refreshLabel?: string
+  refreshSuccessMessage?: string
+  refreshDisabled?: boolean
   showSaveGridButton?: boolean
   onSaveGrid?: () => void
   saveGridIsDirty?: boolean
@@ -32,6 +36,8 @@ export function ErpScreen({
   titleActions,
   onRefresh,
   refreshLabel,
+  refreshSuccessMessage,
+  refreshDisabled,
   showSaveGridButton,
   onSaveGrid,
   saveGridIsDirty,
@@ -40,7 +46,18 @@ export function ErpScreen({
   saveGridSuccessMessage,
   saveGridNoChangesMessage,
 }: Props) {
-  const hasMessages = Boolean(error || success)
+  const [feedbackHidden, setFeedbackHidden] = useState(false)
+
+  useEffect(() => {
+    setFeedbackHidden(false)
+    if (!error && !success) return
+    const timer = window.setTimeout(() => setFeedbackHidden(true), FEEDBACK_AUTO_HIDE_MS)
+    return () => window.clearTimeout(timer)
+  }, [error, success])
+
+  const displayError = error && !feedbackHidden ? error : null
+  const displaySuccess = success && !feedbackHidden ? success : null
+  const hasMessages = Boolean(displayError || displaySuccess)
   const hasTitleBarActions = Boolean(
     titleActions || showSaveGridButton || onSaveGrid || onRefresh
   )
@@ -48,12 +65,6 @@ export function ErpScreen({
 
   return (
     <div className={`erp-screen${className ? ` ${className}` : ''}`}>
-      {hasMessages && (
-        <div className="erp-screen-messages" aria-live="polite">
-          {error && <Alert type="error" message={error} />}
-          {success && <Alert type="success" message={success} />}
-        </div>
-      )}
       {showTitleBar ? (
         <ErpPanelTitleBar title={title ?? ''}>
           {hasTitleBarActions ? (
@@ -68,9 +79,17 @@ export function ErpScreen({
               saveGridNoChangesMessage={saveGridNoChangesMessage}
               onRefresh={onRefresh}
               refreshLabel={refreshLabel}
+              refreshSuccessMessage={refreshSuccessMessage}
+              refreshDisabled={refreshDisabled}
             />
           ) : null}
         </ErpPanelTitleBar>
+      ) : null}
+      {hasMessages ? (
+        <div className="erp-screen-messages" aria-live="polite">
+          {displayError && <Alert type="error" message={displayError} />}
+          {displaySuccess && <Alert type="success" message={displaySuccess} />}
+        </div>
       ) : null}
       {children}
     </div>

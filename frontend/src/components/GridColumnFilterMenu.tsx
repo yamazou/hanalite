@@ -1,25 +1,44 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { GridFilterAnchorRect } from '../utils/gridFilterAnchor'
+import {
+  activateGridColumnFilter,
+  deactivateGridColumnFilter,
+} from '../utils/gridFilterCoordinator'
+import {
+  computeFilterMenuStyle,
+  getScrollableAncestors,
+  isValidFilterAnchorRect,
+  readAnchorRect,
+  resolveFilterAnchorButton,
+} from '../utils/gridFilterAnchor'
 
 type Props = {
   columnLabel: string
+  filterColumnKey?: string
+  filterGridRoot?: Element | null
   options: string[]
   selected: Set<string>
   onApply: (selected: Set<string>) => void
   onClear: () => void
   onClose: () => void
   anchorEl: HTMLElement | null
+  /** Position captured when the filter opened (stable after re-render). */
+  anchorRectAtOpen: GridFilterAnchorRect | null
   searchPlaceholder?: string
   selectAllLabel?: string
 }
 
 export function GridColumnFilterMenu({
   columnLabel,
+  filterColumnKey,
+  filterGridRoot,
   options,
   selected,
   onApply,
   onClose,
   anchorEl,
+  anchorRectAtOpen,
   searchPlaceholder = 'Search',
   selectAllLabel = '(Select All)',
 }: Props) {
@@ -27,27 +46,68 @@ export function GridColumnFilterMenu({
   const selectAllRef = useRef<HTMLInputElement>(null)
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState<Set<string>>(() => new Set(selected))
-  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  const [anchorRect, setAnchorRect] = useState<GridFilterAnchorRect | null>(
+    () => anchorRectAtOpen
+  )
+
+  const selectedSignature = useMemo(
+    () => [...selected].sort().join('\0'),
+    [selected]
+  )
 
   useLayoutEffect(() => {
-    if (!anchorEl) {
+    if (!anchorEl && !anchorRectAtOpen) {
       setAnchorRect(null)
       return
     }
-    const update = () => setAnchorRect(anchorEl.getBoundingClientRect())
+
+    const update = () => {
+      const liveBtn = resolveFilterAnchorButton(
+        filterColumnKey,
+        anchorEl,
+        filterGridRoot ?? null
+      )
+      if (liveBtn) {
+        setAnchorRect(readAnchorRect(liveBtn))
+        return
+      }
+      if (anchorRectAtOpen && isValidFilterAnchorRect(anchorRectAtOpen)) {
+        setAnchorRect(anchorRectAtOpen)
+      } else {
+        setAnchorRect(null)
+      }
+    }
+
     update()
     window.addEventListener('scroll', update, true)
     window.addEventListener('resize', update)
+    const scrollAnchor = resolveFilterAnchorButton(
+      filterColumnKey,
+      anchorEl,
+      filterGridRoot ?? null
+    )
+    const scrollParents = getScrollableAncestors(scrollAnchor)
+    for (const parent of scrollParents) {
+      parent.addEventListener('scroll', update, { passive: true })
+    }
     return () => {
       window.removeEventListener('scroll', update, true)
       window.removeEventListener('resize', update)
+      for (const parent of scrollParents) {
+        parent.removeEventListener('scroll', update)
+      }
     }
-  }, [anchorEl])
+  }, [anchorEl, anchorRectAtOpen, filterColumnKey, filterGridRoot])
 
   useEffect(() => {
     setDraft(new Set(selected))
     setSearch('')
-  }, [columnLabel, selected])
+  }, [columnLabel, selectedSignature])
+
+  useEffect(() => {
+    activateGridColumnFilter(onClose)
+    return () => deactivateGridColumnFilter(onClose)
+  }, [onClose])
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -111,17 +171,7 @@ export function GridColumnFilterMenu({
 
   const style = useMemo(() => {
     if (!anchorRect) return null
-    const width = 260
-    let left = anchorRect.left
-    let top = anchorRect.bottom + 2
-    if (left + width > window.innerWidth - 8) {
-      left = Math.max(8, window.innerWidth - width - 8)
-    }
-    const maxHeight = 300
-    if (top + maxHeight > window.innerHeight - 8) {
-      top = Math.max(8, anchorRect.top - maxHeight - 2)
-    }
-    return { left, top, width, maxHeight }
+    return computeFilterMenuStyle(anchorRect)
   }, [anchorRect])
 
   const listMaxHeight = style ? style.maxHeight - 108 : 192

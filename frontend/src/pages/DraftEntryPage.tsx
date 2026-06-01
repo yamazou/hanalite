@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AppLink, useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
+import { AppLink, useAppNavigate, useTabPanelRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { Alert } from '../components/Alert'
 import { ErpScreen } from '../components/erp/ErpScreen'
@@ -37,7 +37,7 @@ type Props = {
 export function DraftEntryPage({ variant = 'receipt' }: Props) {
   const copy = getDraftPageCopy(variant)
   const navigate = useAppNavigate()
-  const { search } = useAppViewRoute()
+  const { search } = useTabPanelRoute()
   const draftIdParam = new URLSearchParams(search).get('id')
   const draftId = useMemo(() => {
     if (!draftIdParam) return null

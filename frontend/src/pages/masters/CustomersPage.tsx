@@ -25,6 +25,7 @@ import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogCon
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
@@ -141,6 +142,15 @@ export function CustomersPage() {
     )
   }
 
+  const removeSelectedFromGrid = () => {
+    if (selectedKeys.size === 0) return
+    setEditRows((rows) =>
+      removeSelectedGridRows(rows, selectedKeys, isBlankCustomerRow, () => emptyEditCustomerRow())
+    )
+    setSelectedKeys(new Set())
+  }
+  deleteRowsRef.current = removeSelectedFromGrid
+
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'customer(s)'))) return
@@ -150,16 +160,11 @@ export function CustomersPage() {
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.customers_id != null)
-      const toDrop = new Set(selected.map((row) => row.key))
       for (const row of toDelete) {
         await api.deleteCustomer(row.customers_id!)
       }
       setEditRows((rows) =>
-        ensureTrailingBlankRow(
-          rows.filter((row) => !toDrop.has(row.key)),
-          isBlankCustomerRow,
-          () => emptyEditCustomerRow()
-        )
+        removeSelectedGridRows(rows, selectedKeys, isBlankCustomerRow, () => emptyEditCustomerRow())
       )
       setSelectedKeys(new Set())
       setSuccess(toDelete.length > 0 ? 'Customer(s) deleted.' : 'Row(s) removed.')
@@ -170,7 +175,6 @@ export function CustomersPage() {
       setSubmitting(false)
     }
   }
-  deleteRowsRef.current = () => void deleteSelected()
 
   const handleSave = async () => {
     const active = editRows.filter(isActiveCustomerRow)

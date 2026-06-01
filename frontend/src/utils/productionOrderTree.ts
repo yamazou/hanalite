@@ -1,8 +1,14 @@
 import type { Item } from '../types'
-import type { LocationMaster } from '../types/masters'
+import type { ItemProcessesOut } from '../types/itemprocs'
+import type { ItemTyp, LocationMaster } from '../types/masters'
 import type { ProductionOrderDetail } from '../types/production'
 import type { BomTreeLine, ProcessTreeHighlight } from './bomTree'
 import { formatQty } from './format'
+import {
+  appendSavedItemProcessSubtree,
+  isWipCatalogItem,
+  processStepsTreeDisplayOrder,
+} from './itemProcessTree'
 import {
   editInputText,
   isActiveInputRow,
@@ -36,9 +42,57 @@ export function isSameProductionTreeData(
       line.processLineNo === prev.processLineNo &&
       line.suffix === prev.suffix &&
       line.to_location_cd === prev.to_location_cd &&
-      line.from_location_cd === prev.from_location_cd
+      line.from_location_cd === prev.from_location_cd &&
+      line.wipSubtree === prev.wipSubtree
     )
   })
+}
+
+export function collectProductionOrderWipIds(params: {
+  detail: ProductionOrderDetail
+  inputRows: EditInputRow[]
+  items: Item[]
+  itemtyps: ItemTyp[]
+  useEditRows: boolean
+}): number[] {
+  const { detail, inputRows, items, itemtyps, useEditRows } = params
+  const ids = new Set<number>()
+  if (useEditRows) {
+    for (const row of inputRows) {
+      if (!isActiveInputRow(row) || row.item_id === '') continue
+      const itemId = Number(row.item_id)
+      if (isWipCatalogItem(items, itemtyps, itemId)) ids.add(itemId)
+    }
+    return [...ids]
+  }
+  for (const inp of detail.inputs) {
+    if (isWipCatalogItem(items, itemtyps, inp.item_id)) ids.add(inp.item_id)
+  }
+  return [...ids]
+}
+
+/**
+ * Tree display should show what users see in Input grid.
+ * Keep this looser than save validation to avoid "missing" lines in tree.
+ */
+function isTreeVisibleInputRow(row: EditInputRow): boolean {
+  if (isBlankInputRow(row)) return false
+  return row.item_id !== '' || editInputText(row.item_cd).trim() !== ''
+}
+
+function appendWipSubtreesForInput(
+  lines: BomTreeLine[],
+  itemId: number | undefined,
+  items: Item[],
+  locations: LocationMaster[],
+  itemtyps: ItemTyp[],
+  cache: Map<number, ItemProcessesOut> | undefined,
+  visited: Set<number>
+): void {
+  if (itemId == null || !cache?.has(itemId) || !isWipCatalogItem(items, itemtyps, itemId)) return
+  const saved = cache.get(itemId)
+  if (!saved?.processes.length) return
+  appendSavedItemProcessSubtree(lines, 3, itemId, items, locations, cache, visited, itemtyps)
 }
 
 function itemtypIdFor(items: Item[], itemId: number | '' | null | undefined): number | undefined {
@@ -148,9 +202,13 @@ export function buildProductionOrderTree(params: {
   inputRows: EditInputRow[]
   locations: LocationMaster[]
   items: Item[]
+  itemtyps?: ItemTyp[]
+  itemProcessCache?: Map<number, ItemProcessesOut>
   useEditRows: boolean
 }): ProductionTreeData {
-  const { detail, processRows, inputRows, locations, items, useEditRows } = params
+  const { detail, processRows, inputRows, locations, items, itemtyps = [], itemProcessCache, useEditRows } =
+    params
+  const visited = new Set<number>()
   const title = `Tree: ${detail.parent_item_cd} ${detail.parent_item_nm}`
   const lines: BomTreeLine[] = [
     {
@@ -165,11 +223,11 @@ export function buildProductionOrderTree(params: {
   const parent = { item_id: detail.parent_item_id, item_cd: detail.parent_item_cd }
 
   if (useEditRows) {
-    const processes = processRows
-      .filter((row) => !isBlankProcessRow(row))
-      .sort((a, b) => a.line_no - b.line_no)
+    const processesForTree = processStepsTreeDisplayOrder(
+      processRows.filter((row) => !isBlankProcessRow(row))
+    )
 
-    for (const proc of processes) {
+    for (const proc of processesForTree) {
       const wip = locations.find((loc) => loc.location_id === proc.wip_location_id)
       const wipCd = wip?.location_cd ?? ''
       const processLine = buildProcessTreeLine(
@@ -186,31 +244,45 @@ export function buildProductionOrderTree(params: {
       if (processLine) lines.push(processLine)
 
       const inputs = sortEditInputRowsForDisplay(
-        inputRows.filter((row) => row.line_no === proc.line_no && isActiveInputRow(row))
+        inputRows.filter((row) => row.line_no === proc.line_no && isTreeVisibleInputRow(row))
       )
       for (const inp of inputs) {
         const fromLoc = locations.find((loc) => loc.location_id === inp.from_location_id)
-        lines.push(
-          buildInputTreeLine(
-            {
-              line_no: inp.line_no,
-              item_id: inp.item_id,
-              item_cd: inp.item_cd,
-              item_nm: inp.item_nm,
-              req_qty: inp.req_qty,
-              from_location_cd: fromLoc?.location_cd ?? '',
-              level: 1,
-            },
-            wipCd,
-            items
-          )
+        const itemId = inp.item_id !== '' ? Number(inp.item_id) : undefined
+        const hasWipSubtree =
+          itemId != null &&
+          itemProcessCache?.has(itemId) &&
+          (itemProcessCache.get(itemId)?.processes.length ?? 0) > 0 &&
+          isWipCatalogItem(items, itemtyps, itemId)
+        const inputLine = buildInputTreeLine(
+          {
+            line_no: inp.line_no,
+            item_id: inp.item_id,
+            item_cd: inp.item_cd,
+            item_nm: inp.item_nm,
+            req_qty: inp.req_qty,
+            from_location_cd: fromLoc?.location_cd ?? '',
+            level: 1,
+          },
+          wipCd,
+          items
+        )
+        lines.push({ ...inputLine, wipSubtree: hasWipSubtree })
+        appendWipSubtreesForInput(
+          lines,
+          itemId,
+          items,
+          locations,
+          itemtyps,
+          itemProcessCache,
+          visited
         )
       }
     }
     return { title, lines }
   }
 
-  const groups = processLinesFromDetail(detail)
+  const groups = [...processLinesFromDetail(detail)].sort((a, b) => b.no - a.no)
   for (const group of groups) {
     const line = detail.lines.find((ln) => group.lineNos.includes(ln.line_no))
     if (!line) continue
@@ -235,20 +307,32 @@ export function buildProductionOrderTree(params: {
           String(a.item_cd).localeCompare(String(b.item_cd))
       )
     for (const inp of inputs) {
-      lines.push(
-        buildInputTreeLine(
-          {
-            line_no: inp.line_no,
-            item_id: inp.item_id,
-            item_cd: inp.item_cd,
-            item_nm: inp.item_nm,
-            req_qty: inp.req_qty,
-            from_location_cd: inp.from_location_cd ?? '',
-            level: inp.level,
-          },
-          line.wip_location_cd,
-          items
-        )
+      const hasWipSubtree =
+        itemProcessCache?.has(inp.item_id) &&
+        (itemProcessCache.get(inp.item_id)?.processes.length ?? 0) > 0 &&
+        isWipCatalogItem(items, itemtyps, inp.item_id)
+      const inputLine = buildInputTreeLine(
+        {
+          line_no: inp.line_no,
+          item_id: inp.item_id,
+          item_cd: inp.item_cd,
+          item_nm: inp.item_nm,
+          req_qty: inp.req_qty,
+          from_location_cd: inp.from_location_cd ?? '',
+          level: inp.level,
+        },
+        line.wip_location_cd,
+        items
+      )
+      lines.push({ ...inputLine, wipSubtree: hasWipSubtree })
+      appendWipSubtreesForInput(
+        lines,
+        inp.item_id,
+        items,
+        locations,
+        itemtyps,
+        itemProcessCache,
+        visited
       )
     }
   }

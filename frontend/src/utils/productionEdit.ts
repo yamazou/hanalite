@@ -700,6 +700,46 @@ export function detailToEditInputRows(detail: ProductionOrderDetail): EditInputR
 
 }
 
+function payloadSignature(value: unknown): string {
+  return JSON.stringify(value)
+}
+
+/** True when process grid differs from the loaded order (for header Update). */
+export function isProductionProcessDirty(
+  detail: ProductionOrderDetail,
+  processRows: EditProcessRow[],
+  items: Item[],
+  orderPlannedQty: string | number = detail.planned_qty
+): boolean {
+  const ctx = { parentItemId: detail.parent_item_id, orderPlannedQty }
+  const savedRows = detailToEditProcessRows(detail)
+  const current = buildProcessPayload(processRows, items, ctx)
+  const saved = buildProcessPayload(savedRows, items, ctx)
+  return payloadSignature(current) !== payloadSignature(saved)
+}
+
+/** True when input grid differs from the loaded order (for header Update). */
+export function isProductionInputDirty(
+  detail: ProductionOrderDetail,
+  inputRows: EditInputRow[],
+  processRows: EditProcessRow[],
+  orderPlannedQty: string | number = detail.planned_qty
+): boolean {
+  const ctx = {
+    status: detail.status,
+    orderPlannedQty,
+    processRows,
+  }
+  const savedProcessRows = detailToEditProcessRows(detail)
+  const savedInputRows = detailToEditInputRows(detail)
+  const current = buildInputPayload(inputRows, ctx)
+  const saved = buildInputPayload(savedInputRows, {
+    ...ctx,
+    processRows: savedProcessRows,
+  })
+  return payloadSignature(current) !== payloadSignature(saved)
+}
+
 /** Item Process master inputs → production order input edit rows (per process line_no). */
 export function itemProcInputsToEditInputRows(
   inputs: ItemProcInput[],
@@ -722,6 +762,94 @@ export function itemProcInputsToEditInputRows(
       consume_qty: '',
       lot: '*',
     }))
+}
+
+/** Build production-order process rows from Item Process master (replaces order lines in the grid). */
+export function itemProcessesToProductionEditRows(
+  data: ItemProcessesOut,
+  orderPlannedQty: string | number,
+  status: ProductionStatus = 'registered'
+): EditProcessRow[] {
+  const sorted = [...data.processes].sort((a, b) => a.line_no - b.line_no)
+  const byLineNo = new Map<number, (typeof sorted)[number]>()
+  for (const proc of sorted) {
+    byLineNo.set(proc.line_no, proc)
+  }
+  const uniqueSteps = [...byLineNo.values()].sort((a, b) => a.line_no - b.line_no)
+  const rows: EditProcessRow[] = uniqueSteps.map((proc) => ({
+    key: newEditKey(),
+    line_no: proc.line_no,
+    wip_location_id: proc.wip_location_id,
+    wip_location_cd: proc.wip_location_cd ?? '',
+    rm_location_id: '' as const,
+    output_item_id: proc.output_item_id,
+    output_item_cd: proc.output_item_cd ?? '',
+    output_item_nm: proc.output_item_nm ?? '',
+    planned_qty: String(orderPlannedQty),
+    actual_qty: actualQtyForEdit(null, status),
+    status: 'planned',
+  }))
+  return rows.map((row) => ({
+    ...row,
+    ...processWipLocationPatch(row.wip_location_id, row.key, rows),
+  }))
+}
+
+/** Build production-order input rows from Item Process master (per process line_no). */
+export function itemProcessesToProductionInputRows(
+  data: ItemProcessesOut,
+  status: ProductionStatus = 'registered',
+  lot = '*'
+): EditInputRow[] {
+  const sorted = [...data.processes].sort((a, b) => a.line_no - b.line_no)
+  const byLineNo = new Map<number, (typeof sorted)[number]>()
+  for (const proc of sorted) {
+    byLineNo.set(proc.line_no, proc)
+  }
+  const uniqueSteps = [...byLineNo.values()].sort((a, b) => a.line_no - b.line_no)
+  const active: EditInputRow[] = []
+  const seenByLineItem = new Set<string>()
+  for (const proc of uniqueSteps) {
+    const inputs = [...proc.inputs].sort((a, b) => a.input_no - b.input_no)
+    for (const inp of inputs) {
+      if (inp.req_qty == null || Number(inp.req_qty) <= 0) continue
+      const dedupeKey = `${proc.line_no}:${inp.item_id}`
+      if (seenByLineItem.has(dedupeKey)) continue
+      seenByLineItem.add(dedupeKey)
+      active.push({
+        key: newEditKey(),
+        line_no: proc.line_no,
+        item_id: inp.item_id,
+        item_cd: inp.item_cd,
+        item_nm: inp.item_nm,
+        from_location_id: inp.from_location_id ?? '',
+        req_qty: String(inp.req_qty),
+        consume_qty: consumeQtyForEdit(null, inp.req_qty, status),
+        lot,
+      })
+    }
+  }
+  return groupInputRowsWithTrailingBlanks(active, uniqueSteps.map((p) => p.line_no))
+}
+
+function groupInputRowsWithTrailingBlanks(
+  rows: EditInputRow[],
+  processLineNos: number[]
+): EditInputRow[] {
+  const result: EditInputRow[] = []
+  for (const lineNo of processLineNos) {
+    result.push(
+      ...inputRowsWithSingleTrailingBlank(
+        rows.filter((row) => row.line_no === lineNo),
+        () => emptyEditInputRow(lineNo),
+        isBlankInputRow
+      )
+    )
+  }
+  if (processLineNos.length === 0) {
+    result.push(emptyEditInputRow(1))
+  }
+  return result
 }
 
 /** Fill missing input rows from Item Process master when the order has none for a process step. */
@@ -780,6 +908,31 @@ export function firstActiveProcessPlannedQty(
 export type ReorderProcessRowsResult = {
   processRows: EditProcessRow[]
   lineNoRemap: Map<number, number>
+}
+
+/** Keep input rows attached to process steps when line_no is renumbered (swap, delete, etc.). */
+export function remapInputRowsAfterProcessReorder(
+  inputRows: EditInputRow[],
+  processRowsBefore: EditProcessRow[],
+  processRowsAfter: EditProcessRow[],
+  isProcessRowBlank: (row: EditProcessRow) => boolean
+): EditInputRow[] {
+  const keyByOldLineNo = new Map(
+    processRowsBefore
+      .filter((row) => !isProcessRowBlank(row))
+      .map((row) => [row.line_no, row.key] as const)
+  )
+  const lineNoByKey = new Map(
+    processRowsAfter
+      .filter((row) => !isProcessRowBlank(row))
+      .map((row) => [row.key, row.line_no] as const)
+  )
+  return inputRows.map((inp) => {
+    const procKey = keyByOldLineNo.get(inp.line_no)
+    if (!procKey) return inp
+    const newLineNo = lineNoByKey.get(procKey)
+    return newLineNo != null && newLineNo !== inp.line_no ? { ...inp, line_no: newLineNo } : inp
+  })
 }
 
 /** Swap a process row up/down among filled rows; renumber line_no and refresh RM chain. */

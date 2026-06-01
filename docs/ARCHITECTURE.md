@@ -16,7 +16,7 @@
 | `m_itemtyps` | 品目種別マスタ（RM, WIP, FG など） |
 | `m_suppliers` | 仕入先マスタ |
 | `m_items` | 品目マスタ（`item_cd` + 仕入先5件まで） |
-| `m_boms` | BOM（親品目 → 子品目 + 必要量） |
+| `m_itemprocs` / `m_itemproc_inputs` | 品目工程マスタ（FG → 工程・投入品目） |
 | `m_movetyps` | 移動種別マスタ（GR / GI / CAN） |
 | `pch_receipt_draft` | 入荷リスト**ドラフト**（承認前） |
 | `pch_receipt_draft_lines` | ドラフト明細 |
@@ -34,7 +34,7 @@ ER 図: [ER_DIAGRAM.md](./ER_DIAGRAM.md)
 |----------|------|
 | 入荷ドラフト | `/pch-receipt-drafts` |
 | マスタ | `/masters/items`, `/masters/suppliers`, … |
-| BOM | `/boms` |
+| 品目工程 | `/masters/items/{id}/processes` |
 | 在庫 | `/inventory/currents`, `/inventory/grgi`, `/inventory/balances` |
 
 ## 承認・キャンセル

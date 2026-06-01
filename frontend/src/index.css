@@ -10,6 +10,8 @@
   --erp-title-dark: #3d6b3d;
   --erp-text: #1b3d1b;
   --erp-toolbar: #e0f0e0;
+  --erp-bar-row-height: 30px;
+  --erp-detail-section-title-height: 24px;
   --erp-grid-head: #d8e8d8;
   --erp-grid-alt: #eef7ee;
   --erp-grid-hover: #d4ecd4;
@@ -604,11 +606,6 @@ th {
   color: #166534;
 }
 
-.badge-started {
-  background: #fef3c7;
-  color: #b45309;
-}
-
 .badge-completed {
   background: #e0e7ff;
   color: #3730a3;
@@ -931,20 +928,17 @@ input[type='file'] {
 }
 
 .erp-screen-messages {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  max-width: min(420px, 48vw);
+  flex-shrink: 0;
+  padding: 0 8px;
   pointer-events: none;
 }
 
 .erp-screen-messages .alert {
-  pointer-events: auto;
+  pointer-events: none;
   box-shadow: 1px 2px 6px rgba(61, 107, 61, 0.2);
   animation: erp-feedback-in 0.2s ease-out;
 }
@@ -966,6 +960,15 @@ input[type='file'] {
 
 .erp-panel-search {
   flex-shrink: 0;
+}
+
+/* One border on the panel; inner row/form is layout only (avoids double frame). */
+.erp-panel-search .erp-search-body > .erp-search-row,
+.erp-panel-search .erp-search-body > .erp-search-form {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
 }
 
 .erp-panel-grow {
@@ -1152,24 +1155,121 @@ input[type='file'] {
   min-height: 100px;
 }
 
-.erp-screen-stacked .erp-panel-orders-header {
+.erp-screen-stacked > .erp-list-detail-split {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Fixed list/detail ratio only when not using resizable split. */
+.erp-screen-stacked:not(:has(> .erp-list-detail-split-resizable)) .erp-panel-orders-header {
   flex: 0 1 38%;
   max-height: 42%;
   min-height: 120px;
 }
 
-.erp-screen-stacked .erp-detail-panel {
+.erp-screen-stacked:not(:has(> .erp-list-detail-split-resizable)) .erp-detail-panel,
+.erp-screen-stacked:not(:has(> .erp-list-detail-split-resizable)) .erp-production-detail-split {
   flex: 1 1 55%;
   min-height: 220px;
 }
 
-.erp-screen-stacked .erp-production-detail-split {
-  flex: 1 1 55%;
-  min-height: 220px;
+.erp-screen-stacked:not(:has(> .erp-list-detail-split-resizable)) .erp-production-detail-split {
   display: flex;
   align-items: stretch;
   gap: 6px;
   min-width: 0;
+}
+
+.erp-list-detail-split {
+  flex: 1 1 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-list-detail-split-resizable {
+  gap: 0;
+  border: 1px solid var(--erp-border);
+  box-shadow: none;
+  background: var(--erp-surface);
+}
+
+.erp-list-detail-split-resizable .erp-split-pane-first > .erp-panel,
+.erp-list-detail-split-resizable .erp-split-pane-second > .erp-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: none;
+  box-shadow: none;
+}
+
+.erp-list-detail-split-resizable .erp-split-pane-second > .erp-production-detail-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  border: none;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-list-detail-split-resizable .erp-split-pane-second > .erp-production-detail-split.has-tree {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.erp-list-detail-split-resizable .erp-split-pane-first {
+  position: relative;
+  z-index: 0;
+}
+
+.erp-list-detail-split-resizable .erp-split-pane-second {
+  position: relative;
+  z-index: 1;
+  background: var(--erp-surface);
+}
+
+.erp-list-detail-split-resizable .erp-split-handle-row {
+  position: relative;
+  z-index: 2;
+}
+
+.erp-list-detail-split-resizable .erp-panel-orders-header,
+.erp-list-detail-split-resizable .erp-panel-list-header,
+.erp-list-detail-split-resizable .erp-detail-panel {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.erp-list-detail-split-resizable .erp-panel-content,
+.erp-list-detail-split-resizable .erp-panel-body.erp-panel-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-list-detail-split-resizable .erp-grid-wrap-header {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.erp-list-detail-split-resizable .erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-detail,
+.erp-list-detail-split-resizable .erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-static {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.erp-list-detail-split-resizable .erp-production-detail-split {
+  gap: 0;
+  min-height: 0;
 }
 
 .erp-production-detail-main {
@@ -1233,27 +1333,22 @@ input[type='file'] {
   .erp-production-detail-section[data-production-grid='process']
   > .erp-production-detail-section-title,
 .erp-production-detail-split.has-tree
+  .erp-production-detail-section[data-production-grid='input']
+  > .erp-production-detail-section-title,
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section[data-production-grid='final-item']
+  > .erp-production-detail-section-title,
+.erp-production-detail-split.has-tree
   .erp-production-detail-section-tree
   > .erp-production-detail-section-title {
-  height: 30px;
-  min-height: 30px;
-  box-sizing: border-box;
-}
-
-.erp-production-detail-split.has-tree
-  .erp-production-detail-section-title
-  .btn.erp-btn {
-  padding: 1px 8px;
-  font-size: 0.68rem;
-  line-height: 16px;
-  height: 18px;
+  min-height: var(--erp-detail-section-title-height);
   box-sizing: border-box;
 }
 
 .erp-production-detail-split.has-tree
   .erp-production-detail-section[data-production-grid='process']
   > .erp-detail-toolbar:not(:empty) {
-  min-height: 30px;
+  min-height: var(--erp-bar-row-height);
   box-sizing: border-box;
   align-items: center;
   flex: 0 0 auto;
@@ -1527,6 +1622,30 @@ input[type='file'] {
   align-self: flex-end;
 }
 
+/* Production Order List — compact screen title row (Save Grid / Reset). */
+.erp-screen-production-list {
+  gap: 2px;
+}
+
+.erp-screen-production-list > .erp-panel-title-bar {
+  padding: 1px 6px;
+  gap: 4px;
+  min-height: 22px;
+}
+
+.erp-screen-production-list > .erp-panel-title-bar .erp-panel-title-actions {
+  gap: 4px;
+}
+
+.erp-screen-production-list > .erp-panel-title-bar .erp-save-grid-group {
+  gap: 4px;
+}
+
+.erp-screen-production-list > .erp-panel-title-bar .erp-btn {
+  padding: 1px 8px;
+  line-height: 1.25;
+}
+
 /* Production Order Entry — single header panel (no double borders under title bar). */
 .erp-screen-production-entry > .erp-panel-title-bar {
   border-bottom: none;
@@ -1586,6 +1705,10 @@ input[type='file'] {
 .erp-search-form-production-entry .bom-field-label {
   display: block;
   min-height: 14px;
+}
+
+.erp-search-form-production-entry .bom-field-label-required {
+  color: #c62828;
 }
 
 .erp-search-form-production-entry .erp-search-field-with-label {
@@ -1729,6 +1852,28 @@ input[type='file'] {
   color: var(--erp-title-dark);
   font-size: 0.62rem;
   vertical-align: middle;
+}
+
+.erp-tree-marker-spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.erp-tree-toggle {
+  display: inline-block;
+  margin: 0 3px 0 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--erp-title-dark);
+  font-size: 0.62rem;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.erp-tree-toggle:hover {
+  color: var(--erp-accent, #0d6e3f);
 }
 
 .erp-tree-process-btn {
@@ -2010,6 +2155,8 @@ select.erp-input option {
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
+  min-height: var(--erp-bar-row-height);
+  box-sizing: border-box;
   padding: 3px 6px;
   background: linear-gradient(180deg, var(--erp-toolbar) 0%, var(--erp-label) 100%);
   border-bottom: 1px solid var(--erp-border);
@@ -2536,11 +2683,6 @@ body.erp-col-resizing {
   color: #1b5e20;
 }
 
-.erp-screen .badge-started {
-  background: #fde68a;
-  color: #92400e;
-}
-
 .erp-screen .badge-completed {
   background: #c7d2fe;
   color: #312e81;
@@ -2661,6 +2803,8 @@ a.erp-link-cell:hover {
   justify-content: flex-start;
   flex-wrap: wrap;
   gap: 8px;
+  min-height: var(--erp-bar-row-height);
+  box-sizing: border-box;
   padding: 3px 6px 3px 4px;
   background: linear-gradient(180deg, var(--erp-toolbar) 0%, var(--erp-label) 100%);
   border-bottom: 1px solid var(--erp-border);
@@ -2870,7 +3014,10 @@ a.erp-link-cell:hover {
   font-size: 0.68rem;
   font-weight: normal;
   color: var(--erp-title-dark);
-  padding: 4px 8px;
+  height: var(--erp-detail-section-title-height);
+  min-height: var(--erp-detail-section-title-height);
+  max-height: var(--erp-detail-section-title-height);
+  padding: 2px 8px;
   background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
   border-bottom: 1px solid var(--erp-border);
   display: flex;
@@ -2878,14 +3025,102 @@ a.erp-link-cell:hover {
   justify-content: space-between;
   gap: 8px;
   box-sizing: border-box;
+  width: 100%;
+}
+
+.erp-production-detail-section-title-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.erp-production-order-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.erp-production-order-header-actions-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.erp-production-order-header-actions-right {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.erp-panel-orders-header .erp-production-detail-section-title-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.erp-production-detail-section-title--no-label {
+  justify-content: flex-start;
+  padding-left: 4px;
+  padding-right: 6px;
+}
+
+.erp-production-detail-section-title--no-label .erp-production-detail-section-title-actions {
+  margin-left: 0;
+  width: 100%;
+}
+
+.erp-production-detail-section-title--no-label .erp-production-order-header-actions-left {
+  margin-right: auto;
+}
+
+.erp-panel-orders-header .erp-toolbar-select-tree {
+  margin-left: 2px;
 }
 
 .erp-production-detail-section-title-label {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.erp-tree-expand-all-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: normal;
   white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.erp-tree-expand-all-toggle input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.erp-tree-expand-all-toggle input[type='checkbox']:disabled {
+  cursor: not-allowed;
+}
+
+.erp-tree-panel-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .erp-production-detail-section-title .btn {
@@ -2898,12 +3133,17 @@ a.erp-link-cell:hover {
   box-shadow: none;
 }
 
-.erp-production-detail-split.has-tree {
-  flex-direction: row;
+.erp-production-detail-split {
+  display: flex;
+  flex-direction: column;
   align-items: stretch;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.erp-production-detail-split.has-tree {
+  flex-direction: row;
 }
 
 .erp-production-detail-split.has-tree .erp-production-detail-main {
@@ -2932,15 +3172,17 @@ a.erp-link-cell:hover {
 }
 
 /* Resizable split panes: grids scroll inside allocated height (overrides content-sized rule below). */
-.erp-production-detail-section-split > .erp-grid-wrap.erp-grid-wrap-detail,
-.erp-production-detail-section-split > .erp-grid-wrap.erp-grid-wrap-static {
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-detail,
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-static {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
 
-/* Detail sections stack multiple grids — size each grid to its rows, not leftover panel height. */
-.erp-production-detail-split .erp-production-detail-section > .erp-grid-wrap.erp-grid-wrap-detail {
+/* Stacked detail sections (no split): size grid to row count, not pane height. */
+.erp-production-detail-split
+  .erp-production-detail-section:not(.erp-production-detail-section-split)
+  > .erp-grid-wrap.erp-grid-wrap-detail {
   flex: none;
   min-height: auto;
 }
@@ -2953,14 +3195,53 @@ a.erp-link-cell:hover {
   flex-direction: column;
 }
 
-.erp-detail-content-split > .erp-production-detail-section[data-production-grid='final-item'] {
-  flex-shrink: 0;
-}
-
+.erp-detail-content-split > .erp-production-output-process-split,
 .erp-detail-content-split > .erp-production-process-input-split,
 .erp-detail-content-split > .muted.erp-grid-empty {
   flex: 1 1 auto;
   min-height: 0;
+}
+
+.erp-production-output-process-split {
+  flex: 1 1 auto;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-production-output-process-split .erp-split-pane-first > .erp-production-detail-section-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.erp-production-output-process-split .erp-split-pane-second {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.erp-production-output-process-split .erp-output-process-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-production-output-process-split .erp-output-process-pane .erp-production-process-input-split {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.erp-production-output-process-split .erp-split-pane-second > .muted.erp-grid-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .erp-production-process-input-split {
@@ -2973,6 +3254,57 @@ a.erp-link-cell:hover {
 
 .erp-production-detail-split-resizable {
   gap: 0;
+  border: 1px solid var(--erp-border);
+  box-shadow: none;
+  background: var(--erp-surface);
+}
+
+.erp-screen-stacked .erp-production-detail-split.erp-production-detail-split-resizable {
+  gap: 0;
+}
+
+/* One normal rule between main / tree and inside panes — not panel border + handle stacked. */
+.erp-production-detail-split-resizable .erp-production-detail-main .erp-detail-panel,
+.erp-production-detail-split-resizable .erp-production-detail-main > .erp-panel,
+.erp-production-detail-split-resizable .erp-production-detail-tree .erp-tree-panel-sidebar,
+.erp-production-detail-split-resizable .erp-production-detail-tree > .erp-panel {
+  border: none;
+  box-shadow: none;
+}
+
+/* Title bars fill their column and meet the vertical split (no gutter). */
+.erp-production-detail-split-resizable.has-tree
+  .erp-production-detail-section[data-production-grid='process']
+  > .erp-production-detail-section-title,
+.erp-production-detail-split-resizable.has-tree
+  .erp-production-detail-section[data-production-grid='final-item']
+  > .erp-production-detail-section-title,
+.erp-production-detail-split-resizable.has-tree
+  .erp-production-detail-section-tree
+  > .erp-production-detail-section-title {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-main,
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-tree {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-main .erp-detail-panel,
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-tree .erp-tree-panel-sidebar {
+  width: 100%;
+  max-width: 100%;
+}
+
+.erp-production-detail-split-resizable.has-tree
+  .erp-production-detail-section[data-production-grid='process'],
+.erp-production-detail-split-resizable.has-tree
+  .erp-production-detail-section[data-production-grid='final-item'],
+.erp-production-detail-split-resizable.has-tree .erp-production-detail-section-tree {
+  width: 100%;
 }
 
 .erp-production-detail-split-resizable.has-tree .erp-production-detail-main,
@@ -3006,9 +3338,10 @@ a.erp-link-cell:hover {
 }
 
 .erp-split-handle {
-  flex: 0 0 5px;
+  flex: 0 0 1px;
   position: relative;
   z-index: 2;
+  flex-shrink: 0;
   background: var(--erp-border);
   touch-action: none;
   user-select: none;
@@ -3016,19 +3349,39 @@ a.erp-link-cell:hover {
 
 .erp-split-handle-col {
   cursor: col-resize;
-  margin: 0 -1px;
 }
 
 .erp-split-handle-row {
   cursor: row-resize;
-  margin: -1px 0;
+}
+
+/* Wider invisible hit area; visible rule stays 1px like other panel borders. */
+.erp-split-handle-col::before,
+.erp-split-handle-row::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+}
+
+.erp-split-handle-col::before {
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
+.erp-split-handle-row::before {
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
 }
 
 .erp-split-handle-col:hover,
 .erp-split-handle-row:hover,
 body.erp-split-col-resizing .erp-split-handle-col,
 body.erp-split-row-resizing .erp-split-handle-row {
-  background: var(--erp-title);
+  background: var(--erp-border);
 }
 
 body.erp-split-col-resizing {
@@ -3047,6 +3400,13 @@ body.erp-split-row-resizing {
 
 .erp-production-detail-split .erp-production-detail-section-title {
   border-bottom: none;
+}
+
+/* Item Process Output Item title: align bottom rule with Tree title across the split. */
+.erp-production-detail-split.has-tree
+  .erp-production-detail-section[data-production-grid='final-item']
+  > .erp-production-detail-section-title {
+  border-bottom: 1px solid var(--erp-border);
 }
 
 .erp-production-detail-split .erp-production-detail-section-title:not(:has(+ .erp-detail-toolbar)) {
@@ -3075,40 +3435,76 @@ body.erp-split-row-resizing {
   border-top: none;
 }
 
-.erp-production-detail-split
-  .erp-production-detail-section:has(+ .erp-production-detail-section)
-  .erp-grid-wrap:last-of-type
-  tbody
-  tr:last-child
-  td {
-  border-bottom: none;
-}
-
-/* Grid meets panel/section frame: one 1px line, not panel + cell stacked. */
+/* Grid meets panel frame on the left only — avoid double line with outer container. */
 .erp-production-detail-split .erp-detail-panel .erp-grid th:first-child,
 .erp-production-detail-split .erp-detail-panel .erp-grid td:first-child {
   border-left: none;
 }
 
-.erp-production-detail-split .erp-detail-panel .erp-grid th:last-child,
-.erp-production-detail-split .erp-detail-panel .erp-grid td:last-child {
-  border-right: none;
+.erp-production-detail-split.has-tree
+  .erp-production-detail-tree.erp-production-detail-tree-process-aligned {
+  align-self: flex-start;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 
-.erp-production-detail-split
-  .erp-detail-panel
-  .erp-production-detail-section:last-child
-  .erp-grid-wrap:last-of-type
-  tbody
-  tr:last-child
-  td {
-  border-bottom: none;
+.erp-production-detail-split.has-tree
+  .erp-production-detail-tree.erp-production-detail-tree-process-aligned
+  > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
 }
 
 .erp-production-detail-tree .erp-tree-view,
 .erp-production-detail-tree .erp-tree-view.erp-tree-view-fill {
   margin: 0;
   border: none;
+  padding: 6px 4px 4px;
+  line-height: 22px;
+  font-size: 0.72rem;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+/* Match Input Item / Process grid row height (erp-grid-resizable td: 22px). */
+.erp-production-detail-tree .erp-tree-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+  height: 22px;
+  min-height: 22px;
+  max-height: 22px;
+  line-height: 22px;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-right: 4px;
+  margin: 0;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.erp-production-detail-tree .erp-tree-line > * {
+  flex-shrink: 0;
+}
+
+.erp-production-detail-tree .erp-tree-process-btn {
+  min-height: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+
+.erp-production-detail-tree .erp-tree-toggle,
+.erp-production-detail-tree .erp-tree-marker {
+  flex-shrink: 0;
 }
 
 .erp-production-detail-toolbar {

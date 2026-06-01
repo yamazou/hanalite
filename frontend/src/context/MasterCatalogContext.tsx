@@ -51,6 +51,8 @@ export type MasterCatalogSnapshot = {
 export type MasterCatalogValue = MasterCatalogSnapshot & {
   ready: boolean
   refreshing: boolean
+  /** Bumps after each successful catalog apply — remount native datalists. */
+  revision: number
   items: Item[]
   suppliers: Supplier[]
   refresh: () => Promise<MasterCatalogSnapshot>
@@ -58,63 +60,81 @@ export type MasterCatalogValue = MasterCatalogSnapshot & {
 
 const MasterCatalogContext = createContext<MasterCatalogValue | null>(null)
 
+async function fetchMasterCatalogSnapshot(): Promise<MasterCatalogSnapshot> {
+  const [itemRows, supplierRows, customerRows, locationRows, typRows, moveRows] =
+    await Promise.all([
+      api.listItemsMaster(),
+      api.listSuppliersMaster(),
+      api.listCustomersMaster(),
+      api.listLocationsMaster(),
+      api.listItemtyps(),
+      api.listMovetyps(),
+    ])
+  return {
+    itemsMaster: itemRows,
+    suppliersMaster: supplierRows,
+    customers: customerRows,
+    locations: locationRows,
+    itemtyps: typRows,
+    movetyps: moveRows,
+  }
+}
+
 export function MasterCatalogProvider({ children }: { children: ReactNode }) {
   const { pathname } = useAppViewRoute()
   const { reload: reloadItemTypColors } = useItemTypColors()
   const [ready, setReady] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [revision, setRevision] = useState(0)
   const [itemsMaster, setItemsMaster] = useState<ItemListRow[]>([])
   const [suppliersMaster, setSuppliersMaster] = useState<SupplierMaster[]>([])
   const [customers, setCustomers] = useState<CustomerMaster[]>([])
   const [locations, setLocations] = useState<LocationMaster[]>([])
   const [itemtyps, setItemtyps] = useState<ItemTyp[]>([])
   const [movetyps, setMovetyps] = useState<MoveTyp[]>([])
-  const inFlightRef = useRef<Promise<MasterCatalogSnapshot> | null>(null)
+  const refreshLockRef = useRef<Promise<MasterCatalogSnapshot> | null>(null)
+  const pendingRefreshRef = useRef(false)
   const readyRef = useRef(false)
 
+  const applySnapshot = useCallback((snapshot: MasterCatalogSnapshot) => {
+    setItemsMaster(snapshot.itemsMaster)
+    setSuppliersMaster(snapshot.suppliersMaster)
+    setCustomers(snapshot.customers)
+    setLocations(snapshot.locations)
+    setItemtyps(snapshot.itemtyps)
+    setMovetyps(snapshot.movetyps)
+    setRevision((prev) => prev + 1)
+    clearMasterSuggestCaches()
+    readyRef.current = true
+    setReady(true)
+  }, [])
+
   const refresh = useCallback(async (): Promise<MasterCatalogSnapshot> => {
-    if (inFlightRef.current) return inFlightRef.current
+    if (refreshLockRef.current) {
+      pendingRefreshRef.current = true
+      return refreshLockRef.current
+    }
+
     const promise = (async (): Promise<MasterCatalogSnapshot> => {
       setRefreshing(true)
+      let lastSnapshot: MasterCatalogSnapshot | null = null
       try {
-        const [itemRows, supplierRows, customerRows, locationRows, typRows, moveRows] =
-          await Promise.all([
-            api.listItemsMaster(),
-            api.listSuppliersMaster(),
-            api.listCustomersMaster(),
-            api.listLocationsMaster(),
-            api.listItemtyps(),
-            api.listMovetyps(),
-          ])
-        setItemsMaster(itemRows)
-        setSuppliersMaster(supplierRows)
-        setCustomers(customerRows)
-        setLocations(locationRows)
-        setItemtyps(typRows)
-        setMovetyps(moveRows)
-        clearMasterSuggestCaches()
-        await reloadItemTypColors()
-        readyRef.current = true
-        setReady(true)
-        return {
-          itemsMaster: itemRows,
-          suppliersMaster: supplierRows,
-          customers: customerRows,
-          locations: locationRows,
-          itemtyps: typRows,
-          movetyps: moveRows,
-        }
+        do {
+          pendingRefreshRef.current = false
+          lastSnapshot = await fetchMasterCatalogSnapshot()
+          applySnapshot(lastSnapshot)
+          await reloadItemTypColors()
+        } while (pendingRefreshRef.current)
+        return lastSnapshot!
       } finally {
         setRefreshing(false)
+        refreshLockRef.current = null
       }
     })()
-    inFlightRef.current = promise
-    try {
-      return await promise
-    } finally {
-      if (inFlightRef.current === promise) inFlightRef.current = null
-    }
-  }, [reloadItemTypColors])
+
+    refreshLockRef.current = promise
+    return promise
+  }, [applySnapshot, reloadItemTypColors])
 
   useEffect(() => {
     void refresh()
@@ -134,6 +154,7 @@ export function MasterCatalogProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       refreshing,
+      revision,
       itemsMaster,
       items,
       suppliersMaster,
@@ -147,6 +168,7 @@ export function MasterCatalogProvider({ children }: { children: ReactNode }) {
     [
       ready,
       refreshing,
+      revision,
       itemsMaster,
       items,
       suppliersMaster,
@@ -173,9 +195,7 @@ export function useMasterCatalog(): MasterCatalogValue {
 }
 
 /** Call after saving a master so open tabs get fresh dropdown options without Reload. */
-export function useRefreshMasterCatalogAfterSave(): () => void {
+export function useRefreshMasterCatalogAfterSave(): () => Promise<void> {
   const { refresh } = useMasterCatalog()
-  return useCallback(() => {
-    void refresh().catch(() => {})
-  }, [refresh])
+  return useCallback(() => refresh().then(() => undefined), [refresh])
 }

@@ -2,7 +2,7 @@ import { useCallback, type PointerEvent as ReactPointerEvent, type RefObject } f
 
 export type SplitDragAxis = 'horizontal' | 'vertical'
 
-const SPLIT_HANDLE_PX = 5
+const SPLIT_HANDLE_PX = 1
 
 export function clampSplitRatio(
   ratio: number,

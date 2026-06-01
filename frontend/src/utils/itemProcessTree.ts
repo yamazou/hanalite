@@ -1,11 +1,12 @@
 import type { ItemProcessesOut } from '../types/itemprocs'
-import type { ItemListRow, LocationMaster } from '../types/masters'
+import type { ItemListRow, ItemTyp, LocationMaster } from '../types/masters'
 import type { ProductionOrderDetail } from '../types/production'
 import type { BomTreeLine } from './bomTree'
 import {
   isActiveItemProcessInputRow,
   isBlankItemProcessInputRow,
   isBlankItemProcessRow,
+  resolveItemProcessInputFromLocationCd,
 } from './itemProcessEdit'
 import type { ProductionTreeData } from './productionOrderTree'
 import {
@@ -13,6 +14,23 @@ import {
   buildProcessTreeLine,
 } from './productionOrderTree'
 import { sortEditInputRowsForDisplay, type EditInputRow, type EditProcessRow } from './productionEdit'
+
+export function isWipItemtyp(itemtyp: Pick<ItemTyp, 'itemtyp_cd' | 'itemtyp_nm'>): boolean {
+  const cd = itemtyp.itemtyp_cd.trim().toUpperCase()
+  const nm = itemtyp.itemtyp_nm.trim().toLowerCase()
+  return cd === 'WIP' || nm === 'wip' || nm.includes('work in process')
+}
+
+export function isWipCatalogItem(
+  items: { item_id: number; itemtyp_id?: number }[],
+  itemtyps: ItemTyp[],
+  itemId: number
+): boolean {
+  const item = items.find((row) => row.item_id === itemId)
+  if (!item?.itemtyp_id) return false
+  const typ = itemtyps.find((row) => row.itemtyp_id === item.itemtyp_id)
+  return typ ? isWipItemtyp(typ) : false
+}
 
 export function isWipItem(items: ItemListRow[], itemId: number): boolean {
   const item = items.find((row) => row.item_id === itemId)
@@ -37,24 +55,34 @@ function pickParentRootCode(
   return parents[0]?.item_cd ?? ''
 }
 
-function appendSavedItemProcessSubtree(
+/** Process grid: first step at top (line_no ascending). Tree: final step first (line_no descending). */
+export function processStepsTreeDisplayOrder<T extends { line_no: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => b.line_no - a.line_no)
+}
+
+export function appendSavedItemProcessSubtree(
   lines: BomTreeLine[],
   startIndent: number,
   itemId: number,
-  items: ItemListRow[],
+  items: { item_id: number; itemtyp_id?: number }[],
   locations: LocationMaster[],
   cache: Map<number, ItemProcessesOut>,
-  visited: Set<number>
+  visited: Set<number>,
+  itemtyps?: ItemTyp[]
 ): void {
   if (visited.has(itemId)) return
   const saved = cache.get(itemId)
   if (!saved?.processes.length) return
-  if (!isWipItem(items, itemId)) return
+  const wip =
+    itemtyps != null
+      ? isWipCatalogItem(items, itemtyps, itemId)
+      : isWipItem(items as ItemListRow[], itemId)
+  if (!wip) return
 
   visited.add(itemId)
   const parent = { item_id: saved.item_id, item_cd: saved.item_cd }
 
-  const processes = [...saved.processes].sort((a, b) => a.line_no - b.line_no)
+  const processes = processStepsTreeDisplayOrder(saved.processes)
   for (const proc of processes) {
     const processLine = buildProcessTreeLine(
       {
@@ -88,7 +116,11 @@ function appendSavedItemProcessSubtree(
           startIndent + 1
         )
       )
-      if (isWipItem(items, inp.item_id)) {
+      const nestedWip =
+        itemtyps != null
+          ? isWipCatalogItem(items, itemtyps, inp.item_id)
+          : isWipItem(items as ItemListRow[], inp.item_id)
+      if (nestedWip) {
         appendSavedItemProcessSubtree(
           lines,
           startIndent + 2,
@@ -96,7 +128,8 @@ function appendSavedItemProcessSubtree(
           items,
           locations,
           cache,
-          visited
+          visited,
+          itemtyps
         )
       }
     }
@@ -108,6 +141,7 @@ function appendEditProcessBranch(
   lines: BomTreeLine[],
   processIndent: number,
   proc: EditProcessRow,
+  processRows: EditProcessRow[],
   inputRows: EditInputRow[],
   items: ItemListRow[],
   locations: LocationMaster[],
@@ -142,7 +176,7 @@ function appendEditProcessBranch(
   )
 
   for (const inp of inputs) {
-    const fromLoc = locations.find((loc) => loc.location_id === inp.from_location_id)
+    const fromCd = resolveItemProcessInputFromLocationCd(proc.line_no, processRows, locations)
     lines.push(
       buildInputTreeLine(
         {
@@ -151,7 +185,7 @@ function appendEditProcessBranch(
           item_cd: inp.item_cd,
           item_nm: inp.item_nm,
           req_qty: inp.req_qty,
-          from_location_cd: fromLoc?.location_cd ?? '',
+          from_location_cd: fromCd,
         },
         wipCd,
         items,
@@ -195,17 +229,19 @@ export function buildItemProcessMasterTree(params: {
     },
   ]
 
-  const processes = processRows
+  const processRowsActive = processRows
     .filter((row) => !isBlankItemProcessRow(row))
     .sort((a, b) => a.line_no - b.line_no)
+  const processesForTree = processStepsTreeDisplayOrder(processRowsActive)
 
   const visited = new Set<number>()
   const fgParent = { item_id: detail.parent_item_id, item_cd: detail.parent_item_cd }
-  for (const proc of processes) {
+  for (const proc of processesForTree) {
     appendEditProcessBranch(
       lines,
       1,
       proc,
+      processRowsActive,
       inputRows,
       items,
       locations,

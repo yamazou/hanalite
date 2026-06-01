@@ -11,21 +11,30 @@ import { GridColumnFilterMenu } from '../components/GridColumnFilterMenu'
 import { GridContextMenu, type GridContextMenuState } from '../components/GridContextMenu'
 import type { GridColumnDef } from '../components/ResizableGridTable'
 import type { GridColumnLayout } from './useGridColumnLayout'
-import { useGridColumnFilters } from './useGridColumnFilters'
+import { useGridColumnFilters, type GridColumnFiltersApi } from './useGridColumnFilters'
 import { compareValues, useGridSort } from './useGridSort'
 import { applyColumnFilters, collectUniqueFilterValues } from '../utils/gridColumnFilter'
 import { exportGridToExcel } from '../utils/exportGridExcel'
 import { isGridDataColumn } from '../utils/excelLikeGrid'
 import { parseGridExcelFile } from '../utils/importGridExcel'
+import {
+  readAnchorRect,
+  resolveFilterGridRoot,
+  type GridFilterAnchorRect,
+} from '../utils/gridFilterAnchor'
 
 export type GridExcelExport<T> = {
   sheetName: string
   filenamePrefix: string
-  getExportValue: (row: T, columnKey: string) => string | number
+  getExportValue?: (row: T, columnKey: string) => string | number
+  /** When set, runs instead of exporting visible grid columns/rows. */
+  runExport?: () => void | Promise<void>
 }
 
 export type GridExcelImport = {
   applyParsedRows: (rows: Record<string, string>[]) => void | Promise<void>
+  /** When set, parses the workbook instead of matching grid column headers. */
+  parseFile?: (file: File) => Promise<Record<string, string>[]>
 }
 
 type ContextMenuItem = {
@@ -42,21 +51,35 @@ export type GridRowDelete = {
 type Options<T> = {
   columns: GridColumnDef[]
   rows: T[]
+  /** When set, column filter pick-list values come from these rows (e.g. all orders' inputs). */
+  filterOptionRows?: T[]
+  /** When set, called when the filter menu opens (avoids stale pick-lists). */
+  getFilterOptionRows?: () => T[]
+  /** When set, overrides default unique-value collection for the filter pick-list. */
+  getFilterOptions?: (columnKey: string) => string[]
   getFilterValue: (row: T, columnKey: string) => string
+  /** When set with filterOptionRows, resolves values for the filter pick-list only. */
+  getFilterOptionValue?: (row: T, columnKey: string) => string
   getSortValue?: (row: T, columnKey: string) => unknown
   excelExport?: GridExcelExport<T>
   excelImport?: GridExcelImport
   excelLabel?: string
   importLabel?: string
   contextMenuItems?: ContextMenuItem[]
-  /** When rows are checked, right-click shows delete instead of export/import. */
+  /** Grid-only row removal (context menu). DB changes use toolbar Update / Delete. */
   rowDelete?: GridRowDelete
+  /** Share column filter state across multiple grids (e.g. Production List Input Item). */
+  columnFiltersApi?: GridColumnFiltersApi
 }
 
 export function useExcelLikeGrid<T>({
   columns,
   rows,
+  filterOptionRows,
+  getFilterOptionRows,
+  getFilterOptions,
   getFilterValue,
+  getFilterOptionValue,
   getSortValue,
   excelExport,
   excelImport,
@@ -64,13 +87,17 @@ export function useExcelLikeGrid<T>({
   importLabel = 'Import',
   contextMenuItems = [],
   rowDelete,
+  columnFiltersApi,
 }: Options<T>) {
   const sort = useGridSort()
-  const filters = useGridColumnFilters()
+  const internalFilters = useGridColumnFilters()
+  const filters = columnFiltersApi ?? internalFilters
   const [filterMenu, setFilterMenu] = useState<{
     key: string
     label: string
     anchor: HTMLElement
+    anchorRect: GridFilterAnchorRect
+    gridRoot: Element | null
   } | null>(null)
   const [contextMenu, setContextMenu] = useState<GridContextMenuState>(null)
   const [contextMenuDeleteMode, setContextMenuDeleteMode] = useState(false)
@@ -93,17 +120,39 @@ export function useExcelLikeGrid<T>({
     return list
   }, [rows, filters.filters, sort.sort, getFilterValue, resolveSortValue])
 
+  const resolveFilterOptionValue = getFilterOptionValue ?? getFilterValue
+
   const filterOptions = useMemo(() => {
     if (!filterMenu) return []
-    return collectUniqueFilterValues(rows, filterMenu.key, getFilterValue)
-  }, [filterMenu, rows, getFilterValue])
+    if (getFilterOptions) {
+      return getFilterOptions(filterMenu.key)
+    }
+    const filterOptionSource = getFilterOptionRows?.() ?? filterOptionRows ?? rows
+    return collectUniqueFilterValues(
+      filterOptionSource,
+      filterMenu.key,
+      resolveFilterOptionValue
+    )
+  }, [
+    filterMenu,
+    filterOptionRows,
+    rows,
+    getFilterOptionRows,
+    getFilterOptions,
+    resolveFilterOptionValue,
+  ])
 
   const filterColumnLabel =
     columns.find((c) => c.key === filterMenu?.key)?.label ?? filterMenu?.label ?? ''
 
   const runExport = useCallback(() => {
+    if (!excelExport) return
+    if (excelExport.runExport) {
+      void excelExport.runExport()
+      return
+    }
     const layout = layoutRef.current
-    if (!layout || !excelExport) return
+    if (!layout || !excelExport.getExportValue) return
     exportGridToExcel(
       excelExport.sheetName,
       layout.orderedColumns,
@@ -131,7 +180,9 @@ export function useExcelLikeGrid<T>({
       const dataColumns = ordered.filter((col) => isGridDataColumn(col.key))
       setImportBusy(true)
       try {
-        const parsed = await parseGridExcelFile(file, dataColumns)
+        const parsed = excelImport.parseFile
+          ? await excelImport.parseFile(file)
+          : await parseGridExcelFile(file, dataColumns)
         await excelImport.applyParsedRows(parsed)
         setContextMenu(null)
       } catch (err) {
@@ -179,12 +230,14 @@ export function useExcelLikeGrid<T>({
     isColumnSortable: isGridDataColumn,
     isColumnFilterable: isGridDataColumn,
     isColumnFilterActive: filters.isActive,
-    onFilterClick: (key: string, anchor: HTMLElement) => {
+    onFilterClick: (key: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => {
       const col = columns.find((c) => c.key === key)
       setFilterMenu({
         key,
         label: col?.label ?? key,
         anchor,
+        anchorRect,
+        gridRoot: resolveFilterGridRoot(anchor),
       })
     },
   }
@@ -193,9 +246,12 @@ export function useExcelLikeGrid<T>({
     filterMenu != null ? (
       <GridColumnFilterMenu
         columnLabel={filterColumnLabel}
+        filterColumnKey={filterMenu.key}
+        filterGridRoot={filterMenu.gridRoot}
         options={filterOptions}
         selected={filters.getSelected(filterMenu.key, filterOptions)}
         anchorEl={filterMenu.anchor}
+        anchorRectAtOpen={filterMenu.anchorRect}
         onApply={(selected) =>
           filters.applySelection(filterMenu.key, selected, filterOptions)
         }
@@ -233,6 +289,8 @@ export function useExcelLikeGrid<T>({
 
   return {
     displayRows,
+    columnFilters: filters.filters,
+    clearColumnFilters: filters.clearAll,
     onLayoutReady,
     openContextMenu,
     triggerImport,

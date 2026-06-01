@@ -75,19 +75,6 @@ export const masterItemEditColumns: GridColumnDef[] = [
   { key: 'customer2', label: 'Customer 2', defaultWidth: 120 },
 ]
 
-export const masterBomEditColumns: GridColumnDef[] = [
-  GRID_ROWNUM_COLUMN,
-  GRID_SELECT_COLUMN,
-  { key: 'parent_cd', label: 'Parent Code', defaultWidth: 100 },
-  { key: 'parent_nm', label: 'Parent Name', defaultWidth: 140 },
-  { key: 'child_cd', label: 'Child Code', defaultWidth: 100 },
-  { key: 'child_nm', label: 'Child Name', defaultWidth: 140 },
-  { key: 'level', label: 'Level', defaultWidth: 56, className: 'erp-col-num' },
-  { key: 'to_location', label: 'To Location', defaultWidth: 110 },
-  { key: 'from_location', label: 'From Location', defaultWidth: 110 },
-  { key: 'qty', label: 'Req Qty', defaultWidth: 80, className: 'erp-col-num' },
-]
-
 export const currentStockColumns: GridColumnDef[] = [
   { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
   { key: 'item_nm', label: 'Item Name', defaultWidth: 140 },
@@ -170,9 +157,28 @@ export const productionOrderListColumns: GridColumnDef[] = [
   ...productionOrderDataColumns,
 ]
 
+/** Production List header grid (editable trailing row). */
+export const productionOrderListEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'production_date', label: 'Production Date', defaultWidth: 100, headerRequired: true },
+  { key: 'reference_no', label: 'Reference No.', defaultWidth: 120 },
+  { key: 'source', label: 'Source', defaultWidth: 72 },
+  { key: 'status', label: 'Status', defaultWidth: 88 },
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 100, headerRequired: true },
+  { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
+  { key: 'lot', label: 'Lot', defaultWidth: 96 },
+  { key: 'planned_qty', label: 'Plan Qty', defaultWidth: 80, className: 'erp-col-num', headerRequired: true },
+  { key: 'actual_qty', label: 'Actual Qty', defaultWidth: 80, className: 'erp-col-num' },
+  { key: 'lines', label: 'Steps', defaultWidth: 72, className: 'erp-col-num' },
+  { key: 'created', label: 'Created', defaultWidth: 128 },
+  { key: 'id', label: 'Order', defaultWidth: 70, className: 'erp-col-num' },
+  { key: 'approved', label: 'Ordered at', defaultWidth: 128 },
+]
+
 export const productionLineColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'process', label: 'Location Code', defaultWidth: 100 },
+  { key: 'process', label: 'Location Code', defaultWidth: 100, headerRequired: true },
   { key: 'process_nm', label: 'Location Name', defaultWidth: 160 },
   { key: 'actions', label: '', defaultWidth: 44, className: 'erp-col-actions erp-col-row-move' },
 ]
@@ -180,7 +186,7 @@ export const productionLineColumns: GridColumnDef[] = [
 export const itemProcessProcessEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
   GRID_SELECT_COLUMN,
-  { key: 'process', label: 'Location Code', defaultWidth: 120 },
+  { key: 'process', label: 'Location Code', defaultWidth: 120, headerRequired: true },
   { key: 'process_nm', label: 'Location Name', defaultWidth: 160 },
   { key: 'actions', label: '', defaultWidth: 44, className: 'erp-col-actions erp-col-row-move' },
 ]
@@ -188,7 +194,7 @@ export const itemProcessProcessEditColumns: GridColumnDef[] = [
 export const itemProcessInputEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
   GRID_SELECT_COLUMN,
-  { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 110, headerRequired: true },
   { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
   { key: 'req_qty', label: 'Req Qty', defaultWidth: 96, className: 'erp-col-num' },
 ]
@@ -196,7 +202,7 @@ export const itemProcessInputEditColumns: GridColumnDef[] = [
 export const itemProcessFinalItemColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
   GRID_SELECT_COLUMN,
-  { key: 'item_cd', label: 'Item Code', defaultWidth: 110 },
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 110, headerRequired: true },
   { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
   { key: 'final_item_cd', label: 'FG Item', defaultWidth: 110 },
   { key: 'itemtyp_cd', label: 'Item Type Code', defaultWidth: 100 },
@@ -205,10 +211,10 @@ export const itemProcessFinalItemColumns: GridColumnDef[] = [
 
 export const productionInputColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
-  { key: 'item_cd', label: 'Item Code', defaultWidth: 100 },
+  { key: 'item_cd', label: 'Item Code', defaultWidth: 100, headerRequired: true },
   { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
   { key: 'from_location', label: 'From Location', defaultWidth: 100 },
-  { key: 'req_qty', label: 'Plan Input Qty', defaultWidth: 96, className: 'erp-col-num' },
+  { key: 'req_qty', label: 'Plan Input Qty', defaultWidth: 96, className: 'erp-col-num', headerRequired: true },
   { key: 'consume_qty', label: 'Actual Input Qty', defaultWidth: 104, className: 'erp-col-num' },
   { key: 'lot', label: 'Lot', defaultWidth: 96 },
 ]

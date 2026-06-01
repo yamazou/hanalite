@@ -55,7 +55,7 @@ Inventory
   Lot Trace
   Period Balances
 Masters
-  Item Types / Suppliers / Move Types / Locations / Items / BOM
+  Item Types / Suppliers / Move Types / Locations / Items / Item Processes
 ```
 
 ## 画面ルート
@@ -97,7 +97,7 @@ Masters
 | `/masters/movetyps` | Move Types |
 | `/masters/locations` | Locations |
 | `/masters/items` | Items |
-| `/masters/boms` | BOM |
+| `/masters/item-processes` | Item Processes |
 
 ## ロケーション入力
 

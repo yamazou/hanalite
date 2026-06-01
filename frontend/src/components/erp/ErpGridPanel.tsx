@@ -5,6 +5,8 @@ import type { GridColumnLayoutOptions } from '../../hooks/useGridColumnLayoutOpt
 import { ErpPanelTitleBar } from './ErpPanelTitleBar'
 import { ErpTitleBarActions } from './ErpTitleBarActions'
 
+import type { GridFilterAnchorRect } from '../../utils/gridFilterAnchor'
+
 type Props = {
   gridId: string
   title?: string
@@ -13,7 +15,7 @@ type Props = {
   isEmpty?: boolean
   loadingText?: string
   emptyText?: string
-  onRefresh?: () => void
+  onRefresh?: () => void | Promise<void>
   toolbarLeft?: ReactNode
   toolbarRight?: ReactNode
   showSaveGridButton?: boolean
@@ -21,6 +23,10 @@ type Props = {
   onSaveGrid?: () => void
   /** When true, title / Save Grid / Reload are rendered by a parent ErpScreen instead. */
   hidePanelTitleBar?: boolean
+  /** `section` matches Process / Input Item detail section headers. */
+  titleBarStyle?: 'panel' | 'section'
+  /** Actions on the title row (tabs, Update, …). */
+  titleActions?: ReactNode
   panelClassName?: string
   onLayoutReady?: (layout: GridColumnLayout) => void
   onGridContextMenu?: (event: MouseEvent) => void
@@ -29,7 +35,7 @@ type Props = {
   isColumnSortable?: (columnKey: string) => boolean
   isColumnFilterable?: (columnKey: string) => boolean
   isColumnFilterActive?: (columnKey: string) => boolean
-  onFilterClick?: (columnKey: string, anchor: HTMLElement) => void
+  onFilterClick?: (columnKey: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => void
   layoutOptions?: GridColumnLayoutOptions
   /** Auto-fit rownum column to visible row count (Excel-like). */
   rowCount?: number
@@ -51,6 +57,8 @@ export function ErpGridPanel({
   showSaveGridButton = false,
   onSaveGrid,
   hidePanelTitleBar = false,
+  titleBarStyle = 'panel',
+  titleActions,
   panelClassName,
   onLayoutReady,
   onGridContextMenu,
@@ -76,21 +84,44 @@ export function ErpGridPanel({
 
   const showSaveGrid = showSaveGridButton || onSaveGrid != null
   const showTitleBar =
-    !hidePanelTitleBar && Boolean(title || showSaveGrid || onRefresh)
+    !hidePanelTitleBar &&
+    Boolean(title || titleActions || showSaveGrid || onRefresh)
   const showToolbar = Boolean(toolbarLeft || toolbarRight)
 
-  return (
-    <div className={`erp-panel erp-panel-grow${panelClassName ? ` ${panelClassName}` : ''}`}>
-      {showTitleBar ? (
-        <ErpPanelTitleBar title={title ?? ''}>
+  const sectionTitle = title?.trim() ?? ''
+  const titleBar =
+    titleBarStyle === 'section' ? (
+      <div
+        className={[
+          'erp-production-detail-section-title',
+          !sectionTitle ? 'erp-production-detail-section-title--no-label' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {sectionTitle ? (
+          <span className="erp-production-detail-section-title-label">{sectionTitle}</span>
+        ) : null}
+        {titleActions ? (
+          <div className="erp-production-detail-section-title-actions">{titleActions}</div>
+        ) : null}
+      </div>
+    ) : (
+      <ErpPanelTitleBar title={title ?? ''}>
+        {titleActions ?? (
           <ErpTitleBarActions
             showSaveGridButton={showSaveGrid}
             onSaveGrid={onSaveGrid ?? (() => layout.saveLayout())}
             saveGridIsDirty={onSaveGrid ? undefined : layout.isDirty}
             onRefresh={onRefresh}
           />
-        </ErpPanelTitleBar>
-      ) : null}
+        )}
+      </ErpPanelTitleBar>
+    )
+
+  return (
+    <div className={`erp-panel erp-panel-grow${panelClassName ? ` ${panelClassName}` : ''}`}>
+      {showTitleBar ? titleBar : null}
       <div className="erp-panel-content">
         {showToolbar ? (
           <div className="erp-toolbar">

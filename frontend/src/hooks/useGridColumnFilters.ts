@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react'
 
+export type GridColumnFiltersApi = ReturnType<typeof useGridColumnFilters>
+
 export function useGridColumnFilters() {
   const [filters, setFilters] = useState<Record<string, Set<string>>>({})
 

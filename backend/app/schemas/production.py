@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ProductionStatus = Literal["registered", "approved", "started", "completed", "cancelled"]
+ProductionStatus = Literal["registered", "approved", "completed"]
 ProductionLineStatus = Literal["planned", "completed"]
 ProductionSourceType = Literal["manual", "excel"]
 
@@ -41,6 +41,7 @@ class ProductionOrderCreate(BaseModel):
 class ProductionOrderUpdate(BaseModel):
     production_date: date | None = None
     reference_no: str | None = Field(default=None, max_length=100)
+    parent_item_id: int | None = Field(default=None, gt=0)
     planned_qty: Decimal | None = Field(default=None, gt=0)
     actual_qty: Decimal | None = Field(default=None, gt=0)
     lot: str | None = Field(default=None, min_length=1, max_length=50)
@@ -133,6 +134,3 @@ class ProductionOrderRead(ProductionOrderListItem):
     outputs: list[ProductionOrderOutputRead]
 
 
-class ProductionOrderBomPreview(BaseModel):
-    lines: list[ProductionOrderLineRead]
-    inputs: list[ProductionOrderInputRead]

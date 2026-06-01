@@ -102,16 +102,28 @@ PDF 取込は Delivery にはありません。
 | GET/POST/DELETE | `/movetyps`, `/movetyps/{id}` | 移動種別 |
 | GET/POST/DELETE | `/locations`, `/locations/{id}` | ロケーション |
 | GET/POST/PUT/DELETE | `/items`, `/items/{id}` | 品目 |
-| GET | `/items/search?q=` | 品目検索（BOM 用） |
+| GET | `/items/search?q=` | 品目検索（ピッカー用） |
 
-### BOM (`/api/v1/boms`)
+### Item Processes (`/api/v1/masters/items`)
 
 | Method | Path | 説明 |
 |--------|------|------|
-| GET | `` | BOM 一覧 |
-| POST | `` | BOM 作成 |
-| PUT | `/{bom_id}` | BOM 更新 |
-| DELETE | `/{bom_id}` | BOM 削除（論理削除） |
+| GET | `/processes/final-items` | 工程登録済み FG 一覧 |
+| PUT | `/processes/final-items` | FG 登録 |
+| GET | `/{item_id}/processes` | 工程・投入取得 |
+| PUT | `/{item_id}/processes` | 工程・投入保存 |
+
+### Production (`/api/v1/production/orders`)
+
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | `` | 製造オーダー一覧 |
+| POST | `` | 製造オーダー作成 |
+| GET | `/{order_id}` | 詳細（工程・投入含む） |
+| PUT | `/{order_id}` | 更新 |
+| POST | `/{order_id}/approve` | 承認（Ordered） |
+| POST | `/{order_id}/cancel` | Registered に戻す |
+| DELETE | `/{order_id}` | 削除（Registered のみ） |
 
 ### Inventory (`/api/v1/inventory`)
 

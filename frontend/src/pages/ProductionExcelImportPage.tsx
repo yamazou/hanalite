@@ -33,7 +33,7 @@ export function ProductionExcelImportPage() {
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to="/production/orders" className="btn erp-btn erp-btn-clear">
-            Back to list
+            Back to Production Order List
           </AppLink>
         </div>
       </ErpSearchPanel>

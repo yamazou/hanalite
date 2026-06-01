@@ -1,4 +1,4 @@
-export type ProductionStatus = 'registered' | 'approved' | 'started' | 'completed' | 'cancelled'
+export type ProductionStatus = 'registered' | 'approved' | 'completed'
 
 export type ProductionLineStatus = 'planned' | 'completed'
 
@@ -194,16 +194,13 @@ export interface ProductionOrderInputWritePayload {
   line_no?: number
 }
 
-export interface ProductionOrderBomPreview {
-  lines: ProductionOrderLine[]
-  inputs: ProductionOrderInput[]
-}
-
 export interface ProductionOrderUpdatePayload {
 
   production_date?: string
 
   reference_no?: string | null
+
+  parent_item_id?: number
 
   planned_qty?: number
 

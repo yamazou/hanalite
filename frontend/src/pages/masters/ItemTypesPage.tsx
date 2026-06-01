@@ -27,6 +27,7 @@ import { useItemTypColors } from '../../context/ItemTypColorContext'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
@@ -181,6 +182,15 @@ export function ItemTypesPage() {
     commitSentinelRowOnEnter(row)
   }
 
+  const removeSelectedFromGrid = () => {
+    if (selectedKeys.size === 0) return
+    setEditRows((rows) =>
+      removeSelectedGridRows(rows, selectedKeys, isBlankItemTypRow, () => emptyEditItemTypRow())
+    )
+    setSelectedKeys(new Set())
+  }
+  deleteRowsRef.current = removeSelectedFromGrid
+
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item type(s)'))) return
@@ -190,16 +200,11 @@ export function ItemTypesPage() {
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.itemtyp_id != null)
-      const toDrop = new Set(selected.map((row) => row.key))
       for (const row of toDelete) {
         await api.deleteItemTyp(row.itemtyp_id!)
       }
       setEditRows((rows) =>
-        ensureTrailingBlankRow(
-          rows.filter((row) => !toDrop.has(row.key)),
-          isBlankItemTypRow,
-          () => emptyEditItemTypRow()
-        )
+        removeSelectedGridRows(rows, selectedKeys, isBlankItemTypRow, () => emptyEditItemTypRow())
       )
       setSelectedKeys(new Set())
       setSuccess(
@@ -215,7 +220,6 @@ export function ItemTypesPage() {
       setSubmitting(false)
     }
   }
-  deleteRowsRef.current = () => void deleteSelected()
 
   const handleSave = async () => {
     const active = editRows.filter(isActiveItemTypRow)

@@ -9,9 +9,12 @@ from sqlalchemy.exc import OperationalError
 
 from app.config import settings
 from app.db_schema import (
+    ensure_drop_m_boms_table,
     ensure_itemprocs_tables,
-    ensure_itemproc_inputs_from_location_nullable,
+    ensure_itemproc_roots_table,
+    ensure_itemproc_inputs_drop_from_location_column,
     ensure_itemproc_inputs_req_qty_nullable,
+    ensure_itemprocs_drop_rm_location_column,
     ensure_m_customers_and_item_customer_cols,
     ensure_supplier_and_customer_codes,
     ensure_m_itemtyps_itemtyp_cd,
@@ -21,17 +24,20 @@ from app.db_schema import (
     ensure_prd_order_lines_columns,
     ensure_prd_orders_header_columns,
 )
-from app.routers import boms, delivery_drafts, drafts, health, inventory, item_processes, masters, production
+from app.routers import delivery_drafts, drafts, health, inventory, item_processes, masters, production
 
 
 def _run_startup_schema_patches() -> None:
     """Apply lightweight schema patches; retry while MySQL is still starting (e.g. XAMPP boot)."""
     patches = (
+        ensure_drop_m_boms_table,
         ensure_m_customers_and_item_customer_cols,
         ensure_supplier_and_customer_codes,
         ensure_itemprocs_tables,
-        ensure_itemproc_inputs_from_location_nullable,
+        ensure_itemproc_roots_table,
+        ensure_itemproc_inputs_drop_from_location_column,
         ensure_itemproc_inputs_req_qty_nullable,
+        ensure_itemprocs_drop_rm_location_column,
         ensure_prd_orders_header_columns,
         ensure_prd_order_lines_columns,
         ensure_prd_order_inputs_columns,
@@ -84,7 +90,6 @@ app.include_router(drafts.router, prefix=prefix)
 app.include_router(delivery_drafts.router, prefix=prefix)
 app.include_router(masters.router, prefix=prefix)
 app.include_router(item_processes.router, prefix=prefix)
-app.include_router(boms.router, prefix=prefix)
 app.include_router(inventory.router, prefix=prefix)
 app.include_router(production.router, prefix=prefix)
 

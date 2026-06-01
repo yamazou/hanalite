@@ -1,4 +1,5 @@
 import { useMemo, type CSSProperties, type KeyboardEvent } from 'react'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import {
   filterItemsForItemAnyDatalist,
   filterItemsForItemCdDatalist,
@@ -44,6 +45,7 @@ export function GridItemDatalistField({
   onFocus,
   onKeyDown,
 }: Props) {
+  const { revision } = useMasterCatalog()
   const filtered = useMemo(() => {
     if (mode === 'cd') return filterItemsForItemCdDatalist(items, value)
     if (mode === 'nm') return filterItemsForItemNmDatalist(items, value)
@@ -74,7 +76,7 @@ export function GridItemDatalistField({
         onChange={(event) => commit(event.target.value)}
         onBlur={(event) => commit(event.currentTarget.value)}
       />
-      <datalist id={listId}>
+      <datalist key={revision} id={listId}>
         {filtered.map((item) => (
           <option
             key={item.item_id}

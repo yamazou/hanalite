@@ -6,6 +6,7 @@ type ActionsProps = {
   rowError: string | null
   statusMessage?: string | null
   selectedCount?: number
+  saveLabel?: string
   onSave?: () => void
   onDelete?: () => void
 }
@@ -16,6 +17,7 @@ export function MasterGridToolbarActions({
   rowError,
   statusMessage,
   selectedCount = 0,
+  saveLabel = 'Update',
   onSave,
   onDelete,
 }: ActionsProps) {
@@ -28,7 +30,7 @@ export function MasterGridToolbarActions({
           disabled={submitting}
           onClick={onSave}
         >
-          {submitting ? 'Updating…' : 'Update'}
+          {submitting ? (saveLabel === 'Create' ? 'Creating…' : 'Updating…') : saveLabel}
         </button>
       ) : null}
       {onDelete ? (

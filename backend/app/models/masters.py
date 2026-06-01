@@ -79,7 +79,6 @@ class ItemProc(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
     line_no: Mapped[int] = mapped_column(Integer)
     wip_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
-    rm_location_id: Mapped[int] = mapped_column(ForeignKey("m_locations.location_id"))
     output_item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
@@ -87,7 +86,6 @@ class ItemProc(Base):
 
     item: Mapped["Item"] = relationship(foreign_keys=[item_id])
     wip_location: Mapped["Location"] = relationship(foreign_keys=[wip_location_id])
-    rm_location: Mapped["Location"] = relationship(foreign_keys=[rm_location_id])
     output_item: Mapped["Item"] = relationship(foreign_keys=[output_item_id])
     inputs: Mapped[list["ItemProcInput"]] = relationship(
         back_populates="itemproc",
@@ -102,9 +100,6 @@ class ItemProcInput(Base):
     itemproc_id: Mapped[int] = mapped_column(ForeignKey("m_itemprocs.itemproc_id"))
     input_no: Mapped[int] = mapped_column(Integer)
     item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"))
-    from_location_id: Mapped[int | None] = mapped_column(
-        ForeignKey("m_locations.location_id"), nullable=True
-    )
     req_qty: Mapped[Decimal | None] = mapped_column(Numeric(15, 3), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
@@ -112,6 +107,16 @@ class ItemProcInput(Base):
 
     itemproc: Mapped["ItemProc"] = relationship(back_populates="inputs")
     item: Mapped["Item"] = relationship(foreign_keys=[item_id])
-    from_location: Mapped["Location"] = relationship(foreign_keys=[from_location_id])
+
+
+class ItemProcRoot(Base):
+    """Output items registered for Item Process (may exist before process steps are defined)."""
+
+    __tablename__ = "m_itemproc_roots"
+
+    item_id: Mapped[int] = mapped_column(ForeignKey("m_items.item_id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+
+    item: Mapped["Item"] = relationship(foreign_keys=[item_id])
 
 

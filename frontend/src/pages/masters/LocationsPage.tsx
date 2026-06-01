@@ -25,6 +25,7 @@ import { mergeLocationImportRows } from '../../utils/locationExcelImport'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
@@ -175,6 +176,15 @@ export function LocationsPage() {
     commitSentinelRowOnEnter(row)
   }
 
+  const removeSelectedFromGrid = () => {
+    if (selectedKeys.size === 0) return
+    setEditRows((rows) =>
+      removeSelectedGridRows(rows, selectedKeys, isBlankLocationRow, () => emptyEditLocationRow())
+    )
+    setSelectedKeys(new Set())
+  }
+  deleteRowsRef.current = removeSelectedFromGrid
+
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'location(s)'))) return
@@ -184,16 +194,11 @@ export function LocationsPage() {
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.location_id != null)
-      const toDrop = new Set(selected.map((row) => row.key))
       for (const row of toDelete) {
         await api.deleteLocation(row.location_id!)
       }
       setEditRows((rows) =>
-        ensureTrailingBlankRow(
-          rows.filter((row) => !toDrop.has(row.key)),
-          isBlankLocationRow,
-          () => emptyEditLocationRow()
-        )
+        removeSelectedGridRows(rows, selectedKeys, isBlankLocationRow, () => emptyEditLocationRow())
       )
       setSelectedKeys(new Set())
       setSuccess(toDelete.length > 0 ? 'Location(s) deleted.' : 'Row(s) removed.')
@@ -204,7 +209,6 @@ export function LocationsPage() {
       setSubmitting(false)
     }
   }
-  deleteRowsRef.current = () => void deleteSelected()
 
   const handleSave = async () => {
     const active = editRows.filter(isActiveLocationRow)

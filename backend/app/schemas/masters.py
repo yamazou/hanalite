@@ -147,7 +147,7 @@ class ItemListOut(BaseModel):
 
 
 class ItemSearchOut(BaseModel):
-    """Lightweight row for BOM / picker search by item_cd or item_nm."""
+    """Lightweight row for picker search by item_cd or item_nm."""
 
     item_id: int
     item_cd: str

@@ -1,3 +1,5 @@
+import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
+
 export function buildRecordSnapshotMap<TRow, TId extends number, TSnapshot>(
   rows: TRow[],
   getRecordId: (row: TRow) => TId | undefined,
@@ -55,6 +57,22 @@ export function changedActiveRows<TRow, TId extends number, TSnapshot extends Re
 
 export function deleteSelectedConfirm(count: number, entityLabel: string): string {
   return `Delete selected ${count} ${entityLabel}?`
+}
+
+/** Remove checked rows from the edit grid only (no API). Used by grid context-menu Delete row. */
+export function removeSelectedGridRows<T extends { key: string }>(
+  rows: T[],
+  selectedKeys: Set<string>,
+  isBlank: (row: T) => boolean,
+  createBlank: (existing: T[]) => T
+): T[] {
+  if (selectedKeys.size === 0) return rows
+  const drop = new Set(selectedKeys)
+  return ensureTrailingBlankRow(
+    rows.filter((row) => !drop.has(row.key)),
+    isBlank,
+    createBlank
+  )
 }
 
 export function savedCountMessage(count: number, entityLabel: string): string {

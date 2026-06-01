@@ -83,7 +83,5 @@ export const statusLabel: Record<string, string> = {
 export const productionStatusLabel: Record<string, string> = {
   registered: 'Registered',
   approved: 'Ordered',
-  started: 'Started',
   completed: 'Completed',
-  cancelled: 'Cancelled',
 }

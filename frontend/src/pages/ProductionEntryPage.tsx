@@ -1,8 +1,9 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AppLink, useAppNavigate, useAppViewRoute } from '../context/AppNavigateContext'
+import { AppLink, useAppNavigate, useTabPanelRoute } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { BomTreePanel } from '../components/BomTreePanel'
 import { ProductionTreeSidebar } from '../components/ProductionTreeSidebar'
+import { TreeToolbarToggle } from '../components/TreeToolbarToggle'
 import { ProductionDetailSplit } from '../components/ProductionDetailSplit'
 import { ProductionProcessInputPanels } from '../components/ProductionProcessInputPanels'
 import { useProductionPanelSplitLayout } from '../hooks/useProductionPanelSplitLayout'
@@ -11,13 +12,12 @@ import { ErpSearchPanel } from '../components/erp/ErpSearchPanel'
 import { ItemSearchPicker } from '../components/ItemSearchPicker'
 import { PRODUCTION_ORDER_PARENT_ITEMTYP_CDS } from '../utils/itemTypDisplay'
 import { useMasterCatalog } from '../context/MasterCatalogContext'
+import type { ItemProcessesOut } from '../types/itemprocs'
 import type { ProductionOrderDetail } from '../types/production'
 import type { ItemSearchRow } from '../types/masters'
 import { parseDateInputValue, toDateInputValue } from '../utils/format'
 import { ensureTrailingBlankRow } from '../utils/gridTrailingBlankRow'
 import {
-  bomPreviewToEditInputRowsWithTrailingBlanks,
-  bomPreviewToEditProcessRows,
   buildInputPayload,
   buildProcessPayload,
   firstActiveProcessPlannedQty,
@@ -31,10 +31,12 @@ import {
   type EditInputRow,
   type EditProcessRow,
 } from '../utils/productionEdit'
-import { loadBomTreeForParent, type BomTreeLine, type BomTreeParent, type ProcessTreeHighlight } from '../utils/bomTree'
+import { type BomTreeLine, type ProcessTreeHighlight } from '../utils/bomTree'
 import { parentTreeHighlight } from '../utils/productionTreeHighlight'
+import { loadWipItemProcessCache } from '../utils/loadWipItemProcessCache'
 import {
   buildProductionOrderTree,
+  collectProductionOrderWipIds,
   isSameProductionTreeData,
   type ProductionTreeData,
 } from '../utils/productionOrderTree'
@@ -52,11 +54,14 @@ const PANEL_SPLIT_LAYOUT_ID = 'production-entry-panels-v1'
 
 export function ProductionEntryPage() {
   const navigate = useAppNavigate()
-  const { search } = useAppViewRoute()
+  const { search } = useTabPanelRoute()
   const orderIdParam = new URLSearchParams(search).get('id')
   const orderId = orderIdParam ? Number(orderIdParam) : null
   const isEdit = orderId != null && !Number.isNaN(orderId)
-  const { items, itemsMaster, locations } = useMasterCatalog()
+  const { items, itemsMaster, locations, itemtyps } = useMasterCatalog()
+  const [itemProcessCache, setItemProcessCache] = useState<Map<number, ItemProcessesOut>>(
+    () => new Map()
+  )
   const [detail, setDetail] = useState<ProductionOrderDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -88,6 +93,7 @@ export function ProductionEntryPage() {
 
   const loadDetail = useCallback(async (id: number) => {
     setDetailLoading(true)
+    setError(null)
     try {
       const row = await api.getProductionOrder(id)
       setDetail(row)
@@ -156,25 +162,22 @@ export function ProductionEntryPage() {
     []
   )
 
-  const handleSaveGridLayouts = () => {
+  const handleSaveGridLayouts = useCallback(() => {
     panelSplit.saveLayout()
     processInputLayoutApiRef.current?.saveLayouts()
-  }
+    setProcessInputGridDirty(false)
+  }, [panelSplit.saveLayout])
 
   const saveGridIsDirty = panelSplit.isDirty || processInputGridDirty
 
-  const showTreeForParent = useCallback(async (parent: BomTreeParent) => {
-    if (!(parent.item_cd ?? '').trim()) return
-    try {
-      const { title, lines } = await loadBomTreeForParent(parent)
-      setTreeTitle(title)
-      setTreeLines(lines)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load BOM tree')
-    }
+  const showTreeForParent = useCallback(async (parent: { item_cd?: string; item_nm?: string }) => {
+    const itemCd = (parent.item_cd ?? '').trim()
+    if (!itemCd) return
+    setTreeTitle(`${itemCd} - ${parent.item_nm ?? ''}`.trim())
+    setTreeLines([])
   }, [])
 
-  const resolveTreeParent = useCallback((): BomTreeParent | null => {
+  const resolveTreeParent = useCallback(() => {
     if (detail) {
       return {
         item_cd: detail.parent_item_cd,
@@ -248,55 +251,108 @@ export function ProductionEntryPage() {
     setEditInputRows(rows)
   }, [])
 
-  const reloadFromBom = async () => {
-    if (!orderId || !canEditLines || !detail) return
-    if (
-      !confirm(
-        'Reload Process and Input Item from Item Processes into the grid? Changes are not saved until you click Update.'
-      )
-    ) {
+  const selectedParentItem = useMemo((): ItemSearchRow | null => {
+    if (isEdit && detail) {
+      return {
+        item_id: detail.parent_item_id,
+        item_cd: detail.parent_item_cd,
+        item_nm: detail.parent_item_nm,
+        itemtyp_id: 0,
+        itemtyp_nm: '',
+      }
+    }
+    if (createForm.parent_item_id === '') return null
+    const master = itemsMaster.find(
+      (row) => String(row.item_id) === createForm.parent_item_id
+    )
+    if (!master) return null
+    return {
+      item_id: master.item_id,
+      item_cd: master.item_cd,
+      item_nm: master.item_nm,
+      itemtyp_id: master.itemtyp_id,
+      itemtyp_nm: master.itemtyp_nm,
+    }
+  }, [isEdit, detail, createForm.parent_item_id, itemsMaster])
+
+  useEffect(() => {
+    if (isEdit) return
+    if (!selectedParentItem) {
+      setEditProcessRows([])
+      setEditInputRows([])
       return
     }
-    setSubmitting(true)
-    setError(null)
-    try {
-      const planQty = Number(createForm.planned_qty)
-      const preview = await api.previewProductionOrderFromBom(
-        orderId,
-        Number.isFinite(planQty) && planQty > 0 ? planQty : undefined
-      )
-      const orderPlannedQty =
-        Number.isFinite(planQty) && planQty > 0 ? planQty : detail.planned_qty
-      setLineRowError(null)
-      const newProcessRows = ensureTrailingBlankRow(
-        bomPreviewToEditProcessRows(preview.lines, detail.status),
+    setEditProcessRows(
+      ensureTrailingBlankRow(
+        [],
         isBlankProcessRow,
         (rows) => createBlankProcessRowForDetail(rows)
       )
-      const newInputRows = bomPreviewToEditInputRowsWithTrailingBlanks(
-        preview.inputs,
-        preview.lines.map((line) => line.line_no),
-        detail.status,
-        orderPlannedQty
-      )
-      setEditProcessRows(newProcessRows)
-      setEditInputRows(newInputRows)
-      const treeData = buildProductionOrderTree({
-        detail,
-        processRows: newProcessRows,
-        inputRows: newInputRows,
-        locations,
-        items,
-        useEditRows: true,
-      })
-      setTreeTitle(treeData.title)
-      setTreeLines(treeData.lines)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to reload from BOM')
-    } finally {
-      setSubmitting(false)
+    )
+    setEditInputRows([])
+    setLineRowError(null)
+  }, [isEdit, selectedParentItem?.item_id])
+
+  const panelDetail = useMemo((): ProductionOrderDetail | null => {
+    if (isEdit) return detail
+    if (!selectedParentItem) return null
+    const plannedQty = createForm.planned_qty.trim()
+    return {
+      production_order_id: 0,
+      status: 'registered',
+      production_date: createForm.production_date,
+      reference_no: createForm.reference_no.trim() || null,
+      source_type: 'manual',
+      parent_item_id: selectedParentItem.item_id,
+      parent_item_cd: selectedParentItem.item_cd,
+      parent_item_nm: selectedParentItem.item_nm,
+      planned_qty: plannedQty && Number(plannedQty) > 0 ? plannedQty : '1',
+      actual_qty: null,
+      lot: createForm.lot.trim() || '*',
+      line_count: 0,
+      completed_line_count: 0,
+      created_at: null,
+      approved_at: null,
+      cancelled_at: null,
+      notes: createForm.notes.trim() || null,
+      updated_at: null,
+      lines: [],
+      inputs: [],
+      outputs: [],
     }
-  }
+  }, [isEdit, detail, selectedParentItem, createForm])
+
+  const canEditDraftLines = !isEdit && selectedParentItem != null
+  const canEditLinesPanel = isEdit ? canEditLines : canEditDraftLines
+
+  useEffect(() => {
+    if (!panelDetail) {
+      setItemProcessCache(new Map())
+      return
+    }
+    let cancelled = false
+    const wipIds = collectProductionOrderWipIds({
+      detail: panelDetail,
+      inputRows: editInputRows,
+      items,
+      itemtyps,
+      useEditRows: canEditLinesPanel,
+    })
+    void (async () => {
+      const next = await loadWipItemProcessCache(wipIds, items, itemtyps, new Map())
+      if (!cancelled) setItemProcessCache(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    panelDetail?.parent_item_id,
+    panelDetail?.production_order_id,
+    editInputRows,
+    items,
+    itemtyps,
+    canEditLinesPanel,
+  ])
 
   const createOrder = async (e: FormEvent) => {
     e.preventDefault()
@@ -346,7 +402,7 @@ export function ProductionEntryPage() {
           production_date: createForm.production_date,
           reference_no: createForm.reference_no.trim() || null,
           planned_qty: planFromProcess ?? Number(createForm.planned_qty),
-          lot: createForm.lot.trim(),
+          lot: createForm.lot.trim() || '*',
           notes: createForm.notes.trim() || null,
           ...(linesPayload != null ? { lines: linesPayload } : {}),
           ...(inputsPayload != null ? { inputs: inputsPayload } : {}),
@@ -365,9 +421,42 @@ export function ProductionEntryPage() {
           reference_no: createForm.reference_no.trim() || null,
           parent_item_id: Number(createForm.parent_item_id),
           planned_qty: Number(createForm.planned_qty),
-          lot: createForm.lot.trim(),
+          lot: createForm.lot.trim() || '*',
           notes: createForm.notes.trim() || null,
         })
+        const hasManualProcess = editProcessRows.some((r) => !isBlankProcessRow(r))
+        const hasManualInput = editInputRows.some(isActiveInputRow)
+        if (hasManualProcess || hasManualInput) {
+          const saveContext = {
+            parentItemId: row.parent_item_id,
+            orderPlannedQty: row.planned_qty,
+          }
+          const lines = buildProcessPayload(editProcessRows, items, saveContext)
+          const inputs = buildInputPayload(editInputRows, {
+            status: row.status,
+            orderPlannedQty: row.planned_qty,
+            processRows: editProcessRows,
+          })
+          const processRows = editProcessRows.filter((r) => !isBlankProcessRow(r))
+          const activeInputRows = editInputRows.filter(isActiveInputRow)
+          const partialInputRows = editInputRows.some(
+            (r) => !isBlankInputRow(r) && !isActiveInputRow(r)
+          )
+          if (
+            lines.length === 0 ||
+            !processRows.every((r) => isActiveProcessRow(r, editProcessRows, items))
+          ) {
+            setLineRowError('line_validation')
+            setSubmitting(false)
+            return
+          }
+          if (partialInputRows || (activeInputRows.length > 0 && inputs.length === 0)) {
+            setLineRowError('input_validation')
+            setSubmitting(false)
+            return
+          }
+          await api.updateProductionOrder(row.production_order_id, { lines, inputs })
+        }
         navigate(`/production/new?id=${row.production_order_id}`)
       }
     } catch (e2) {
@@ -378,30 +467,6 @@ export function ProductionEntryPage() {
   }
 
   const pageTitle = 'Production Order Entry'
-
-  const selectedParentItem = useMemo((): ItemSearchRow | null => {
-    if (isEdit && detail) {
-      return {
-        item_id: detail.parent_item_id,
-        item_cd: detail.parent_item_cd,
-        item_nm: detail.parent_item_nm,
-        itemtyp_id: 0,
-        itemtyp_nm: '',
-      }
-    }
-    if (createForm.parent_item_id === '') return null
-    const master = itemsMaster.find(
-      (row) => String(row.item_id) === createForm.parent_item_id
-    )
-    if (!master) return null
-    return {
-      item_id: master.item_id,
-      item_cd: master.item_cd,
-      item_nm: master.item_nm,
-      itemtyp_id: master.itemtyp_id,
-      itemtyp_nm: master.itemtyp_nm,
-    }
-  }, [isEdit, detail, createForm.parent_item_id, itemsMaster])
 
   return (
     <ErpScreen
@@ -418,7 +483,7 @@ export function ProductionEntryPage() {
       <ErpSearchPanel className="erp-panel-production-entry-header">
         <div className="erp-production-entry-toolbar">
           <AppLink to="/production/orders" className="btn erp-btn erp-btn-clear">
-            Back to list
+            ← Back to Production Order List
           </AppLink>
           {isEdit && status && <span className="erp-search-section-label">Status: {status}</span>}
         </div>
@@ -428,7 +493,7 @@ export function ProductionEntryPage() {
           <form className="erp-search-form erp-search-form-production-entry" onSubmit={createOrder}>
             <div className="erp-production-entry-row">
               <label className="erp-search-field erp-search-field-date erp-search-field-with-label">
-                <span className="bom-field-label">Production Date</span>
+                <span className="bom-field-label bom-field-label-required">Production Date</span>
                 <input
                   className="erp-input"
                   type="date"
@@ -453,7 +518,7 @@ export function ProductionEntryPage() {
             </div>
             <div className="erp-production-entry-row">
               <label className="erp-search-field erp-search-field-item erp-search-field-with-label">
-                <span className="bom-field-label">Item</span>
+                <span className="bom-field-label bom-field-label-required">Item</span>
                 <ItemSearchPicker
                   hideLabel
                   label="Item"
@@ -470,7 +535,7 @@ export function ProductionEntryPage() {
                 />
               </label>
               <label className="erp-search-field erp-search-field-qty erp-search-field-with-label">
-                <span className="bom-field-label">Plan Qty</span>
+                <span className="bom-field-label bom-field-label-required">Plan Qty</span>
                 <input
                   className="erp-input"
                   type="number"
@@ -489,7 +554,6 @@ export function ProductionEntryPage() {
                   className="erp-input"
                   value={createForm.lot}
                   onChange={(e) => setCreateForm((p) => ({ ...p, lot: e.target.value }))}
-                  required
                 />
               </label>
               <label className="erp-search-field erp-search-field-notes erp-search-field-with-label">
@@ -502,14 +566,7 @@ export function ProductionEntryPage() {
               </label>
               <div className="erp-search-actions">
                 <div className="erp-toolbar-select-tree">
-                  <label className="erp-toolbar-tree-toggle">
-                    Tree
-                    <input
-                      type="checkbox"
-                      checked={treeOnSelect}
-                      onChange={(e) => handleTreeOnSelectChange(e.target.checked)}
-                    />
-                  </label>
+                  <TreeToolbarToggle checked={treeOnSelect} onChange={handleTreeOnSelectChange} />
                 </div>
                 <button className="btn erp-btn erp-btn-search" type="submit" disabled={submitting}>
                   {submitting ? 'Saving…' : isEdit ? 'Update' : 'Create'}
@@ -527,6 +584,7 @@ export function ProductionEntryPage() {
         hasTree={treeOnSelect}
         treeWidthRatio={panelSplit.layout.treeWidthRatio}
         onTreeWidthRatioChange={panelSplit.setTreeWidthRatio}
+        treeHeightRatio={panelSplit.layout.processHeightRatio}
         tree={
           treeTitle && treeLines.length > 0 ? (
             <BomTreePanel
@@ -534,20 +592,31 @@ export function ProductionEntryPage() {
               title={treeTitle}
               lines={treeLines}
               highlight={treeHighlight}
+              expandMode="production-fg"
             />
           ) : (
-            <ProductionTreeSidebar title="Tree">
+            <ProductionTreeSidebar
+              expandAll={false}
+              expandAllDisabled
+              onExpandAllChange={() => {}}
+            >
               <p className="muted erp-grid-empty">
-                {isEdit ? 'Loading tree…' : 'Select an item to show BOM tree.'}
+                {isEdit ? 'Loading tree…' : 'Select an item to show process tree.'}
               </p>
             </ProductionTreeSidebar>
           )
         }
       >
           <ProductionProcessInputPanels
-            detail={detail}
+            detail={panelDetail}
             loading={detailLoading}
-            canEdit={canEditLines}
+            canEdit={canEditLinesPanel}
+            canEditPlan={canEditLinesPanel && (!isEdit || status === 'registered')}
+            canEditActuals={
+              isEdit &&
+              detail != null &&
+              detail.status === 'approved'
+            }
             hideInputActualQty
             hideInputFromLocation
             autoSelectProcess="last"
@@ -561,7 +630,7 @@ export function ProductionEntryPage() {
             emptyMessage={
               isEdit
                 ? 'No process and input data.'
-                : 'Create the order to view Process and Input Item from BOM.'
+                : 'Select an item to enter Process and Input Item.'
             }
             lineGridId="production-entry-lines-v4"
             inputGridId="production-entry-inputs-v3"
@@ -569,11 +638,9 @@ export function ProductionEntryPage() {
             inputEditGridId="production-entry-input-edit-v2"
             onGridLayoutsReady={handleProcessInputGridLayoutsReady}
             onTreeHighlightChange={setTreeHighlight}
-            onTreeDataChange={detail ? handleTreeDataChange : undefined}
-            onReloadFromItemProcesses={
-              canEditLines && isEdit ? () => void reloadFromBom() : undefined
-            }
-            reloadingFromItemProcesses={submitting}
+            onTreeDataChange={panelDetail ? handleTreeDataChange : undefined}
+            itemProcessCache={itemProcessCache}
+            itemtyps={itemtyps}
             processInputSplit={{
               processHeightRatio: panelSplit.layout.processHeightRatio,
               onProcessHeightRatioChange: panelSplit.setProcessHeightRatio,

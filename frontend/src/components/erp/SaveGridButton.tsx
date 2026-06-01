@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { TOOLBAR_HINT_AUTO_HIDE_MS } from '../../constants/feedbackTiming'
 
 const DEFAULT_SUCCESS = 'Grid layout saved.'
 const DEFAULT_NO_CHANGES = 'No layout changes.'
@@ -25,7 +26,7 @@ export function SaveGridButton({
 
   useEffect(() => {
     if (!hint) return
-    const t = window.setTimeout(() => setHint(null), 1800)
+    const t = window.setTimeout(() => setHint(null), TOOLBAR_HINT_AUTO_HIDE_MS)
     return () => window.clearTimeout(t)
   }, [hint])
 

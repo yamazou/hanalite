@@ -5,7 +5,6 @@ import { statusLabel } from '../utils/format'
 const classMap: Record<string, string> = {
   registered: 'badge-registered',
   approved: 'badge-approved',
-  started: 'badge-started',
   completed: 'badge-completed',
   cancelled: 'badge-cancelled',
 }

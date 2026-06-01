@@ -21,6 +21,7 @@ import { MasterGridToolbarActions } from './MasterGridToolbar'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
@@ -194,6 +195,15 @@ export function MasterNameEditPage({
     commitSentinelRowOnEnter(row)
   }
 
+  const removeSelectedFromGrid = () => {
+    if (selectedKeys.size === 0) return
+    setEditRows((rows) =>
+      removeSelectedGridRows(rows, selectedKeys, isBlankNameMasterRow, () => emptyEditNameMasterRow())
+    )
+    setSelectedKeys(new Set())
+  }
+  deleteRowsRef.current = removeSelectedFromGrid
+
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedCount, entityLabels.plural))) return
@@ -203,16 +213,11 @@ export function MasterNameEditPage({
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.record_id != null)
-      const toDrop = new Set(selected.map((row) => row.key))
       for (const row of toDelete) {
         await deleteRecord(row.record_id!)
       }
       setEditRows((rows) =>
-        ensureTrailingBlankRow(
-          rows.filter((row) => !toDrop.has(row.key)),
-          isBlankNameMasterRow,
-          () => emptyEditNameMasterRow()
-        )
+        removeSelectedGridRows(rows, selectedKeys, isBlankNameMasterRow, () => emptyEditNameMasterRow())
       )
       setSelectedKeys(new Set())
       setSuccess(toDelete.length > 0 ? 'Deleted.' : 'Row(s) removed.')
@@ -223,7 +228,6 @@ export function MasterNameEditPage({
       setSubmitting(false)
     }
   }
-  deleteRowsRef.current = () => void deleteSelected()
 
   const handleSave = async () => {
     const active = editRows.filter(isActiveNameMasterRow)

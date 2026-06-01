@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.production import (
-    ProductionOrderBomPreview,
     ProductionOrderCompleteLineIn,
     ProductionOrderCreate,
     ProductionOrderListItem,
@@ -19,16 +18,13 @@ from app.services.production import (
     ProductionError,
     approve_order,
     cancel_order,
-    restore_order,
     complete_line,
     complete_order,
     create_order,
     delete_order,
     get_order,
     list_orders,
-    preview_order_from_bom,
     recalculate_inputs,
-    reload_order_from_bom,
     suggest_production_lots,
     update_order,
 )
@@ -127,32 +123,6 @@ def api_update_order(
         raise _handle_error(e) from e
 
 
-@router.get("/{order_id}/bom-preview", response_model=ProductionOrderBomPreview)
-def api_preview_order_from_bom(
-    order_id: int,
-    db: Annotated[Session, Depends(get_db)],
-    planned_qty: Decimal | None = Query(default=None, gt=0),
-):
-    try:
-        return preview_order_from_bom(db, order_id, planned_qty=planned_qty)
-    except ProductionError as e:
-        raise _handle_error(e) from e
-
-
-@router.post("/{order_id}/reload-bom", response_model=ProductionOrderRead)
-def api_reload_order_from_bom(
-    order_id: int,
-    db: Annotated[Session, Depends(get_db)],
-):
-    try:
-        row = reload_order_from_bom(db, order_id)
-        db.commit()
-        return row
-    except ProductionError as e:
-        db.rollback()
-        raise _handle_error(e) from e
-
-
 @router.post("/{order_id}/recalculate-inputs", response_model=ProductionOrderRead)
 def api_recalculate_inputs(
     order_id: int,
@@ -214,17 +184,6 @@ def api_approve_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
 def api_cancel_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         row = cancel_order(db, order_id)
-        db.commit()
-        return row
-    except ProductionError as e:
-        db.rollback()
-        raise _handle_error(e) from e
-
-
-@router.post("/{order_id}/restore", response_model=ProductionOrderRead)
-def api_restore_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
-    try:
-        row = restore_order(db, order_id)
         db.commit()
         return row
     except ProductionError as e:

@@ -48,7 +48,7 @@ export function DraftPdfImportPage() {
       <ErpSearchPanel>
         <div className="erp-search-form">
           <AppLink to="/" className="btn erp-btn erp-btn-clear">
-            ← Back to list
+            ← Back to List
           </AppLink>
         </div>
       </ErpSearchPanel>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ReloadButton } from './ReloadButton'
 import { SaveGridButton } from './SaveGridButton'
 
 type Props = {
@@ -10,8 +11,10 @@ type Props = {
   saveGridLabel?: string
   saveGridSuccessMessage?: string
   saveGridNoChangesMessage?: string
-  onRefresh?: () => void
+  onRefresh?: () => void | Promise<void>
   refreshLabel?: string
+  refreshSuccessMessage?: string
+  refreshDisabled?: boolean
 }
 
 export function ErpTitleBarActions({
@@ -24,7 +27,9 @@ export function ErpTitleBarActions({
   saveGridSuccessMessage,
   saveGridNoChangesMessage,
   onRefresh,
-  refreshLabel = 'Reload',
+  refreshLabel = 'Reset',
+  refreshSuccessMessage,
+  refreshDisabled,
 }: Props) {
   const showSaveGrid = showSaveGridButton || onSaveGrid != null
   if (!titleActions && !showSaveGrid && !onRefresh) return null
@@ -42,9 +47,12 @@ export function ErpTitleBarActions({
         />
       ) : null}
       {onRefresh ? (
-        <button type="button" className="btn erp-btn erp-btn-clear" onClick={onRefresh}>
-          {refreshLabel}
-        </button>
+        <ReloadButton
+          onReload={onRefresh}
+          disabled={refreshDisabled}
+          label={refreshLabel}
+          successMessage={refreshSuccessMessage}
+        />
       ) : null}
     </>
   )

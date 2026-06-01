@@ -27,7 +27,6 @@ import type {
   MoveTyp,
 } from '../types/inventory'
 import type {
-  ProductionOrderBomPreview,
   ProductionOrderCreatePayload,
   ProductionOrderDetail,
   ProductionOrderListItem,
@@ -369,19 +368,6 @@ export const api = {
   deleteItem: (item_id: number) =>
     request<void>(`/masters/items/${item_id}`, { method: 'DELETE' }),
 
-  listBoms: (p_item_id?: number) => {
-    const q = p_item_id != null ? `?p_item_id=${p_item_id}` : ''
-    return request<BomRow[]>(`/boms${q}`)
-  },
-
-  createBom: (payload: BomCreatePayload) =>
-    request<BomRow>('/boms', { method: 'POST', body: JSON.stringify(payload) }),
-
-  updateBom: (bom_id: number, payload: BomUpdatePayload) =>
-    request<BomRow>(`/boms/${bom_id}`, { method: 'PUT', body: JSON.stringify(payload) }),
-
-  deleteBom: (bom_id: number) => request<void>(`/boms/${bom_id}`, { method: 'DELETE' }),
-
   getItemProcesses: (item_id: number) =>
     request<import('../types/itemprocs').ItemProcessesOut>(`/masters/items/${item_id}/processes`),
 
@@ -390,17 +376,17 @@ export const api = {
       '/masters/items/processes/final-items'
     ),
 
+  saveItemProcessFinalItems: (payload: import('../types/itemprocs').ItemProcessFinalItemsSave) =>
+    request<import('../types/itemprocs').ItemProcessFinalItem[]>(
+      '/masters/items/processes/final-items',
+      { method: 'PUT', body: JSON.stringify(payload) }
+    ),
+
   saveItemProcesses: (item_id: number, payload: import('../types/itemprocs').ItemProcessesSave) =>
     request<import('../types/itemprocs').ItemProcessesOut>(`/masters/items/${item_id}/processes`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
-
-  importItemProcessesFromBom: (item_id: number) =>
-    request<import('../types/itemprocs').ItemProcessesOut>(
-      `/masters/items/${item_id}/processes/import-from-bom`,
-      { method: 'POST' }
-    ),
 
   downloadTemplate: async (kind: DraftKind = 'receipt') => {
     const url = `${API_BASE}${API_PREFIX}${draftBase(kind)}/template`
@@ -578,20 +564,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ basis_qty }),
     }),
-  previewProductionOrderFromBom: (order_id: number, planned_qty?: number) => {
-    const params = new URLSearchParams()
-    if (planned_qty != null && Number.isFinite(planned_qty) && planned_qty > 0) {
-      params.set('planned_qty', String(planned_qty))
-    }
-    const qs = params.toString()
-    return request<ProductionOrderBomPreview>(
-      `/production/orders/${order_id}/bom-preview${qs ? `?${qs}` : ''}`
-    )
-  },
-  reloadProductionOrderFromBom: (order_id: number) =>
-    request<ProductionOrderDetail>(`/production/orders/${order_id}/reload-bom`, {
-      method: 'POST',
-    }),
   completeProductionOrder: (order_id: number, actual_qty: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}/complete`, {
       method: 'POST',
@@ -611,8 +583,6 @@ export const api = {
     request<ProductionOrderDetail>(`/production/orders/${order_id}/approve`, { method: 'POST' }),
   cancelProductionOrder: (order_id: number) =>
     request<ProductionOrderDetail>(`/production/orders/${order_id}/cancel`, { method: 'POST' }),
-  restoreProductionOrder: (order_id: number) =>
-    request<ProductionOrderDetail>(`/production/orders/${order_id}/restore`, { method: 'POST' }),
   importProductionExcel: async (file: File) => {
     const form = new FormData()
     form.append('file', file)

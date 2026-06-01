@@ -9,6 +9,8 @@ export type AppNavigate = (to: string, options?: AppNavigateOptions) => void
 
 const AppNavigateContext = createContext<AppNavigate | null>(null)
 const AppViewRouteContext = createContext<AppRouteTarget | null>(null)
+/** Per-tab route frozen at panel mount; hidden tabs must not read the active tab's viewRoute. */
+const TabPanelRouteContext = createContext<AppRouteTarget | null>(null)
 
 export function AppShellProvider({
   navigate,
@@ -40,6 +42,27 @@ export function useAppViewRoute(): AppRouteTarget {
     throw new Error('useAppViewRoute must be used within Layout')
   }
   return viewRoute
+}
+
+export function TabPanelRouteProvider({
+  route,
+  children,
+}: {
+  route: AppRouteTarget
+  children: React.ReactNode
+}) {
+  return (
+    <TabPanelRouteContext.Provider value={route}>{children}</TabPanelRouteContext.Provider>
+  )
+}
+
+/** Route for the current tab panel (pathname + search). Prefer over useAppViewRoute for page params. */
+export function useTabPanelRoute(): AppRouteTarget {
+  const tabRoute = useContext(TabPanelRouteContext)
+  const viewRoute = useContext(AppViewRouteContext)
+  if (tabRoute) return tabRoute
+  if (viewRoute) return viewRoute
+  throw new Error('useTabPanelRoute must be used within Layout')
 }
 
 type AppLinkProps = {

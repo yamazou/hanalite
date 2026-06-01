@@ -1,5 +1,6 @@
 import type { MouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
+import { readAnchorRect, type GridFilterAnchorRect } from '../utils/gridFilterAnchor'
 
 export type GridColumnDef = {
   key: string
@@ -22,7 +23,7 @@ type Props = {
   isColumnSortable?: (columnKey: string) => boolean
   isColumnFilterable?: (columnKey: string) => boolean
   isColumnFilterActive?: (columnKey: string) => boolean
-  onFilterClick?: (columnKey: string, anchor: HTMLElement) => void
+  onFilterClick?: (columnKey: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => void
 }
 
 export function ResizableGridTable({
@@ -128,8 +129,10 @@ export function ResizableGridTable({
                     aria-label={`Filter ${col.label}`}
                     onClick={(event) => {
                       event.stopPropagation()
-                      onFilterClick?.(col.key, event.currentTarget)
+                      const anchor = event.currentTarget
+                      onFilterClick?.(col.key, anchor, readAnchorRect(anchor))
                     }}
+                    data-filter-col={col.key}
                   >
                     ▼
                   </button>
@@ -147,7 +150,7 @@ export function ResizableGridTable({
                     {sortMark?.(col.key) ?? ''}
                   </span>
                 )}
-                {col.key !== 'rownum' && (
+                {col.key !== 'rownum' && !isSelectHeader && (
                   <button
                     type="button"
                     className="erp-col-resizer"
