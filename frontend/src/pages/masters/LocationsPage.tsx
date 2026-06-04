@@ -8,7 +8,10 @@ import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogContext'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
-import type { LocationMaster } from '../../types/masters'
+import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
+import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
+import type { LocationTyp } from '../../types/masters'
+import { locationTypDropdownLabel } from '../../utils/locationTypMasterEdit'
 import {
   buildLocationPayload,
   emptyEditLocationRow,
@@ -25,12 +28,18 @@ import { mergeLocationImportRows } from '../../utils/locationExcelImport'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  masterPersistResultMessage,
+  persistedIdsPendingDelete,
   removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
-
-const LOCATION_TYPES: LocationMaster['location_type'][] = ['RM', 'Process', 'NG', 'FG']
+import {
+  isMasterDateColumn,
+  masterDateCellText,
+  masterDateExportValue,
+  masterDateFilterValue,
+} from '../../utils/masterGridDates'
 
 export function LocationsPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
@@ -42,21 +51,38 @@ export function LocationsPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
+  const {
+    success,
+    setSuccess,
+    rowError,
+    setRowError,
+    clearToolbarFeedback,
+    beginToolbarAction,
+  } = useMasterGridToolbarFeedback()
+  const [locationtyps, setLocationtyps] = useState<LocationTyp[]>([])
+
+  const locationTypLabelById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const t of locationtyps) {
+      map.set(t.locationtyp_id, locationTypDropdownLabel(t))
+    }
+    return map
+  }, [locationtyps])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    setSuccess(null)
     try {
-      const rows = await api.listLocationsMaster()
+      const [rows, locTypRows] = await Promise.all([
+        api.listLocationsMaster(),
+        api.listLocationtypsMaster(),
+      ])
+      setLocationtyps(locTypRows)
       const dataRows = listRowsToEditLocationRows(rows)
       setSavedSnapshots(locationRowSnapshotsFromEditRows(dataRows))
       setEditRows(
         ensureTrailingBlankRow(dataRows, isBlankLocationRow, () => emptyEditLocationRow())
       )
-      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -83,24 +109,33 @@ export function LocationsPage() {
       case 'name':
         return toFilterCellValue(row.location_nm)
       case 'type':
-        return toFilterCellValue(row.location_type)
+        return toFilterCellValue(
+          row.locationtyp_id === ''
+            ? ''
+            : (locationTypLabelById.get(row.locationtyp_id) ?? '')
+        )
       default:
-        return toFilterCellValue('')
+        return masterDateFilterValue(row, col)
     }
-  }, [])
+  }, [locationTypLabelById])
 
-  const exportValue = useCallback((row: EditLocationRow, col: string) => {
-    switch (col) {
-      case 'code':
-        return row.location_cd
-      case 'name':
-        return row.location_nm
-      case 'type':
-        return row.location_type
-      default:
-        return ''
-    }
-  }, [])
+  const exportValue = useCallback(
+    (row: EditLocationRow, col: string) => {
+      switch (col) {
+        case 'code':
+          return row.location_cd
+        case 'name':
+          return row.location_nm
+        case 'type':
+          return row.locationtyp_id === ''
+            ? ''
+            : (locationTypLabelById.get(row.locationtyp_id) ?? '')
+        default:
+          return masterDateExportValue(row, col)
+      }
+    },
+    [locationTypLabelById]
+  )
 
   const deleteRowsRef = useRef<() => void>(() => {})
 
@@ -115,7 +150,12 @@ export function LocationsPage() {
     },
     excelImport: {
       applyParsedRows: async (parsed) => {
-        const { rows, updated, added } = mergeLocationImportRows(parsed, editRows)
+        beginToolbarAction()
+        const { rows, updated, added } = mergeLocationImportRows(
+          parsed,
+          editRows,
+          locationtyps
+        )
         setEditRows(
           ensureTrailingBlankRow(rows, isBlankLocationRow, () => emptyEditLocationRow())
         )
@@ -138,12 +178,19 @@ export function LocationsPage() {
     [grid.displayRows]
   )
 
+  const rowNav = useGridRowKeyboardNav({
+    wrapId: 'masters-locations',
+    displayRows: grid.displayRows,
+    isBlankRow: isBlankLocationRow,
+  })
+
   const selectedCount = useMemo(
     () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
     [selectableRows, selectedKeys]
   )
 
   const updateRow = (key: string, patch: Partial<EditLocationRow>) => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       updateRowWithTrailingBlank(rows, key, patch, isBlankLocationRow, () =>
         emptyEditLocationRow()
@@ -188,9 +235,9 @@ export function LocationsPage() {
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'location(s)'))) return
+    beginToolbarAction()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.location_id != null)
@@ -211,6 +258,12 @@ export function LocationsPage() {
   }
 
   const handleSave = async () => {
+    beginToolbarAction()
+    const pendingDeleteIds = persistedIdsPendingDelete(
+      editRows,
+      savedSnapshots,
+      (row) => row.location_id ?? null
+    )
     const active = editRows.filter(isActiveLocationRow)
     const incomplete = editRows.filter(
       (row) => !isBlankLocationRow(row) && !isActiveLocationRow(row)
@@ -219,7 +272,7 @@ export function LocationsPage() {
       setRowError('Enter Location Code and Location Type for each row, or clear empty rows.')
       return
     }
-    if (active.length === 0) {
+    if (active.length === 0 && pendingDeleteIds.length === 0) {
       setRowError('Add at least one location row.')
       return
     }
@@ -236,37 +289,32 @@ export function LocationsPage() {
       (row) => row.location_id,
       (row) => (isActiveLocationRow(row) ? buildLocationPayload(row) : null)
     )
-    if (toSave.length === 0) {
-      setRowError(null)
+    if (toSave.length === 0 && pendingDeleteIds.length === 0) {
       setSuccess(savedCountMessage(0, 'location'))
       return
     }
 
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
+      for (const id of pendingDeleteIds) {
+        await api.deleteLocation(id)
+      }
       for (const row of toSave) {
         const payload = buildLocationPayload(row)
         if (row.location_id != null) {
-          await api.updateLocation(
-            row.location_id,
-            payload.location_cd,
-            payload.location_nm,
-            payload.location_type
-          )
+          await api.updateLocation(row.location_id, payload)
         } else {
-          await api.createLocation(
-            payload.location_cd,
-            payload.location_nm,
-            payload.location_type
-          )
+          await api.createLocation(payload)
         }
       }
-      setSuccess(savedCountMessage(toSave.length, 'location'))
-      refreshMasterCatalog()
-      await load()
+      setSuccess(
+        masterPersistResultMessage(toSave.length, pendingDeleteIds.length, 'location')
+      )
+      if (pendingDeleteIds.length > 0 || toSave.length > 0) {
+        refreshMasterCatalog()
+        await load()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -284,7 +332,10 @@ export function LocationsPage() {
         columns={masterLocationEditColumns}
         loading={loading}
         isEmpty={false}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          beginToolbarAction()
+          void load()
+        }}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableRows.length}
@@ -305,6 +356,7 @@ export function LocationsPage() {
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
+        gridRowNavWrapId="masters-locations"
         onLayoutReady={grid.onLayoutReady}
         onGridContextMenu={grid.openContextMenu}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
@@ -318,9 +370,16 @@ export function LocationsPage() {
               return (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
-                    selectedKeys.has(row.key) ? ' selected' : ''
-                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                  {...rowNav.getTrProps(row)}
+                  className={[
+                    'erp-grid-row-editing',
+                    rowNav.rowHighlightClass(index, row.key) ??
+                      (index % 2 === 1 ? 'row-alt' : undefined),
+                    selectedKeys.has(row.key) ? 'selected' : undefined,
+                    isSentinel ? 'erp-grid-row-sentinel' : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -381,27 +440,37 @@ export function LocationsPage() {
                         return (
                           <td key={col.key} className="erp-grid-cell-edit">
                             <select
-                              className={`erp-grid-input${row.location_type === '' ? ' erp-input-empty' : ''}`}
-                              value={row.location_type}
+                              className={`erp-grid-input${
+                                row.locationtyp_id === '' ? ' erp-input-empty' : ''
+                              }`}
+                              value={row.locationtyp_id}
+                              aria-label="Location Type"
                               data-loc-grid-cell={`${row.key}:type`}
                               onChange={(e) =>
                                 updateRow(row.key, {
-                                  location_type: e.target
-                                    .value as LocationMaster['location_type'],
+                                  locationtyp_id:
+                                    e.target.value === '' ? '' : Number(e.target.value),
                                 })
                               }
                               onKeyDown={(e) => handleCellKeyDown(e, row)}
                             >
-                              <option value="" />
-                              {LOCATION_TYPES.map((type) => (
-                                <option key={type} value={type}>
-                                  {type}
+                              <option value="">{isSentinel ? '' : 'Location Type'}</option>
+                              {locationtyps.map((t) => (
+                                <option key={t.locationtyp_id} value={t.locationtyp_id}>
+                                  {locationTypDropdownLabel(t)}
                                 </option>
                               ))}
                             </select>
                           </td>
                         )
                       default:
+                        if (isMasterDateColumn(col.key)) {
+                          return (
+                            <td key={col.key} className="erp-grid-cell-readonly">
+                              {masterDateCellText(row, col.key)}
+                            </td>
+                          )
+                        }
                         return <td key={col.key} />
                     }
                   })}

@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react'
-import { TOOLBAR_HINT_AUTO_HIDE_MS } from '../../constants/feedbackTiming'
+import { useCallback, useState } from 'react'
+import {
+  useRegisterToolbarHintClear,
+  useToolbarHintContext,
+} from '../../context/ToolbarHintContext'
+import { ToolbarFeedback } from '../ToolbarFeedback'
 
 const DEFAULT_SUCCESS = 'Grid layout saved.'
 const DEFAULT_NO_CHANGES = 'No layout changes.'
@@ -22,15 +26,13 @@ export function SaveGridButton({
   successMessage = DEFAULT_SUCCESS,
   noChangesMessage = DEFAULT_NO_CHANGES,
 }: Props) {
+  const ctx = useToolbarHintContext()
   const [hint, setHint] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!hint) return
-    const t = window.setTimeout(() => setHint(null), TOOLBAR_HINT_AUTO_HIDE_MS)
-    return () => window.clearTimeout(t)
-  }, [hint])
+  const clearHint = useCallback(() => setHint(null), [])
+  useRegisterToolbarHintClear(clearHint)
 
   const handleClick = () => {
+    ctx?.clearToolbarHints()
     if (isDirty === false) {
       setHint(noChangesMessage)
       return
@@ -49,7 +51,7 @@ export function SaveGridButton({
       >
         {label}
       </button>
-      {hint ? <span className="erp-save-grid-hint muted">{hint}</span> : null}
+      <ToolbarFeedback message={hint} type="success" />
     </span>
   )
 }

@@ -5,6 +5,8 @@ import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterMoveTypEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
+import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
 import {
   buildMoveTypPayload,
   emptyEditMoveTypRow,
@@ -25,10 +27,18 @@ import { useRefreshMasterCatalogAfterSave } from '../../context/MasterCatalogCon
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  masterPersistResultMessage,
+  persistedIdsPendingDelete,
   removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
+import {
+  isMasterDateColumn,
+  masterDateCellText,
+  masterDateExportValue,
+  masterDateFilterValue,
+} from '../../utils/masterGridDates'
 
 export function MoveTypesPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
@@ -40,8 +50,14 @@ export function MoveTypesPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
+  const {
+    success,
+    setSuccess,
+    rowError,
+    setRowError,
+    clearToolbarFeedback,
+    beginToolbarAction,
+  } = useMasterGridToolbarFeedback()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,7 +69,6 @@ export function MoveTypesPage() {
       setEditRows(
         ensureTrailingBlankRow(dataRows, isBlankMoveTypRow, () => emptyEditMoveTypRow())
       )
-      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -80,7 +95,7 @@ export function MoveTypesPage() {
       case 'name':
         return toFilterCellValue(row.movetyps_nm)
       default:
-        return toFilterCellValue('')
+        return masterDateFilterValue(row, col)
     }
   }, [])
 
@@ -91,7 +106,7 @@ export function MoveTypesPage() {
       case 'name':
         return row.movetyps_nm
       default:
-        return ''
+        return masterDateExportValue(row, col)
     }
   }, [])
 
@@ -113,6 +128,7 @@ export function MoveTypesPage() {
     },
     excelImport: {
       applyParsedRows: async (parsed) => {
+        beginToolbarAction()
         const { rows, updated, added } = mergeMoveTypImportRows(parsed, editRows)
         setEditRows(
           ensureTrailingBlankRow(rows, isBlankMoveTypRow, () => emptyEditMoveTypRow())
@@ -131,12 +147,19 @@ export function MoveTypesPage() {
     [grid.displayRows]
   )
 
+  const rowNav = useGridRowKeyboardNav({
+    wrapId: 'masters-move-types',
+    displayRows: grid.displayRows,
+    isBlankRow: isBlankMoveTypRow,
+  })
+
   const selectedCount = useMemo(
     () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
     [selectableRows, selectedKeys]
   )
 
   const updateRow = (key: string, patch: Partial<EditMoveTypRow>) => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       updateRowWithTrailingBlank(rows, key, patch, isBlankMoveTypRow, () => emptyEditMoveTypRow())
     )
@@ -154,9 +177,9 @@ export function MoveTypesPage() {
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'move type(s)'))) return
+    beginToolbarAction()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.movetyps_id != null)
@@ -177,6 +200,12 @@ export function MoveTypesPage() {
   }
 
   const handleSave = async () => {
+    beginToolbarAction()
+    const pendingDeleteIds = persistedIdsPendingDelete(
+      editRows,
+      savedSnapshots,
+      (row) => row.movetyps_id ?? null
+    )
     const active = editRows.filter(isActiveMoveTypRow)
     const incompletePersisted = editRows.filter(
       (row) => row.movetyps_id != null && !isActiveMoveTypRow(row)
@@ -190,7 +219,7 @@ export function MoveTypesPage() {
       setRowError('Duplicate move type codes in the grid.')
       return
     }
-    if (active.length === 0) {
+    if (active.length === 0 && pendingDeleteIds.length === 0) {
       setRowError('Add at least one move type row.')
       return
     }
@@ -202,17 +231,17 @@ export function MoveTypesPage() {
       (row) => row.movetyps_id,
       (row) => (isActiveMoveTypRow(row) ? buildMoveTypPayload(row) : null)
     )
-    if (toSave.length === 0) {
-      setRowError(null)
+    if (toSave.length === 0 && pendingDeleteIds.length === 0) {
       setSuccess(savedCountMessage(0, 'move type'))
       return
     }
 
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
+      for (const id of pendingDeleteIds) {
+        await api.deleteMoveTyp(id)
+      }
       for (const row of toSave) {
         const payload = buildMoveTypPayload(row)
         if (row.movetyps_id != null) {
@@ -221,9 +250,13 @@ export function MoveTypesPage() {
           await api.createMoveTyp(payload)
         }
       }
-      setSuccess(savedCountMessage(toSave.length, 'move type'))
-      refreshMasterCatalog()
-      await load()
+      setSuccess(
+        masterPersistResultMessage(toSave.length, pendingDeleteIds.length, 'move type')
+      )
+      if (pendingDeleteIds.length > 0 || toSave.length > 0) {
+        refreshMasterCatalog()
+        await load()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -241,7 +274,10 @@ export function MoveTypesPage() {
         columns={masterMoveTypEditColumns}
         loading={loading}
         isEmpty={false}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          beginToolbarAction()
+          void load()
+        }}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableRows.length}
@@ -262,6 +298,7 @@ export function MoveTypesPage() {
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
+        gridRowNavWrapId="masters-move-types"
         onLayoutReady={grid.onLayoutReady}
         onGridContextMenu={grid.openContextMenu}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
@@ -275,9 +312,16 @@ export function MoveTypesPage() {
               return (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
-                    selectedKeys.has(row.key) ? ' selected' : ''
-                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                  {...rowNav.getTrProps(row)}
+                  className={[
+                    'erp-grid-row-editing',
+                    rowNav.rowHighlightClass(index, row.key) ??
+                      (index % 2 === 1 ? 'row-alt' : undefined),
+                    selectedKeys.has(row.key) ? 'selected' : undefined,
+                    isSentinel ? 'erp-grid-row-sentinel' : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -331,6 +375,13 @@ export function MoveTypesPage() {
                           </td>
                         )
                       default:
+                        if (isMasterDateColumn(col.key)) {
+                          return (
+                            <td key={col.key} className="erp-grid-cell-readonly">
+                              {masterDateCellText(row, col.key)}
+                            </td>
+                          )
+                        }
                         return <td key={col.key} />
                     }
                   })}

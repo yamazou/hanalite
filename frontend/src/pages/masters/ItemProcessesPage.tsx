@@ -9,7 +9,7 @@ import { ProductionTreeSidebar } from '../../components/ProductionTreeSidebar'
 import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
-import { erpRowClass } from '../../components/erp/ErpGridPanel'
+import { useRegisterToolbarHintClear } from '../../context/ToolbarHintContext'
 import { itemProcessFinalItemColumns } from '../../components/erp/masterGridColumns'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { ResizableGridTable } from '../../components/ResizableGridTable'
@@ -22,9 +22,16 @@ import {
 } from '../../context/MasterCatalogContext'
 import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
 import { useGridColumnLayout } from '../../hooks/useGridColumnLayout'
 import { gridColumnLayoutOptions } from '../../hooks/useGridColumnLayoutOptions'
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
+import { GRID_ROW_NAV_WRAP_ATTR } from '../../utils/headerListKeyboardNav'
+import {
+  isMasterDateColumn,
+  masterDateCellText,
+  masterDateFilterValue,
+} from '../../utils/masterGridDates'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/gridTrailingBlankRow'
 import {
   buildFinalItemCatalogLookups,
@@ -48,6 +55,7 @@ import {
   isDraftFinalItemKey,
   itemProcessesToEditInputRows,
   itemProcessesToEditProcessRows,
+  syncItemProcessInputFromLocations,
   serializeItemProcessEditDraft,
   stableFinalItemKey,
   type EditFinalItemRow,
@@ -83,6 +91,7 @@ import { parentTreeHighlight } from '../../utils/productionTreeHighlight'
 import {
   buildItemProcessExportBodyRows,
   downloadItemProcessExcel,
+  ensureItemsForItemProcessImport,
   mergeItemProcessImportRows,
   parseItemProcessExcelFile,
   type ItemProcessExcelRow,
@@ -209,9 +218,22 @@ export function ItemProcessesPage() {
   const [exportingExcel, setExportingExcel] = useState(false)
   const deleteOutputRowsRef = useRef<() => void>(() => {})
 
+  const clearSaveToolbarFeedback = useCallback(() => {
+    setSuccess(null)
+    setUpdateStatusMessage(null)
+    setUpdateErrorMessage(null)
+    setRowError(null)
+  }, [])
+
+  useRegisterToolbarHintClear(clearSaveToolbarFeedback)
+
   useEffect(() => {
     processDraftByItemIdRef.current = processDraftByItemId
   }, [processDraftByItemId])
+
+  useEffect(() => {
+    clearSaveToolbarFeedback()
+  }, [outputItemFilter, clearSaveToolbarFeedback])
 
   const selectedFinalItemRow = useMemo(
     () => finalItemRows.find((row) => row.key === selectedFinalItemKey) ?? null,
@@ -227,8 +249,8 @@ export function ItemProcessesPage() {
       item_id: Number(selectedFinalItemRow.item_id),
       item_cd: selectedFinalItemRow.item_cd,
       item_nm: selectedFinalItemRow.item_nm,
-      itemtyp_id: catalog?.itemtyp_id ?? 0,
-      itemtyp_nm: selectedFinalItemRow.itemtyp_nm || catalog?.itemtyp_nm || '',
+      itemtyp_id: catalog?.itemtyp_id ?? null,
+      itemtyp_nm: catalog?.itemtyp_nm ?? '',
     }
   }, [selectedFinalItemRow, items])
 
@@ -368,7 +390,7 @@ export function ItemProcessesPage() {
         case 'customer_cd':
           return toFilterCellValue(row.customer_cd)
         default:
-          return toFilterCellValue('')
+          return masterDateFilterValue(row, col)
       }
     },
     [resolveFinalItemCd]
@@ -494,14 +516,23 @@ export function ItemProcessesPage() {
     (
       key: string,
       patch: Partial<
-        Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'>
+        Pick<
+          EditFinalItemRow,
+          | 'item_id'
+          | 'item_cd'
+          | 'item_nm'
+          | 'itemtyp_cd'
+          | 'customer_cd'
+          | 'created_at'
+          | 'updated_at'
+        >
       >
     ) => {
+      clearSaveToolbarFeedback()
       if (patch.item_id !== '' && itemIdUsedInOtherRow(Number(patch.item_id), key)) {
         setRowError('final_item_duplicate')
         return
       }
-      setRowError(null)
       const nextKey =
         patch.item_id !== '' ? stableFinalItemKey(Number(patch.item_id)) : key
       updateFinalItemRow(key, { ...patch, key: nextKey })
@@ -509,7 +540,7 @@ export function ItemProcessesPage() {
         setSelectedFinalItemKey(nextKey)
       }
     },
-    [itemIdUsedInOtherRow, updateFinalItemRow]
+    [clearSaveToolbarFeedback, itemIdUsedInOtherRow, updateFinalItemRow]
   )
 
   const activateFinalItemRow = useCallback(
@@ -535,7 +566,13 @@ export function ItemProcessesPage() {
   const applyProcessesToGrids = useCallback(
     (data: Awaited<ReturnType<typeof api.getItemProcesses>>, itemId?: number) => {
       const procRows = itemProcessesToEditProcessRows(data.processes)
-      const inputData = itemProcessesToEditInputRows(data.processes)
+      const inputData = syncItemProcessInputFromLocations(
+        itemProcessesToEditInputRows(data.processes),
+        procRows,
+        locations,
+        items,
+        itemtyps
+      )
       const lineNos = data.processes.map((proc) => proc.line_no)
       const normalized = ensureItemProcessEditRows(procRows, inputData, lineNos)
       const processRowsFinal = ensureTrailingBlankRow(
@@ -545,7 +582,6 @@ export function ItemProcessesPage() {
       )
       setProcessRows(processRowsFinal)
       setInputRows(normalized.inputRows)
-      setRowError(null)
       const snapshotItemId = itemId ?? data.item_id
       setSavedProcessSnapshots((prev) => {
         const next = new Map(prev)
@@ -560,7 +596,7 @@ export function ItemProcessesPage() {
         return next
       })
     },
-    []
+    [items, itemtyps, locations]
   )
 
   const loadProcesses = useCallback(
@@ -601,7 +637,6 @@ export function ItemProcessesPage() {
       )
       setProcessRows(processRowsFinal)
       setInputRows(normalized.inputRows)
-      setRowError(null)
       loadedProcessItemIdRef.current = itemId
     },
     []
@@ -672,7 +707,7 @@ export function ItemProcessesPage() {
             processDataByItemId,
             liveEditsByItemId: liveEdits,
           })
-          downloadItemProcessExcel(body)
+          await downloadItemProcessExcel(body)
         } catch (e) {
           setError(e instanceof Error ? e.message : 'Failed to export item processes')
         } finally {
@@ -688,17 +723,27 @@ export function ItemProcessesPage() {
       applyParsedRows: async (parsed) => {
         stashCurrentProcessEdits()
         setError(null)
-        setSuccess(null)
-        setUpdateStatusMessage(null)
-        setUpdateErrorMessage(null)
-        setRowError(null)
+        clearSaveToolbarFeedback()
         try {
+          const parsedRows = parsed as unknown as ItemProcessExcelRow[]
+          const { items: itemsAfterEnsure, createdCount: createdMasterItems } =
+            await ensureItemsForItemProcessImport({
+              parsed: parsedRows,
+              items,
+              itemtyps,
+              customers,
+              createItem: api.createItem,
+            })
+          if (createdMasterItems > 0) {
+            setItems(itemsAfterEnsure)
+            await refreshMasterCatalog()
+          }
           const apiFinalItems = await api.listItemProcessFinalItems()
           const result = mergeItemProcessImportRows({
-            parsed: parsed as unknown as ItemProcessExcelRow[],
+            parsed: parsedRows,
             existingFinalItems: finalItemRows,
             apiFinalItems,
-            items,
+            items: itemsAfterEnsure,
             locations,
             lookups: finalItemLookups,
           })
@@ -718,6 +763,9 @@ export function ItemProcessesPage() {
             applyDraftToGrids(result.processDraftByItemId.get(firstId)!, firstId)
           }
           const parts: string[] = []
+          if (createdMasterItems > 0) {
+            parts.push(`${createdMasterItems} item(s) created in Items master`)
+          }
           if (result.addedOutputItems > 0) {
             parts.push(`${result.addedOutputItems} output item(s) added`)
           }
@@ -757,6 +805,15 @@ export function ItemProcessesPage() {
       selectedSelectableCount(selectableOutputRows, selectedOutputItemKeys, (row) => row.key),
     [selectableOutputRows, selectedOutputItemKeys]
   )
+
+  const finalItemRowNav = useGridRowKeyboardNav({
+    wrapId: 'masters-item-processes-final-items',
+    displayRows: finalItemDisplayRows,
+    isBlankRow: isBlankFinalItemRow,
+    selectedKey: selectedFinalItemKey,
+    onSelectedKeyChange: setSelectedFinalItemKey,
+    onActivate: activateFinalItemRow,
+  })
 
   const finalItemLayout = useGridColumnLayout(
     'item-process-final-item-v5',
@@ -914,10 +971,7 @@ export function ItemProcessesPage() {
   }, [])
 
   const handleSave = async () => {
-    setUpdateStatusMessage(null)
-    setUpdateErrorMessage(null)
-    setSuccess(null)
-    setRowError(null)
+    clearSaveToolbarFeedback()
 
     const resolveDraftForDirtyCheck = (itemId: number) => {
       const draft = resolveProcessDraft(itemId)
@@ -1058,7 +1112,13 @@ export function ItemProcessesPage() {
         setSavedProcessSnapshots((prev) => {
           const next = new Map(prev)
           const procRows = itemProcessesToEditProcessRows(saved.processes)
-          const inputData = itemProcessesToEditInputRows(saved.processes)
+          const inputData = syncItemProcessInputFromLocations(
+            itemProcessesToEditInputRows(saved.processes),
+            procRows,
+            locations,
+            items,
+            itemtyps
+          )
           const lineNos = saved.processes.map((proc) => proc.line_no)
           const normalized = ensureItemProcessEditRows(procRows, inputData, lineNos)
           const processRowsFinal = ensureTrailingBlankRow(
@@ -1122,10 +1182,9 @@ export function ItemProcessesPage() {
     if (selectedOutputItemKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedOutputItemKeys.size, 'output item(s)'))) return
 
+    clearSaveToolbarFeedback()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
       const targets = finalItemRows.filter(
         (row) => selectedOutputItemKeys.has(row.key) && isActiveFinalItemRow(row)
@@ -1276,7 +1335,10 @@ export function ItemProcessesPage() {
                     <button
                       type="button"
                       className={`erp-tab${outputItemFilter === 'ALL' ? ' active' : ''}`}
-                      onClick={() => setOutputItemFilter('ALL')}
+                      onClick={() => {
+                        clearSaveToolbarFeedback()
+                        setOutputItemFilter('ALL')
+                      }}
                     >
                       All
                     </button>
@@ -1284,7 +1346,10 @@ export function ItemProcessesPage() {
                       <button
                         type="button"
                         className={`erp-tab${outputItemFilter === 'WIP' ? ' active' : ''}`}
-                        onClick={() => setOutputItemFilter('WIP')}
+                        onClick={() => {
+                          clearSaveToolbarFeedback()
+                          setOutputItemFilter('WIP')
+                        }}
                       >
                         {itemTypTabLabel(wipItemtyp)}
                       </button>
@@ -1293,7 +1358,10 @@ export function ItemProcessesPage() {
                       <button
                         type="button"
                         className={`erp-tab${outputItemFilter === 'FG' ? ' active' : ''}`}
-                        onClick={() => setOutputItemFilter('FG')}
+                        onClick={() => {
+                          clearSaveToolbarFeedback()
+                          setOutputItemFilter('FG')
+                        }}
                       >
                         {itemTypTabLabel(fgItemtyp)}
                       </button>
@@ -1320,6 +1388,7 @@ export function ItemProcessesPage() {
                 </div>
                 <div
                   className="erp-grid-wrap erp-grid-wrap-detail"
+                  {...{ [GRID_ROW_NAV_WRAP_ATTR]: 'masters-item-processes-final-items' }}
                   onContextMenu={finalItemGrid.openContextMenu}
                 >
                   <ResizableGridTable
@@ -1342,20 +1411,19 @@ export function ItemProcessesPage() {
                       {finalItemDisplayRows.map((row, index) => {
                         const isSentinel = isBlankFinalItemRow(row)
                         const isRowSelected = selectedOutputItemKeys.has(row.key)
-                        const isActiveRow = selectedFinalItemKey === row.key
                         return (
                         <tr
                           key={row.key}
+                          {...finalItemRowNav.getTrProps(row)}
                           className={
                             [
-                              erpRowClass(index, isActiveRow),
-                              isRowSelected ? ' selected' : '',
-                              isSentinel ? ' erp-grid-row-sentinel' : '',
+                              finalItemRowNav.rowHighlightClass(index, row.key),
+                              isRowSelected ? 'selected' : undefined,
+                              isSentinel ? 'erp-grid-row-sentinel' : undefined,
                             ]
                               .filter(Boolean)
-                              .join('') || undefined
+                              .join(' ') || undefined
                           }
-                          onClick={() => activateFinalItemRow(row)}
                         >
                           {finalItemLayout.orderedColumns.map((col) => {
                             switch (col.key) {
@@ -1499,6 +1567,13 @@ export function ItemProcessesPage() {
                                   <td key={col.key}>{row.customer_cd}</td>
                                 )
                               default:
+                                if (isMasterDateColumn(col.key)) {
+                                  return (
+                                    <td key={col.key} className="erp-grid-cell-readonly">
+                                      {masterDateCellText(row, col.key)}
+                                    </td>
+                                  )
+                                }
                                 return <td key={col.key} />
                             }
                           })}
@@ -1524,6 +1599,7 @@ export function ItemProcessesPage() {
                   outputItemDatalistCatalog={outputItemDatalistCatalog}
                   inputItemDatalistCatalog={inputItemDatalistCatalog}
                   locations={locations}
+                  itemtyps={itemtyps}
                   processRows={processRows}
                   inputRows={inputRows}
                   onProcessRowsChange={setProcessRows}

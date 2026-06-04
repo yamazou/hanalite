@@ -1,12 +1,13 @@
 import type { CustomerMaster } from '../types/masters'
 import { buildRecordSnapshotMap } from './gridRowChange'
+import { EMPTY_MASTER_ROW_DATES, type MasterRowDates } from './masterGridDates'
 
 export type EditCustomerRow = {
   key: string
   customers_id?: number
   customers_cd: string
   customers_nm: string
-}
+} & MasterRowDates
 
 let nextKey = 0
 
@@ -21,6 +22,8 @@ export function listRowToEditCustomerRow(row: CustomerMaster): EditCustomerRow {
     customers_id: row.customers_id,
     customers_cd: row.customers_cd,
     customers_nm: row.customers_nm,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   }
 }
 
@@ -29,6 +32,7 @@ export function emptyEditCustomerRow(): EditCustomerRow {
     key: newCustomerEditKey(),
     customers_cd: '',
     customers_nm: '',
+    ...EMPTY_MASTER_ROW_DATES,
   }
 }
 

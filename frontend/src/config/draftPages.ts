@@ -3,13 +3,11 @@ export type DraftVariant = 'receipt' | 'delivery'
 export type DraftPageCopy = {
   listPath: string
   newPath: string
-  importPath: string
   pdfImportPath?: string
   detailPath: (id: number) => string
   listTitle: string
   listDesc: string
   newBtn: string
-  excelBtn: string
   pdfBtn?: string
   detailLink: string
   detailPanelHint: string
@@ -22,7 +20,6 @@ export type DraftPageCopy = {
   detailSaveBtn: string
   /** Receipt List: save lines only (header edited on Entry). */
   detailSaveLinesBtn: string
-  listLinesEditHint: string
   searchPanelTitle: string
   headerGridTitle: string
   dateColumn: string
@@ -53,14 +50,6 @@ export type DraftPageCopy = {
   submitCreate: string
   submittingCreate: string
   cancelBtn: string
-  excelTitle: string
-  excelDesc: string
-  templateBtn: string
-  excelFormatTitle: string
-  uploadTitle: string
-  excelFileLabel: string
-  submitImport: string
-  submittingImport: string
   detailTitle: (id: number) => string
   approveConfirm: string
   cancelApprovedConfirm: string
@@ -91,7 +80,6 @@ export type DraftPageCopy = {
   masterLoadFail: string
   createFail: string
   importFail: string
-  selectExcel: string
   lineValidation: string
   showPdfImport: boolean
   filterAll: string
@@ -136,13 +124,11 @@ export type DraftPageCopy = {
 const receiptCopy: DraftPageCopy = {
   listPath: '/',
   newPath: '/drafts/new',
-  importPath: '/drafts/import',
   pdfImportPath: '/drafts/import-pdf',
   detailPath: (id) => `/drafts/${id}`,
   listTitle: 'Receipt List',
   listDesc: 'Review and approve receipts to post inventory movements.',
   newBtn: 'Receipt Entry',
-  excelBtn: 'Excel Import',
   pdfBtn: 'PDF Import',
   detailLink: 'Detail',
   detailPanelHint: 'Select a row above to view header and line details.',
@@ -154,8 +140,6 @@ const receiptCopy: DraftPageCopy = {
   saveSuccessMsg: 'Saved.',
   detailSaveBtn: 'Save Data',
   detailSaveLinesBtn: 'Save lines',
-  listLinesEditHint:
-    'Edit lines below, then Save. Double-click a row above to change receipt date, supplier, reference, or notes.',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Receipt Date',
@@ -186,14 +170,6 @@ const receiptCopy: DraftPageCopy = {
   submitCreate: 'Save',
   submittingCreate: 'Saving…',
   cancelBtn: 'Cancel',
-  excelTitle: 'Excel Receipt Import',
-  excelDesc: 'Upload a filled template. A pending receipt draft will be created.',
-  templateBtn: 'Download template',
-  excelFormatTitle: 'Excel format',
-  uploadTitle: 'Upload',
-  excelFileLabel: 'Excel file (.xlsx)',
-  submitImport: 'Import and create draft',
-  submittingImport: 'Importing…',
   detailTitle: (id) => `Receipt Draft #${id}`,
   approveConfirm: 'Approve this receipt and post to inventory?',
   cancelApprovedConfirm:
@@ -211,7 +187,7 @@ const receiptCopy: DraftPageCopy = {
   linesReviewTitle: 'Rows (review)',
   noLinesMsg: 'No lines yet. Click Add row to enter a line.',
   nextStepHint:
-    'Save lines, then Approve to post to inventory. Double-click a row in the list to change header fields on Entry.',
+    'Click Update to save, then Approve to post to inventory.',
   approveFail: 'Approval failed',
   cancelFail: 'Cancel failed',
   restoreBtn: 'Restore',
@@ -226,7 +202,6 @@ const receiptCopy: DraftPageCopy = {
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
   importFail: 'Import failed',
-  selectExcel: 'Please select an .xlsx file.',
   lineValidation: 'Enter at least one line with item code or name, location, lot, and quantity.',
   showPdfImport: true,
   filterAll: 'All',
@@ -271,12 +246,10 @@ const receiptCopy: DraftPageCopy = {
 const deliveryCopy: DraftPageCopy = {
   listPath: '/delivery',
   newPath: '/delivery/new',
-  importPath: '/delivery/import',
   detailPath: (id) => `/delivery/${id}`,
   listTitle: 'Delivery List',
   listDesc: 'Review and approve deliveries to post inventory movements.',
   newBtn: 'Delivery Entry',
-  excelBtn: 'Excel Import',
   detailLink: 'Detail',
   detailPanelHint: 'Select a row above to view header and line details.',
   listPathWithId: (id) => `/delivery?id=${id}`,
@@ -287,8 +260,6 @@ const deliveryCopy: DraftPageCopy = {
   saveSuccessMsg: 'Saved.',
   detailSaveBtn: 'Save Data',
   detailSaveLinesBtn: 'Save lines',
-  listLinesEditHint:
-    'Edit lines below, then Save. Double-click a row above to change delivery date, customer, reference, or notes.',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
   dateColumn: 'Delivery Date',
@@ -319,14 +290,6 @@ const deliveryCopy: DraftPageCopy = {
   submitCreate: 'Save',
   submittingCreate: 'Saving…',
   cancelBtn: 'Cancel',
-  excelTitle: 'Excel Delivery Import',
-  excelDesc: 'Upload a filled template. A pending delivery draft will be created.',
-  templateBtn: 'Download template',
-  excelFormatTitle: 'Excel format',
-  uploadTitle: 'Upload',
-  excelFileLabel: 'Excel file (.xlsx)',
-  submitImport: 'Import and create draft',
-  submittingImport: 'Importing…',
   detailTitle: (id) => `Delivery Draft #${id}`,
   approveConfirm: 'Approve this delivery and post to inventory?',
   cancelApprovedConfirm:
@@ -357,7 +320,6 @@ const deliveryCopy: DraftPageCopy = {
   masterLoadFail: 'Failed to load master data',
   createFail: 'Save failed',
   importFail: 'Import failed',
-  selectExcel: 'Please select an .xlsx file.',
   lineValidation: 'Enter at least one line with item code or name, location, lot, and quantity.',
   showPdfImport: false,
   filterAll: 'All',

@@ -1,14 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
-import { useLocation, useNavigate, useRoutes, type Location } from 'react-router-dom'
-import { appRouteObjects } from '../appRoutes'
-import { AppShellProvider, TabPanelRouteProvider } from '../context/AppNavigateContext'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react'
+import { Outlet, useLocation, useNavigate, type Location } from 'react-router-dom'
+import {
+  AppShellProvider,
+  TabPanelActiveProvider,
+} from '../context/AppNavigateContext'
+import { ApiReadinessGate } from './ApiReadinessGate'
+import { useAuth } from '../context/AuthContext'
 import { ItemTypColorProvider } from '../context/ItemTypColorContext'
 import { MasterCatalogProvider } from '../context/MasterCatalogContext'
 import {
+  APP_HOME_PATH,
   formatAppRoute,
+  isAppHomeRoute,
   normalizeTabPath,
   parseAppRoute,
+  resolveRouteOnLoad,
+  tabDedupeKey,
+  tabMatchesViewRoute,
   tabRouteKey,
+  type AppRouteTarget,
 } from '../utils/appRoute'
 
 type NavLink = { to: string; label: string }
@@ -21,63 +39,97 @@ function tabRoute(tab: OpenTab): string {
 
 const TAB_STORAGE_KEY = 'hanalite.openTabs.v1'
 
-type NavModule = {
-  id: 'Receipt' | 'Delivery'
+function readTabsFromSession(): OpenTab[] {
+  try {
+    const raw = sessionStorage.getItem(TAB_STORAGE_KEY)
+    if (!raw) return []
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return normalizeAndDedupeTabs(
+      parsed.map((tab) => {
+        const row = tab as Partial<OpenTab>
+        return {
+          to: String(row.to ?? ''),
+          search: row.search ?? '',
+          label: String(row.label ?? ''),
+          pinned: row.pinned === true,
+        }
+      })
+    )
+  } catch {
+    return []
+  }
+}
+
+function writeTabsToSession(tabs: OpenTab[]): void {
+  try {
+    if (tabs.length === 0) {
+      sessionStorage.removeItem(TAB_STORAGE_KEY)
+      return
+    }
+    sessionStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(tabs))
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+/** Restore tabs on refresh; cold start at `/` or `/home` opens no tabs. */
+function hydrateTabsOnLoad(browserRoute: AppRouteTarget): OpenTab[] {
+  const stored = readTabsFromSession()
+  if (isAppHomeRoute(browserRoute)) return []
+  const routeKey = tabDedupeKey(browserRoute.pathname, browserRoute.search)
+  if (normalizeTabPath(browserRoute.pathname) === '/') {
+    return stored.some((t) => tabDedupeKey(t.to, t.search) === routeKey) ? stored : []
+  }
+  if (stored.some((t) => tabDedupeKey(t.to, t.search) === routeKey)) return stored
+  return normalizeAndDedupeTabs([
+    ...stored,
+    {
+      to: browserRoute.pathname,
+      search: browserRoute.search,
+      label: labelForPath(browserRoute.pathname),
+      pinned: false,
+    },
+  ])
+}
+
+function getInitialShellState(location: Location): {
+  tabs: OpenTab[]
+  viewRoute: AppRouteTarget
+} {
+  const browser = routeFromBrowserLocation(location)
+  const tabs = hydrateTabsOnLoad(browser)
+  const viewRoute = resolveRouteOnLoad(browser, tabs)
+  return { tabs, viewRoute }
+}
+
+type NavGroup = {
+  id: 'Purchase' | 'Sales' | 'Inventory' | 'Production' | 'Masters'
   label: string
   items: NavLink[]
 }
-
-type NavGroup =
-  | {
-      id: 'Purchase' | 'Sales'
-      label: string
-      modules: NavModule[]
-    }
-  | {
-      id: 'Inventory' | 'Production' | 'Masters'
-      label: string
-      items: NavLink[]
-    }
 
 const navGroups: NavGroup[] = [
   {
     id: 'Purchase',
     label: 'Purchase',
-    modules: [
-      {
-        id: 'Receipt',
-        label: 'Receipt',
-        items: [
-          { to: '/', label: 'Receipt List' },
-          { to: '/drafts/new', label: 'Receipt Entry' },
-          { to: '/drafts/import', label: 'Excel Import' },
-          { to: '/drafts/import-pdf', label: 'PDF Import' },
-        ],
-      },
+    items: [
+      { to: '/', label: 'Receipt List' },
+      { to: '/drafts/import-pdf', label: 'PDF Import' },
     ],
   },
   {
     id: 'Sales',
     label: 'Sales',
-    modules: [
-      {
-        id: 'Delivery',
-        label: 'Delivery',
-        items: [
-          { to: '/delivery', label: 'Delivery List' },
-          { to: '/delivery/new', label: 'Delivery Entry' },
-          { to: '/delivery/import', label: 'Excel Import' },
-        ],
-      },
+    items: [
+      { to: '/delivery', label: 'Delivery List' },
+      { to: '/delivery/new', label: 'Delivery Entry' },
     ],
   },
   {
     id: 'Production',
     label: 'Production',
-    items: [
-      { to: '/production/orders', label: 'Production Order List' },
-      { to: '/production/import', label: 'Excel Import' },
-    ],
+    items: [{ to: '/production/orders', label: 'Production Order List' }],
   },
   {
     id: 'Inventory',
@@ -93,13 +145,16 @@ const navGroups: NavGroup[] = [
     id: 'Masters',
     label: 'Masters',
     items: [
+      { to: '/masters/item-processes', label: 'Item Processes' },
       { to: '/masters/items', label: 'Items' },
       { to: '/masters/locations', label: 'Locations' },
-      { to: '/masters/item-processes', label: 'Item Processes' },
+      { to: '/masters/locationtyps', label: 'Location Types' },
       { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/movetyps', label: 'Move Types' },
       { to: '/masters/suppliers', label: 'Suppliers' },
       { to: '/masters/customers', label: 'Customers' },
+      { to: '/masters/companies', label: 'Companies' },
+      { to: '/masters/users', label: 'Users' },
     ],
   },
 ]
@@ -111,22 +166,16 @@ function isActive(pathname: string, to: string) {
 }
 
 function openKeysForPath(pathname: string): string[] {
+  if (isAppHomeRoute({ pathname, search: '' })) return []
   if (pathname.startsWith('/masters')) return ['Masters']
   if (pathname.startsWith('/production')) return ['Production']
   if (pathname.startsWith('/inventory') || pathname.startsWith('/trace')) return ['Inventory']
-  if (pathname.startsWith('/delivery')) return ['Sales', 'Sales:Delivery']
-  return ['Purchase', 'Purchase:Receipt']
+  if (pathname.startsWith('/delivery')) return ['Sales']
+  return ['Purchase']
 }
 
 function groupHasActive(pathname: string, group: NavGroup): boolean {
-  if ('modules' in group) {
-    return group.modules.some((mod) => mod.items.some((item) => isActive(pathname, item.to)))
-  }
   return group.items.some((item) => isActive(pathname, item.to))
-}
-
-function moduleHasActive(pathname: string, mod: NavModule): boolean {
-  return mod.items.some((item) => isActive(pathname, item.to))
 }
 
 function normalizeAndDedupeTabs(
@@ -140,7 +189,7 @@ function normalizeAndDedupeTabs(
       label: tab.label,
       pinned: tab.pinned,
     })
-    const key = tabRouteKey(normalized.to, normalized.search)
+    const key = tabDedupeKey(normalized.to, normalized.search)
     const existing = deduped.get(key)
     if (!existing) {
       deduped.set(key, normalized)
@@ -148,7 +197,7 @@ function normalizeAndDedupeTabs(
     }
     deduped.set(key, {
       to: normalized.to,
-      search: normalized.search,
+      search: normalized.search || existing.search,
       label: existing.label || normalized.label,
       pinned: existing.pinned === true || normalized.pinned === true,
     })
@@ -159,8 +208,7 @@ function normalizeAndDedupeTabs(
 function labelForPath(pathname: string): string {
   let best: NavLink | null = null
   for (const group of navGroups) {
-    const items = 'modules' in group ? group.modules.flatMap((m) => m.items) : group.items
-    for (const item of items) {
+    for (const item of group.items) {
       const matched = item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(`${item.to}/`)
       if (!matched) continue
       if (!best || item.to.length > best.to.length) best = item
@@ -170,17 +218,6 @@ function labelForPath(pathname: string): string {
   if (pathname.startsWith('/drafts')) return 'Receipt'
   if (pathname.startsWith('/delivery')) return 'Delivery'
   return pathname
-}
-
-function tabPanelLocation(tab: OpenTab): Location {
-  const routeKey = tabRouteKey(tab.to, tab.search)
-  return {
-    pathname: tab.to,
-    search: tab.search,
-    hash: '',
-    state: null,
-    key: `tab-panel-${routeKey}`,
-  }
 }
 
 function normalizeOpenTab(tab: OpenTab): OpenTab {
@@ -193,77 +230,52 @@ function normalizeOpenTab(tab: OpenTab): OpenTab {
   }
 }
 
-function TabPanelRoutes({ tab }: { tab: OpenTab }): ReactElement | null {
-  const location = useMemo(() => tabPanelLocation(tab), [tab.to, tab.search])
-  const panelRoute = useMemo(
-    (): { pathname: string; search: string } => ({
-      pathname: tab.to,
-      search: tab.search,
-    }),
-    [tab.to, tab.search]
-  )
-  return (
-    <TabPanelRouteProvider route={panelRoute}>
-      {useRoutes(appRouteObjects, location)}
-    </TabPanelRouteProvider>
-  )
+function routeFromBrowserLocation(location: Location): { pathname: string; search: string } {
+  return parseAppRoute(formatAppRoute(location.pathname, location.search))
 }
 
 export function Layout() {
+  const { session, logout } = useAuth()
   const location = useLocation()
   const { pathname } = location
   const routerPath = normalizeTabPath(pathname)
   const navigate = useNavigate()
-  const [viewRoute, setViewRoute] = useState(() => ({
-    pathname: routerPath,
-    search: location.search,
-  }))
+  const routeHydratedRef = useRef(false)
+  const skipLocationSyncOnceRef = useRef(true)
+  const [initialShell] = useState(() => getInitialShellState(location))
+  const [viewRoute, setViewRoute] = useState(() => initialShell.viewRoute)
   const currentPath = viewRoute.pathname
   const closingPathRef = useRef<string | null>(null)
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set(openKeysForPath(currentPath)))
-  const [tabs, setTabs] = useState<OpenTab[]>(() => {
-    try {
-      const raw = localStorage.getItem(TAB_STORAGE_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw) as Array<OpenTab | { to: string; label: string }>
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const normalized = parsed
-            .filter((t): t is { to: string; label: string; pinned?: boolean } =>
-              !!t && typeof t.to === 'string' && typeof t.label === 'string'
-            )
-            .map((t) => {
-              const parsed = parseAppRoute(t.to)
-              return {
-                to: parsed.pathname,
-                search: (t as OpenTab).search ?? parsed.search,
-                label: t.label,
-                pinned: (t as OpenTab).pinned === true,
-              }
-            })
-          return normalizeAndDedupeTabs(normalized)
-        }
-      }
-    } catch {
-      // ignore bad localStorage
-    }
-    return [
-      {
-        to: currentPath,
-        search: location.search,
-        label: labelForPath(currentPath),
-        pinned: false,
-      },
-    ]
-  })
+  const [tabs, setTabs] = useState<OpenTab[]>(() => initialShell.tabs)
 
-  const activeRouteKey = tabRouteKey(currentPath, viewRoute.search)
+  const viewRouteTarget = useMemo(
+    (): AppRouteTarget => ({ pathname: currentPath, search: viewRoute.search }),
+    [currentPath, viewRoute.search]
+  )
 
   const activeTabIndex = useMemo(
-    () => tabs.findIndex((t) => tabRouteKey(t.to, t.search) === activeRouteKey),
-    [tabs, activeRouteKey]
+    () => tabs.findIndex((t) => tabMatchesViewRoute(t, viewRouteTarget)),
+    [tabs, viewRouteTarget]
   )
 
   const activeTab = activeTabIndex >= 0 ? tabs[activeTabIndex] : undefined
+  const navActivePath = activeTab?.to ?? currentPath
+
+  useLayoutEffect(() => {
+    if (routeHydratedRef.current) return
+    routeHydratedRef.current = true
+    try {
+      localStorage.removeItem(TAB_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+    const atReceiptRoot = normalizeTabPath(location.pathname) === '/'
+    if (atReceiptRoot && tabs.length === 0) {
+      setViewRoute({ pathname: APP_HOME_PATH, search: '' })
+      navigate(APP_HOME_PATH, { replace: true })
+    }
+  }, [location.pathname, navigate, tabs.length])
 
   useEffect(() => {
     setTabs((prev) => {
@@ -285,23 +297,7 @@ export function Layout() {
   }, [])
 
   useEffect(() => {
-    if (activeTab) return
-    if (closingPathRef.current === currentPath) return
-    setTabs((prev) =>
-      normalizeAndDedupeTabs([
-        ...prev,
-        {
-          to: currentPath,
-          search: viewRoute.search,
-          label: labelForPath(currentPath),
-          pinned: false,
-        },
-      ])
-    )
-  }, [currentPath, activeTab, viewRoute.search])
-
-  useEffect(() => {
-    localStorage.setItem(TAB_STORAGE_KEY, JSON.stringify(normalizeAndDedupeTabs(tabs)))
+    writeTabsToSession(tabs)
   }, [tabs])
 
   useEffect(() => {
@@ -320,6 +316,10 @@ export function Layout() {
   }, [currentPath])
 
   useEffect(() => {
+    if (skipLocationSyncOnceRef.current) {
+      skipLocationSyncOnceRef.current = false
+      return
+    }
     setViewRoute({ pathname: routerPath, search: location.search })
     setTabs((prev) =>
       prev.map((t) => (t.to === routerPath ? { ...t, search: location.search } : t))
@@ -340,6 +340,32 @@ export function Layout() {
     [navigate, routerPath, location.search]
   )
 
+  useEffect(() => {
+    if (tabs.length > 0) return
+    if (isAppHomeRoute(viewRouteTarget)) return
+    appNavigate(APP_HOME_PATH)
+  }, [tabs.length, viewRouteTarget, appNavigate])
+
+  useLayoutEffect(() => {
+    if (tabs.length === 0 || activeTabIndex >= 0) return
+    if (isAppHomeRoute(viewRouteTarget)) return
+    const browser = routeFromBrowserLocation(location)
+    const fromBrowser = tabs.findIndex((t) => tabMatchesViewRoute(t, browser))
+    const target = fromBrowser >= 0 ? tabs[fromBrowser]! : tabs[tabs.length - 1]!
+    const next = parseAppRoute(formatAppRoute(target.to, target.search))
+    setViewRoute(next)
+    if (routerPath !== next.pathname || location.search !== next.search) {
+      navigate({ pathname: next.pathname, search: next.search }, { replace: true })
+    }
+  }, [tabs, activeTabIndex, location.pathname, location.search, navigate, routerPath, viewRouteTarget])
+
+  useEffect(() => {
+    if (!activeTab) return
+    const next = parseAppRoute(formatAppRoute(activeTab.to, activeTab.search))
+    if (routerPath === next.pathname && location.search === next.search) return
+    navigate({ pathname: next.pathname, search: next.search }, { replace: true })
+  }, [activeTab, routerPath, location.search, navigate])
+
   const requestRoute = (to: string) => {
     const next = parseAppRoute(to)
     if (currentPath === next.pathname && viewRoute.search === next.search) return
@@ -357,10 +383,10 @@ export function Layout() {
 
   const openTab = (to: string, label?: string) => {
     const parsed = parseAppRoute(to)
-    const routeKey = tabRouteKey(parsed.pathname, parsed.search)
-    const existing = tabs.find((t) => tabRouteKey(t.to, t.search) === routeKey)
+    const dedupeKey = tabDedupeKey(parsed.pathname, parsed.search)
+    const existing = tabs.find((t) => tabDedupeKey(t.to, t.search) === dedupeKey)
     if (existing) {
-      requestRoute(tabRoute(existing))
+      requestRoute(formatAppRoute(parsed.pathname, parsed.search))
       return
     }
     setTabs((prev) =>
@@ -385,7 +411,11 @@ export function Layout() {
     if (currentPath === normalizedTo) {
       closingPathRef.current = normalizedTo
       const fallback = nextTabs[Math.max(0, idx - 1)] ?? nextTabs[0] ?? null
-      if (fallback) requestRoute(tabRoute(fallback))
+      if (fallback) {
+        requestRoute(tabRoute(fallback))
+      } else {
+        requestRoute(APP_HOME_PATH)
+      }
     }
     setTabs(nextTabs)
   }
@@ -426,6 +456,7 @@ export function Layout() {
   return (
     <ItemTypColorProvider>
     <AppShellProvider navigate={appNavigate} viewRoute={viewRoute}>
+    <ApiReadinessGate>
     <MasterCatalogProvider>
     <div className="app">
       <aside className="sidebar">
@@ -438,66 +469,25 @@ export function Layout() {
             height={64}
           />
         </div>
+        {session ? (
+          <div className="sidebar-session">
+            <div className="sidebar-session-meta">
+              <span className="sidebar-session-company">{session.company_cd}</span>
+              <span className="sidebar-session-user">
+                {session.user_cd}
+                {session.user_nm ? ` (${session.user_nm})` : ''}
+              </span>
+            </div>
+            <button type="button" className="sidebar-logout" onClick={() => logout()}>
+              Sign out
+            </button>
+          </div>
+        ) : null}
         <nav className="sidebar-nav">
           {navGroups.map((group) => {
             const groupKey = group.id
             const groupOpen = openKeys.has(groupKey)
-            const groupActive = groupHasActive(currentPath, group)
-
-            if ('modules' in group) {
-              return (
-                <div key={groupKey} className={`nav-section${groupOpen ? ' is-open' : ''}`}>
-                  <button
-                    type="button"
-                    className={`nav-section-toggle${groupActive ? ' has-active' : ''}`}
-                    aria-expanded={groupOpen}
-                    onClick={() => toggleKey(groupKey)}
-                  >
-                    <span>{group.label}</span>
-                    <span className="nav-chevron" aria-hidden="true">
-                      ›
-                    </span>
-                  </button>
-                  <div className="nav-submenu">
-                    {group.modules.map((mod) => {
-                      const moduleKey = `${groupKey}:${mod.id}`
-                      const moduleOpen = openKeys.has(moduleKey)
-                      const moduleActive = moduleHasActive(currentPath, mod)
-                      return (
-                        <div
-                          key={moduleKey}
-                          className={`nav-module${moduleOpen ? ' is-open' : ''}`}
-                        >
-                          <button
-                            type="button"
-                            className={`nav-module-toggle${moduleActive ? ' has-active' : ''}`}
-                            aria-expanded={moduleOpen}
-                            onClick={() => toggleKey(moduleKey)}
-                          >
-                            <span>{mod.label}</span>
-                            <span className="nav-chevron" aria-hidden="true">
-                              ›
-                            </span>
-                          </button>
-                          <div className="nav-module-links">
-                            {mod.items.map((item) => (
-                              <button
-                                key={`${moduleKey}-${item.to}`}
-                                type="button"
-                                className={`nav-link${isActive(currentPath, item.to) ? ' active' : ''}`}
-                                onClick={() => openTab(item.to, item.label)}
-                              >
-                                {item.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            }
+            const groupActive = groupHasActive(navActivePath, group)
 
             return (
               <div key={groupKey} className={`nav-section${groupOpen ? ' is-open' : ''}`}>
@@ -517,7 +507,7 @@ export function Layout() {
                     <button
                       key={item.to}
                       type="button"
-                      className={`nav-link${isActive(currentPath, item.to) ? ' active' : ''}`}
+                      className={`nav-link${isActive(navActivePath, item.to) ? ' active' : ''}`}
                       onClick={() => openTab(item.to, item.label)}
                     >
                       {item.label}
@@ -532,7 +522,7 @@ export function Layout() {
           <div className="sidebar-footer-tabs">
             <button
               type="button"
-              className={`erp-tab${currentPath === '/api-docs' ? ' active' : ''}`}
+              className={`erp-tab${navActivePath === '/api-docs' ? ' active' : ''}`}
               onClick={() => openTab('/api-docs', 'API Docs')}
             >
               API Docs
@@ -547,7 +537,7 @@ export function Layout() {
           {tabs.map((tab) => (
             <div
               key={tabRouteKey(tab.to, tab.search)}
-              className={`main-tab ${tabRouteKey(tab.to, tab.search) === activeRouteKey ? 'active' : ''}`}
+              className={`main-tab ${tabMatchesViewRoute(tab, viewRouteTarget) ? 'active' : ''}`}
               onDragOver={(e) => {
                 e.preventDefault()
                 e.dataTransfer.dropEffect = 'move'
@@ -602,32 +592,34 @@ export function Layout() {
           ))}
         </div>
         {tabs.length === 0 ? (
-          <div className="erp-panel">
-            <div className="erp-panel-content">
-              <p className="muted erp-grid-empty">No tab open. Select a menu to open a page.</p>
+          <div className="main-tab-panels">
+            <div className="main-tab-panel">
+              <TabPanelActiveProvider active>
+                <Outlet />
+              </TabPanelActiveProvider>
+            </div>
+          </div>
+        ) : activeTab ? (
+          <div className="main-tab-panels">
+            <div className="main-tab-panel">
+              <TabPanelActiveProvider active>
+                <Outlet />
+              </TabPanelActiveProvider>
             </div>
           </div>
         ) : (
-          <div className="main-tab-panels">
-            {tabs.map((tab, index) => {
-              const routeKey = tabRouteKey(tab.to, tab.search)
-              const isActive = index === activeTabIndex
-              return (
-                <div
-                  key={`${routeKey}#${index}`}
-                  className="main-tab-panel"
-                  hidden={!isActive}
-                  aria-hidden={!isActive}
-                >
-                  <TabPanelRoutes tab={tab} />
-                </div>
-              )
-            })}
+          <div className="erp-panel">
+            <div className="erp-panel-content">
+              <p className="muted erp-grid-empty">
+                Tab route mismatch. Select a tab or open a page from the menu.
+              </p>
+            </div>
           </div>
         )}
       </main>
     </div>
     </MasterCatalogProvider>
+    </ApiReadinessGate>
     </AppShellProvider>
     </ItemTypColorProvider>
   )

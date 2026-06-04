@@ -4,6 +4,7 @@ import { ErpScreen } from '../erp/ErpScreen'
 import { GridRowNumCell } from '../GridRowNumCell'
 import { masterNameEditColumns } from '../erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
 import {
   emptyEditNameMasterRow,
   isActiveNameMasterRow,
@@ -21,6 +22,8 @@ import { MasterGridToolbarActions } from './MasterGridToolbar'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  masterPersistResultMessage,
+  persistedIdsPendingDelete,
   removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
@@ -75,8 +78,14 @@ export function MasterNameEditPage({
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
+  const {
+    success,
+    setSuccess,
+    rowError,
+    setRowError,
+    clearToolbarFeedback,
+    beginToolbarAction,
+  } = useMasterGridToolbarFeedback()
 
   const columns = masterNameEditColumns.map((col) =>
     col.key === 'name' ? { ...col, label: nameLabel } : col
@@ -85,7 +94,6 @@ export function MasterNameEditPage({
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    setSuccess(null)
     try {
       const records = await loadRecords()
       const dataRows = records.map((r) => listRowToEditNameMasterRow(r.id, r.name))
@@ -93,7 +101,6 @@ export function MasterNameEditPage({
       setEditRows(
         ensureTrailingBlankRow(dataRows, isBlankNameMasterRow, () => emptyEditNameMasterRow())
       )
-      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -139,6 +146,7 @@ export function MasterNameEditPage({
     },
     excelImport: {
       applyParsedRows: async (parsed) => {
+        beginToolbarAction()
         const { rows, updated, added } = mergeNameMasterImportRows(parsed, editRows)
         setEditRows(
           ensureTrailingBlankRow(rows, isBlankNameMasterRow, () => emptyEditNameMasterRow())
@@ -163,6 +171,7 @@ export function MasterNameEditPage({
   )
 
   const updateRow = (key: string, patch: Partial<EditNameMasterRow>) => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       updateRowWithTrailingBlank(rows, key, patch, isBlankNameMasterRow, () =>
         emptyEditNameMasterRow()
@@ -207,9 +216,9 @@ export function MasterNameEditPage({
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedCount, entityLabels.plural))) return
+    beginToolbarAction()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.record_id != null)
@@ -230,6 +239,12 @@ export function MasterNameEditPage({
   }
 
   const handleSave = async () => {
+    beginToolbarAction()
+    const pendingDeleteIds = persistedIdsPendingDelete(
+      editRows,
+      savedSnapshots,
+      (row) => row.record_id ?? null
+    )
     const active = editRows.filter(isActiveNameMasterRow)
     const incomplete = editRows.filter(
       (row) => !isBlankNameMasterRow(row) && !isActiveNameMasterRow(row)
@@ -238,7 +253,7 @@ export function MasterNameEditPage({
       setRowError(`Enter ${nameLabel} for each row, or clear empty rows.`)
       return
     }
-    if (active.length === 0) {
+    if (active.length === 0 && pendingDeleteIds.length === 0) {
       setRowError('Add at least one row.')
       return
     }
@@ -255,17 +270,17 @@ export function MasterNameEditPage({
       (row) => row.record_id,
       (row) => (isActiveNameMasterRow(row) ? { name: row.name.trim() } : null)
     )
-    if (toSave.length === 0) {
-      setRowError(null)
+    if (toSave.length === 0 && pendingDeleteIds.length === 0) {
       setSuccess(savedCountMessage(0, entityLabels.singular))
       return
     }
 
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
+      for (const id of pendingDeleteIds) {
+        await deleteRecord(id)
+      }
       for (const row of toSave) {
         const name = row.name.trim()
         if (row.record_id != null) {
@@ -274,8 +289,16 @@ export function MasterNameEditPage({
           await createRecord(name)
         }
       }
-      setSuccess(savedCountMessage(toSave.length, entityLabels.singular))
-      await load()
+      setSuccess(
+        masterPersistResultMessage(
+          toSave.length,
+          pendingDeleteIds.length,
+          entityLabels.singular
+        )
+      )
+      if (pendingDeleteIds.length > 0 || toSave.length > 0) {
+        await load()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -293,7 +316,10 @@ export function MasterNameEditPage({
         columns={columns}
         loading={loading}
         isEmpty={false}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          beginToolbarAction()
+          void load()
+        }}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableRows.length}

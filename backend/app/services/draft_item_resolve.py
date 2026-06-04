@@ -6,10 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.deps import get_tenant
 from app.models.drafts import InvReceiptDraftLine, SlsDeliveryDraftLine
 from app.models.masters import Item, ItemTyp
 from app.schemas.masters import ItemCreate
 from app.services.masters import MasterError, _normalize_item_cd, _validate_item_cd_unique, create_item
+from app.tenant import stamp_update
 
 ITEM_CD_REQUIRED_FOR_APPROVE = (
     "Please enter the item code. This code will be used to generate the master."
@@ -29,8 +31,12 @@ def validate_lines_item_cd_for_approve(
 
 
 def _default_itemtyp_id(db: Session) -> int:
+    ctx = get_tenant()
     row = db.scalar(
-        select(ItemTyp.itemtyp_id).where(ItemTyp.deleted_at.is_(None)).order_by(ItemTyp.itemtyp_id).limit(1)
+        select(ItemTyp.itemtyp_id)
+        .where(ItemTyp.co_id == ctx.co_id, ItemTyp.deleted_at.is_(None))
+        .order_by(ItemTyp.itemtyp_id)
+        .limit(1)
     )
     if not row:
         raise MasterError("No item type in master. Create an item type first.")
@@ -45,25 +51,36 @@ def _line_cd_nm(line: InvReceiptDraftLine | SlsDeliveryDraftLine) -> tuple[str |
 
 def resolve_draft_line_item_id(db: Session, line: InvReceiptDraftLine | SlsDeliveryDraftLine) -> int:
     """Ensure m_items row exists; update master from draft line code/name when approving."""
+    ctx = get_tenant()
     cd, nm = _line_cd_nm(line)
 
     if line.item_id:
-        item = db.get(Item, line.item_id)
+        item = db.scalar(
+            select(Item).where(Item.item_id == line.item_id, Item.co_id == ctx.co_id)
+        )
         if item and item.deleted_at is None:
             if cd and item.item_cd != _normalize_item_cd(cd):
                 _validate_item_cd_unique(db, cd, exclude_item_id=item.item_id)
                 item.item_cd = _normalize_item_cd(cd)
             if nm:
                 item.item_nm = nm.strip()
+            stamp_update(item, ctx)
             line.item_id = item.item_id
             return item.item_id
 
     if cd:
         code = _normalize_item_cd(cd)
-        existing = db.scalar(select(Item).where(Item.item_cd == code, Item.deleted_at.is_(None)))
+        existing = db.scalar(
+            select(Item).where(
+                Item.item_cd == code,
+                Item.co_id == ctx.co_id,
+                Item.deleted_at.is_(None),
+            )
+        )
         if existing:
             if nm:
                 existing.item_nm = nm.strip()
+                stamp_update(existing, ctx)
             line.item_id = existing.item_id
             line.item_cd = existing.item_cd
             return existing.item_id

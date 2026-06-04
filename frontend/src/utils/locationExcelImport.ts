@@ -1,11 +1,12 @@
-import type { LocationMaster } from '../types/masters'
+import type { LocationTyp } from '../types/masters'
 import { emptyEditLocationRow, type EditLocationRow } from './locationMasterEdit'
+import { resolveLocationtypId } from './locationTypMasterEdit'
 
-const LOCATION_TYPES: LocationMaster['location_type'][] = ['RM', 'Process', 'NG', 'FG']
-
+/** Merge Excel rows into location grid: match by Location Code, else append. */
 export function mergeLocationImportRows(
   parsed: Record<string, string>[],
-  existing: EditLocationRow[]
+  existing: EditLocationRow[],
+  locationtyps: LocationTyp[]
 ): { rows: EditLocationRow[]; updated: number; added: number } {
   const byCode = new Map<string, EditLocationRow>()
   for (const row of existing) {
@@ -20,13 +21,11 @@ export function mergeLocationImportRows(
   for (const cells of parsed) {
     const code = (cells.code ?? '').trim()
     const name = (cells.name ?? '').trim()
-    const typeRaw = (cells.type ?? '').trim() as LocationMaster['location_type']
-    if (!code && !name) continue
+    const locationtyp_id = resolveLocationtypId(cells.type, locationtyps)
+    if (!code && !name && locationtyp_id === '') continue
 
-    const type = LOCATION_TYPES.includes(typeRaw) ? typeRaw : 'Process'
     const codeKey = code.toLowerCase()
     const match = code ? byCode.get(codeKey) : undefined
-
     if (match) {
       const index = result.findIndex((r) => r.key === match.key)
       if (index >= 0) {
@@ -34,7 +33,7 @@ export function mergeLocationImportRows(
           ...match,
           location_cd: code || match.location_cd,
           location_nm: name || match.location_nm,
-          location_type: type,
+          locationtyp_id: locationtyp_id !== '' ? locationtyp_id : match.locationtyp_id,
         }
         updated += 1
       }
@@ -42,7 +41,7 @@ export function mergeLocationImportRows(
       const row = emptyEditLocationRow()
       row.location_cd = code
       row.location_nm = name
-      row.location_type = type
+      row.locationtyp_id = locationtyp_id
       result.push(row)
       byCode.set(codeKey, row)
       added += 1

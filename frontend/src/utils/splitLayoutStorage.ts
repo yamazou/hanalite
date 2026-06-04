@@ -12,7 +12,10 @@ export const DEFAULT_PANEL_SPLIT_LAYOUT: StoredPanelSplitLayout = {
   listHeightRatio: 0.38,
 }
 
-export function splitLayoutStorageKey(layoutId: string): string {
+export function splitLayoutStorageKey(layoutId: string, layoutScope?: string): string {
+  if (layoutScope) {
+    return `hanalite:split:${layoutScope}:${layoutId}`
+  }
   return `hanalite:split:${layoutId}`
 }
 
@@ -23,10 +26,11 @@ function clampRatio(value: number, min = 0.15, max = 0.85): number {
 
 export function loadPanelSplitLayout(
   layoutId: string,
-  defaults: StoredPanelSplitLayout = DEFAULT_PANEL_SPLIT_LAYOUT
+  defaults: StoredPanelSplitLayout = DEFAULT_PANEL_SPLIT_LAYOUT,
+  layoutScope?: string
 ): StoredPanelSplitLayout {
   try {
-    const raw = localStorage.getItem(splitLayoutStorageKey(layoutId))
+    const raw = localStorage.getItem(splitLayoutStorageKey(layoutId, layoutScope))
     if (!raw) return { ...defaults }
     const parsed = JSON.parse(raw) as Partial<StoredPanelSplitLayout>
     return {
@@ -46,9 +50,13 @@ export function loadPanelSplitLayout(
 
 export function persistPanelSplitLayout(
   layoutId: string,
-  layout: StoredPanelSplitLayout
+  layout: StoredPanelSplitLayout,
+  layoutScope?: string
 ): void {
-  localStorage.setItem(splitLayoutStorageKey(layoutId), JSON.stringify(layout))
+  localStorage.setItem(
+    splitLayoutStorageKey(layoutId, layoutScope),
+    JSON.stringify(layout)
+  )
 }
 
 export function panelSplitLayoutsEqual(

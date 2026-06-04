@@ -1,12 +1,13 @@
 import type { SupplierMaster } from '../types/masters'
 import { buildRecordSnapshotMap } from './gridRowChange'
+import { EMPTY_MASTER_ROW_DATES, type MasterRowDates } from './masterGridDates'
 
 export type EditSupplierRow = {
   key: string
   suppliers_id?: number
   suppliers_cd: string
   suppliers_nm: string
-}
+} & MasterRowDates
 
 let nextKey = 0
 
@@ -21,6 +22,8 @@ export function listRowToEditSupplierRow(row: SupplierMaster): EditSupplierRow {
     suppliers_id: row.suppliers_id,
     suppliers_cd: row.suppliers_cd,
     suppliers_nm: row.suppliers_nm,
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   }
 }
 
@@ -29,6 +32,7 @@ export function emptyEditSupplierRow(): EditSupplierRow {
     key: newSupplierEditKey(),
     suppliers_cd: '',
     suppliers_nm: '',
+    ...EMPTY_MASTER_ROW_DATES,
   }
 }
 

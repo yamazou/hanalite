@@ -45,7 +45,7 @@ export function ProductionOrderHeaderGridCell({
             type="date"
             className="erp-grid-input"
             value={row.production_date}
-            aria-label="Production Date"
+            aria-label="Planned Date"
             onChange={(e) => onUpdate({ production_date: e.target.value })}
             onKeyDown={onKeyDown ? (e) => onKeyDown(e, row) : undefined}
           />
@@ -161,8 +161,8 @@ export function ProductionOrderHeaderGridCell({
           <input
             className="erp-grid-input"
             value={row.planned_qty}
-            placeholder={gridCellPlaceholder('Plan Qty', isBlank)}
-            aria-label="Plan Qty"
+            placeholder={gridCellPlaceholder('Planned Qty', isBlank)}
+            aria-label="Planned Qty"
             inputMode="decimal"
             onChange={(e) => onUpdate({ planned_qty: e.target.value })}
             onKeyDown={onKeyDown ? (e) => onKeyDown(e, row) : undefined}

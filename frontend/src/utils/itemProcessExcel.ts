@@ -1,5 +1,13 @@
 import * as XLSX from 'xlsx'
-import type { ItemListRow, LocationMaster } from '../types/masters'
+import type {
+  CustomerMaster,
+  ItemDetail,
+  ItemListRow,
+  ItemPayload,
+  ItemTyp,
+  LocationMaster,
+} from '../types/masters'
+import { resolveItemtypId } from './itemTypDisplay'
 import type { ItemProcessesOut } from '../types/itemprocs'
 import { exportFilename, downloadExcelSheetWithRedColumns } from './exportExcel'
 import {
@@ -229,8 +237,8 @@ function processExportRow(
   ]
 }
 
-export function downloadItemProcessExcel(body: (string | number)[][]): void {
-  downloadExcelSheetWithRedColumns(
+export async function downloadItemProcessExcel(body: (string | number)[][]): Promise<void> {
+  await downloadExcelSheetWithRedColumns(
     ITEM_PROCESS_EXCEL_SHEET,
     [...ITEM_PROCESS_EXCEL_HEADERS],
     body,
@@ -287,6 +295,177 @@ export type ItemProcessImportResult = {
   importedProcessItems: number
 }
 
+export type EnsureItemsForImportResult = {
+  items: ItemListRow[]
+  createdCount: number
+}
+
+/** @deprecated Use EnsureItemsForImportResult */
+export type EnsureOutputItemsForImportResult = EnsureItemsForImportResult
+
+type ImportItemToEnsure = {
+  code: string
+  name: string
+  typeLabel: string
+  customerCd: string
+  label: string
+}
+
+function importItemEnsureKey(code: string, name: string): string {
+  const c = code.trim().toLowerCase()
+  if (c) return `cd:${c}`
+  return `nm:${name.trim()}`
+}
+
+function collectItemsToEnsureFromImport(parsed: ItemProcessExcelRow[]): ImportItemToEnsure[] {
+  const seen = new Set<string>()
+  const result: ImportItemToEnsure[] = []
+
+  const add = (
+    code: string,
+    name: string,
+    typeLabel: string,
+    customerCd: string,
+    label: string
+  ) => {
+    const trimmedCode = code.trim()
+    const trimmedName = name.trim()
+    if (!trimmedCode && !trimmedName) return
+    const key = importItemEnsureKey(trimmedCode, trimmedName)
+    if (seen.has(key)) return
+    seen.add(key)
+    result.push({
+      code: trimmedCode || trimmedName,
+      name: trimmedName || trimmedCode,
+      typeLabel: typeLabel.trim(),
+      customerCd: customerCd.trim(),
+      label,
+    })
+  }
+
+  for (const row of parsed) {
+    add(
+      row['Output Item Code'],
+      row['Output Item Name'],
+      row['Item Type Code'],
+      row['Customer Code'],
+      'output item'
+    )
+    add(row['Input Item Code'], row['Input Item Name'], '', '', 'input item')
+    const processOutputCd = row['Process Output'].trim()
+    if (processOutputCd) {
+      add(processOutputCd, processOutputCd, '', '', 'process output item')
+    }
+  }
+
+  return result
+}
+
+async function createImportItemIfMissing(args: {
+  items: ItemListRow[]
+  entry: ImportItemToEnsure
+  itemtyps: ItemTyp[]
+  customers: CustomerMaster[]
+  createItem: (payload: ItemPayload) => Promise<ItemDetail>
+}): Promise<{ items: ItemListRow[]; created: boolean }> {
+  const { entry } = args
+  let items = args.items
+  if (resolveImportItem(items, entry.code, entry.name)) {
+    return { items, created: false }
+  }
+
+  const itemtyp_id = entry.typeLabel ? resolveItemtypId(entry.typeLabel, args.itemtyps) : null
+  if (entry.typeLabel && itemtyp_id === '') {
+    throw new Error(`Item type not found: ${entry.typeLabel} (${entry.label} ${entry.code})`)
+  }
+
+  let customer1_id: number | null = null
+  if (entry.customerCd) {
+    const customer = findCustomerByCd(args.customers, entry.customerCd)
+    if (!customer) {
+      throw new Error(`Customer not found: ${entry.customerCd} (${entry.label} ${entry.code})`)
+    }
+    customer1_id = customer.customers_id
+  }
+
+  const created = await args.createItem({
+    item_cd: entry.code,
+    item_nm: entry.name,
+    itemtyp_id: itemtyp_id === '' ? null : itemtyp_id,
+    customer1_id,
+  })
+  items = [...items, itemListRowFromDetail(created, args.itemtyps, args.customers)]
+  return { items, created: true }
+}
+
+function findCustomerByCd(
+  customers: CustomerMaster[],
+  cd: string
+): CustomerMaster | undefined {
+  const trimmed = cd.trim()
+  if (!trimmed) return undefined
+  const lower = trimmed.toLowerCase()
+  return customers.find((c) => c.customers_cd.trim().toLowerCase() === lower)
+}
+
+function itemListRowFromDetail(
+  detail: ItemDetail,
+  itemtyps: ItemTyp[],
+  customers: CustomerMaster[]
+): ItemListRow {
+  const itemtyp = detail.itemtyp_id != null
+    ? itemtyps.find((t) => t.itemtyp_id === detail.itemtyp_id)
+    : undefined
+  const customer =
+    detail.customer1_id != null
+      ? customers.find((c) => c.customers_id === detail.customer1_id)
+      : undefined
+  return {
+    item_id: detail.item_id,
+    item_cd: detail.item_cd,
+    item_nm: detail.item_nm,
+    itemtyp_id: detail.itemtyp_id,
+    itemtyp_nm: itemtyp?.itemtyp_nm ?? null,
+    supplier1_id: detail.supplier1_id,
+    supplier1_nm: null,
+    supplier2_id: detail.supplier2_id,
+    supplier3_id: detail.supplier3_id,
+    customer1_id: detail.customer1_id,
+    customer1_nm: customer?.customers_nm ?? null,
+    customer2_id: detail.customer2_id,
+    customer2_nm: null,
+  }
+}
+
+/** Create missing output/input/process-output items in Items master before merge. */
+export async function ensureItemsForItemProcessImport(args: {
+  parsed: ItemProcessExcelRow[]
+  items: ItemListRow[]
+  itemtyps: ItemTyp[]
+  customers: CustomerMaster[]
+  createItem: (payload: ItemPayload) => Promise<ItemDetail>
+}): Promise<EnsureItemsForImportResult> {
+  let items = [...args.items]
+  let createdCount = 0
+
+  for (const entry of collectItemsToEnsureFromImport(args.parsed)) {
+    const result = await createImportItemIfMissing({
+      items,
+      entry,
+      itemtyps: args.itemtyps,
+      customers: args.customers,
+      createItem: args.createItem,
+    })
+    items = result.items
+    if (result.created) createdCount += 1
+  }
+
+  return { items, createdCount }
+}
+
+/** @deprecated Use ensureItemsForItemProcessImport */
+export const ensureOutputItemsForItemProcessImport = ensureItemsForItemProcessImport
+
 export function mergeItemProcessImportRows(args: {
   parsed: ItemProcessExcelRow[]
   existingFinalItems: EditFinalItemRow[]
@@ -326,7 +505,9 @@ export function mergeItemProcessImportRows(args: {
       resolveImportItem(args.items, first['Output Item Code'], first['Output Item Name']) ??
       findItemByCd(args.items, first['Output Item Code'])
     if (!item) {
-      throw new Error(`Output item not found in Items master: ${first['Output Item Code']}`)
+      throw new Error(
+        `Output item could not be resolved after import: ${first['Output Item Code']}`
+      )
     }
     importedFinalItems.push({
       key: stableFinalItemKey(item.item_id),
@@ -366,6 +547,8 @@ export function mergeItemProcessImportRows(args: {
       item_nm: row.item_nm,
       itemtyp_cd: row.itemtyp_cd,
       customer_cd: row.customer_cd,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     })),
     mergedBase,
     args.items,
@@ -432,10 +615,12 @@ function buildDraftFromImportGroup(
     const inputCd = row['Input Item Code'].trim()
     const inputNm = row['Input Item Name'].trim()
     if (!inputCd && !inputNm) continue
-    const inputItem = resolveImportItem(items, inputCd, inputNm)
+    const inputItem =
+      resolveImportItem(items, inputCd, inputNm) ??
+      (inputCd ? findItemByCd(items, inputCd) : undefined)
     if (!inputItem) {
       throw new Error(
-        `Input item not found: ${inputCd || inputNm} (output ${row['Output Item Code']}, line ${lineNo})`
+        `Input item could not be resolved after import: ${inputCd || inputNm} (output ${row['Output Item Code']}, line ${lineNo})`
       )
     }
     nextInputKey += 1

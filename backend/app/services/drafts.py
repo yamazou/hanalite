@@ -3,6 +3,7 @@ from datetime import date, datetime, time
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.deps import get_tenant
 from app.models.drafts import InvReceiptDraft, InvReceiptDraftLine
 from app.models.masters import Item, Supplier
 from app.schemas.drafts import (
@@ -23,6 +24,7 @@ from app.services.draft_item_resolve import (
 from app.services.draft_search import draft_line_matches_item_q
 from app.services.inventory import InventoryError, apply_cancel_reversal, apply_gr
 from app.services.masters import MasterError, resolve_location_id
+from app.tenant import stamp_new, stamp_update
 
 
 class DraftServiceError(Exception):
@@ -39,8 +41,10 @@ def _item_ref_from_line(line: DraftLineCreate | DraftLineUpsert) -> tuple[int | 
 def _itemtyp_id_by_item_cd(db: Session, cds: set[str]) -> dict[str, int]:
     if not cds:
         return {}
+    ctx = get_tenant()
     rows = db.execute(
         select(Item.item_cd, Item.itemtyp_id).where(
+            Item.co_id == ctx.co_id,
             Item.deleted_at.is_(None),
             Item.item_cd.in_(list(cds)),
         )
@@ -107,6 +111,7 @@ def create_draft(
     parse_message: str | None = None,
     require_lines: bool = True,
 ) -> InvReceiptDraft:
+    ctx = get_tenant()
     if require_lines and not payload.lines:
         raise DraftServiceError("At least one line is required.")
 
@@ -124,6 +129,7 @@ def create_draft(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(draft, ctx)
     db.add(draft)
     db.flush()
 
@@ -142,9 +148,10 @@ def _add_line_entity(
     default_line_no: int,
     now: datetime,
 ) -> InvReceiptDraftLine:
+    ctx = get_tenant()
     item_id, item_cd, item_nm = _item_ref_from_line(line)
     if item_id is not None:
-        item = db.get(Item, item_id)
+        item = db.scalar(select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id))
         if not item or item.deleted_at is not None:
             raise DraftServiceError(f"Item {item_id} not found.")
         item_cd = item_cd or item.item_cd
@@ -167,15 +174,18 @@ def _add_line_entity(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(entity, ctx)
     db.add(entity)
     return entity
 
 
 def add_draft_line(db: Session, draft_id: int, line: DraftLineCreate) -> DraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(selectinload(InvReceiptDraft.lines))
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -194,10 +204,12 @@ def add_draft_line(db: Session, draft_id: int, line: DraftLineCreate) -> DraftRe
 
 
 def _load_registered_draft_for_update(db: Session, draft_id: int) -> InvReceiptDraft:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(selectinload(InvReceiptDraft.lines))
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -217,6 +229,7 @@ def _apply_line_upsert(
     lines: list[DraftLineUpsert],
     now: datetime,
 ) -> None:
+    ctx = get_tenant()
     active = {
         ln.inv_receipt_draft_line_id: ln
         for ln in draft.lines
@@ -232,7 +245,9 @@ def _apply_line_upsert(
                 raise DraftServiceError(f"Line {line_in.inv_receipt_draft_line_id} not found.")
             item_id, item_cd, item_nm = _item_ref_from_line(line_in)
             if item_id is not None:
-                item = db.get(Item, item_id)
+                item = db.scalar(
+                    select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id)
+                )
                 if not item or item.deleted_at is not None:
                     raise DraftServiceError(f"Item {item_id} not found.")
                 item_cd = item_cd or item.item_cd
@@ -250,7 +265,7 @@ def _apply_line_upsert(
             entity.lot = line_in.lot.strip()
             entity.qty = line_in.qty
             entity.line_no = line_no
-            entity.updated_at = now
+            stamp_update(entity, ctx)
             kept_ids.add(entity.inv_receipt_draft_line_id)
         else:
             _add_line_entity(db, draft_id, line_in, line_no, now)
@@ -258,17 +273,18 @@ def _apply_line_upsert(
     for line_id, entity in active.items():
         if line_id not in kept_ids:
             entity.deleted_at = now
-            entity.updated_at = now
+            stamp_update(entity, ctx)
 
 
 def update_draft(db: Session, draft_id: int, payload: DraftUpdate) -> DraftRead:
     draft = _load_registered_draft_for_update(db, draft_id)
+    ctx = get_tenant()
     now = datetime.now()
     draft.receipt_at = payload.receipt_at
     draft.suppliers_id = payload.suppliers_id
     draft.reference_no = payload.reference_no
     draft.notes = payload.notes
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     _apply_line_upsert(db, draft_id, draft, payload.lines, now)
     db.commit()
     return get_draft(db, draft_id)
@@ -287,6 +303,7 @@ def list_drafts(
     item_q: str | None = None,
     lot: str | None = None,
 ) -> list[DraftListItem]:
+    ctx = get_tenant()
     stmt = (
         select(
             InvReceiptDraft.inv_receipt_draft_id,
@@ -294,6 +311,7 @@ def list_drafts(
             InvReceiptDraft.source_type,
             InvReceiptDraft.receipt_at,
             InvReceiptDraft.reference_no,
+            InvReceiptDraft.suppliers_id,
             InvReceiptDraft.notes,
             InvReceiptDraft.approved_at,
             InvReceiptDraft.cancelled_at,
@@ -309,13 +327,17 @@ def list_drafts(
             (InvReceiptDraftLine.inv_receipt_draft_id == InvReceiptDraft.inv_receipt_draft_id)
             & (InvReceiptDraftLine.deleted_at.is_(None)),
         )
-        .where(InvReceiptDraft.deleted_at.is_(None))
+        .where(
+            InvReceiptDraft.co_id == ctx.co_id,
+            InvReceiptDraft.deleted_at.is_(None),
+        )
         .group_by(
             InvReceiptDraft.inv_receipt_draft_id,
             InvReceiptDraft.status,
             InvReceiptDraft.source_type,
             InvReceiptDraft.receipt_at,
             InvReceiptDraft.reference_no,
+            InvReceiptDraft.suppliers_id,
             InvReceiptDraft.notes,
             InvReceiptDraft.approved_at,
             InvReceiptDraft.cancelled_at,
@@ -351,6 +373,7 @@ def list_drafts(
             )
         )
     item_match = draft_line_matches_item_q(
+        co_id=ctx.co_id,
         draft_id_col=InvReceiptDraft.inv_receipt_draft_id,
         line_model=InvReceiptDraftLine,
         line_draft_id_col=InvReceiptDraftLine.inv_receipt_draft_id,
@@ -379,6 +402,7 @@ def list_drafts(
             source_type=SourceType(r.source_type or "manual"),
             receipt_at=r.receipt_at,
             reference_no=r.reference_no,
+            suppliers_id=r.suppliers_id,
             supplier_nm=r.suppliers_nm,
             notes=r.notes,
             line_count=int(r.line_count),
@@ -393,6 +417,7 @@ def list_drafts(
 
 
 def get_draft(db: Session, draft_id: int) -> DraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(
@@ -401,6 +426,7 @@ def get_draft(db: Session, draft_id: int) -> DraftRead:
             selectinload(InvReceiptDraft.supplier),
         )
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -418,10 +444,12 @@ def get_draft(db: Session, draft_id: int) -> DraftRead:
 
 
 def approve_draft(db: Session, draft_id: int) -> DraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(selectinload(InvReceiptDraft.lines))
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -459,6 +487,7 @@ def approve_draft(db: Session, draft_id: int) -> DraftRead:
             )
         draft.status = "approved"
         draft.approved_at = datetime.now()
+        stamp_update(draft, ctx)
         db.commit()
     except InventoryError as e:
         db.rollback()
@@ -468,10 +497,12 @@ def approve_draft(db: Session, draft_id: int) -> DraftRead:
 
 
 def cancel_draft(db: Session, draft_id: int) -> DraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(selectinload(InvReceiptDraft.lines))
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -504,6 +535,7 @@ def cancel_draft(db: Session, draft_id: int) -> DraftRead:
             draft.cancelled_at = datetime.now()
         else:
             raise DraftServiceError(f"Draft cannot be cancelled (current: {draft.status}).")
+        stamp_update(draft, ctx)
         db.commit()
     except InventoryError as e:
         db.rollback()
@@ -513,9 +545,11 @@ def cancel_draft(db: Session, draft_id: int) -> DraftRead:
 
 
 def restore_draft(db: Session, draft_id: int) -> DraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -529,12 +563,13 @@ def restore_draft(db: Session, draft_id: int) -> DraftRead:
     now = datetime.now()
     draft.status = "registered"
     draft.cancelled_at = None
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     db.commit()
     return get_draft(db, draft_id)
 
 
 def suggest_draft_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    ctx = get_tenant()
     stmt = (
         select(InvReceiptDraftLine.lot)
         .distinct()
@@ -543,6 +578,8 @@ def suggest_draft_lots(db: Session, q: str | None = None, *, limit: int = 20) ->
             InvReceiptDraft.inv_receipt_draft_id == InvReceiptDraftLine.inv_receipt_draft_id,
         )
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
+            InvReceiptDraftLine.co_id == ctx.co_id,
             InvReceiptDraft.deleted_at.is_(None),
             InvReceiptDraftLine.deleted_at.is_(None),
         )
@@ -557,10 +594,12 @@ def suggest_draft_lots(db: Session, q: str | None = None, *, limit: int = 20) ->
 
 
 def delete_draft(db: Session, draft_id: int) -> None:
+    ctx = get_tenant()
     draft = db.scalar(
         select(InvReceiptDraft)
         .options(selectinload(InvReceiptDraft.lines))
         .where(
+            InvReceiptDraft.co_id == ctx.co_id,
             InvReceiptDraft.inv_receipt_draft_id == draft_id,
             InvReceiptDraft.deleted_at.is_(None),
         )
@@ -568,14 +607,14 @@ def delete_draft(db: Session, draft_id: int) -> None:
     )
     if not draft:
         raise DraftServiceError(f"Draft {draft_id} not found.")
-    if draft.status != "cancelled":
-        raise DraftServiceError("Only cancelled drafts can be deleted.")
+    if draft.status not in ("registered", "cancelled"):
+        raise DraftServiceError("Only registered or cancelled drafts can be deleted.")
 
     now = datetime.now()
     for line in draft.lines:
         if line.deleted_at is None:
             line.deleted_at = now
-            line.updated_at = now
+            stamp_update(line, ctx)
     draft.deleted_at = now
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     db.commit()

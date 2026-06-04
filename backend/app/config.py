@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5180,http://127.0.0.1:5180"
     app_name: str = "hanalite api"
     upload_dir: str = "uploads/receipts"
+    auth_secret: str = "hanalite-dev-auth-secret-change-in-production"
 
     @property
     def cors_origin_list(self) -> list[str]:

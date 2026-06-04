@@ -156,6 +156,177 @@ def ensure_m_itemtyps_itemtyp_color() -> None:
         )
 
 
+_DEFAULT_LOCATIONTYPS = (
+    ("RM", "Raw Material"),
+    ("Process", "Process"),
+    ("NG", "NG"),
+    ("FG", "Finished Goods"),
+)
+
+
+def _archive_soft_deleted_locationtyp_codes(conn) -> None:
+    """Free unique codes held by soft-deleted rows (legacy deletes before code archival)."""
+    conn.execute(
+        text(
+            """
+            UPDATE m_locationtyps t
+            SET t.locationtyp_cd = CONCAT(
+                    LEFT(
+                        t.locationtyp_cd,
+                        GREATEST(1, 50 - CHAR_LENGTH(t.locationtyp_id) - 1)
+                    ),
+                    '~',
+                    t.locationtyp_id
+                ),
+                t.updated_at = NOW()
+            WHERE t.deleted_at IS NOT NULL
+              AND t.locationtyp_cd NOT LIKE '%~%'
+            """
+        )
+    )
+
+
+def _seed_default_locationtyps(conn) -> None:
+    _archive_soft_deleted_locationtyp_codes(conn)
+    now_sql = "NOW()"
+    for cd, nm in _DEFAULT_LOCATIONTYPS:
+        conn.execute(
+            text(
+                f"""
+                INSERT INTO m_locationtyps (locationtyp_cd, locationtyp_nm, created_at, updated_at)
+                SELECT :cd, :nm, {now_sql}, {now_sql}
+                FROM DUAL
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM m_locationtyps
+                    WHERE locationtyp_cd = :cd
+                )
+                """
+            ),
+            {"cd": cd, "nm": nm},
+        )
+
+
+def ensure_m_locations_locationtyp_id() -> None:
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if not insp.has_table("m_locationtyps"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_locationtyps (
+                        locationtyp_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        locationtyp_cd VARCHAR(50) NOT NULL,
+                        locationtyp_nm VARCHAR(100) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        PRIMARY KEY (locationtyp_id),
+                        UNIQUE KEY uk_locationtyps_cd (locationtyp_cd)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            )
+        _seed_default_locationtyps(conn)
+
+        if not insp.has_table("m_locations"):
+            return
+
+        cols = {c["name"] for c in insp.get_columns("m_locations")}
+        if "locationtyp_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE m_locations "
+                    "ADD COLUMN locationtyp_id INT UNSIGNED NULL DEFAULT NULL "
+                    "AFTER location_nm"
+                )
+            )
+            cols.add("locationtyp_id")
+
+        if "location_type" in cols:
+            for old_cd, _ in _DEFAULT_LOCATIONTYPS:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE m_locations l
+                        INNER JOIN m_locationtyps t
+                            ON t.deleted_at IS NULL AND t.locationtyp_cd = :old_cd
+                        SET l.locationtyp_id = t.locationtyp_id
+                        WHERE l.deleted_at IS NULL
+                          AND l.location_type = :old_cd
+                          AND (l.locationtyp_id IS NULL OR l.locationtyp_id = 0)
+                        """
+                    ),
+                    {"old_cd": old_cd},
+                )
+            conn.execute(
+                text(
+                    """
+                    UPDATE m_locations l
+                    INNER JOIN m_locationtyps t
+                        ON t.deleted_at IS NULL AND t.locationtyp_cd = 'Process'
+                    SET l.locationtyp_id = t.locationtyp_id
+                    WHERE l.deleted_at IS NULL
+                      AND (l.locationtyp_id IS NULL OR l.locationtyp_id = 0)
+                    """
+                )
+            )
+            conn.execute(text("ALTER TABLE m_locations DROP COLUMN location_type"))
+            cols.discard("location_type")
+
+        fks = {fk["name"] for fk in insp.get_foreign_keys("m_locations")}
+        if "fk_locations_locationtyp" not in fks and "locationtyp_id" in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE m_locations "
+                    "ADD CONSTRAINT fk_locations_locationtyp "
+                    "FOREIGN KEY (locationtyp_id) REFERENCES m_locationtyps (locationtyp_id)"
+                )
+            )
+
+
+def ensure_m_locationtyps_and_itemtyp_link() -> None:
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if not insp.has_table("m_locationtyps"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_locationtyps (
+                        locationtyp_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        locationtyp_cd VARCHAR(50) NOT NULL,
+                        locationtyp_nm VARCHAR(100) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        PRIMARY KEY (locationtyp_id),
+                        UNIQUE KEY uk_locationtyps_cd (locationtyp_cd)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            )
+        if not insp.has_table("m_itemtyps"):
+            return
+        cols = {c["name"] for c in insp.get_columns("m_itemtyps")}
+        if "locationtyp_id" not in cols:
+            after = "itemtyp_color" if "itemtyp_color" in cols else "itemtyp_nm"
+            conn.execute(
+                text(
+                    f"ALTER TABLE m_itemtyps "
+                    f"ADD COLUMN locationtyp_id INT UNSIGNED NULL DEFAULT NULL AFTER {after}"
+                )
+            )
+            cols.add("locationtyp_id")
+        fks = {fk["name"] for fk in insp.get_foreign_keys("m_itemtyps")}
+        if "fk_itemtyps_locationtyp" not in fks and "locationtyp_id" in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE m_itemtyps "
+                    "ADD CONSTRAINT fk_itemtyps_locationtyp "
+                    "FOREIGN KEY (locationtyp_id) REFERENCES m_locationtyps (locationtyp_id)"
+                )
+            )
+
+
 def _dedupe_master_codes(
     conn,
     *,
@@ -547,3 +718,161 @@ def ensure_itemproc_inputs_drop_from_location_column() -> None:
         if idx_name:
             conn.execute(text(f"ALTER TABLE m_itemproc_inputs DROP INDEX `{idx_name}`"))
         conn.execute(text("ALTER TABLE m_itemproc_inputs DROP COLUMN from_location_id"))
+
+
+def ensure_m_items_nullable_itemtyp_id() -> None:
+    """Allow items without an item type (e.g. Item Process Excel import)."""
+    insp = inspect(engine)
+    if not insp.has_table("m_items"):
+        return
+    cols = {c["name"]: c for c in insp.get_columns("m_items")}
+    itemtyp_col = cols.get("itemtyp_id")
+    if not itemtyp_col or itemtyp_col.get("nullable"):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE m_items MODIFY COLUMN itemtyp_id INT UNSIGNED NULL"
+            )
+        )
+
+
+_TENANT_TABLES = (
+    "m_locationtyps",
+    "m_itemtyps",
+    "m_suppliers",
+    "m_customers",
+    "m_locations",
+    "m_items",
+    "m_itemprocs",
+    "m_itemproc_inputs",
+    "m_itemproc_roots",
+    "m_movetyps",
+    "inv_currents",
+    "inv_balances",
+    "inv_grgi",
+    "pch_receipt_draft",
+    "pch_receipt_draft_lines",
+    "sls_delivery_draft",
+    "sls_delivery_draft_lines",
+    "prd_orders",
+    "prd_order_lines",
+    "prd_order_inputs",
+    "prd_order_outputs",
+)
+
+
+def _ensure_tenant_columns_on_table(conn, table: str) -> None:
+    cols = {c["name"] for c in inspect(engine).get_columns(table)}
+    if "co_id" not in cols:
+        conn.execute(
+            text(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN co_id INT UNSIGNED NOT NULL DEFAULT 1"
+            )
+        )
+        conn.execute(text(f"UPDATE {table} SET co_id = 1 WHERE co_id = 0"))
+        cols.add("co_id")
+    if "created_by" not in cols:
+        conn.execute(
+            text(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN created_by INT UNSIGNED NULL DEFAULT NULL"
+            )
+        )
+    if "updated_by" not in cols:
+        conn.execute(
+            text(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN updated_by INT UNSIGNED NULL DEFAULT NULL"
+            )
+        )
+
+
+def ensure_auth_and_tenant_columns() -> None:
+    """Company/user masters, tenant columns on business tables, default login seed."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if not insp.has_table("m_companies"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_companies (
+                        co_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        company_cd VARCHAR(50) NOT NULL,
+                        company_nm VARCHAR(200) NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        PRIMARY KEY (co_id),
+                        UNIQUE KEY uk_companies_cd (company_cd)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+            )
+        if not insp.has_table("m_users"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_users (
+                        user_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        co_id INT UNSIGNED NOT NULL,
+                        user_cd VARCHAR(50) NOT NULL,
+                        user_nm VARCHAR(200) NOT NULL DEFAULT '',
+                        password_hash VARCHAR(255) NOT NULL,
+                        is_active TINYINT(1) NOT NULL DEFAULT 1,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        created_by INT UNSIGNED NULL DEFAULT NULL,
+                        updated_by INT UNSIGNED NULL DEFAULT NULL,
+                        PRIMARY KEY (user_id),
+                        UNIQUE KEY uk_users_co_user_cd (co_id, user_cd),
+                        KEY idx_users_co (co_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+            )
+        co_count = conn.execute(text("SELECT COUNT(*) FROM m_companies")).scalar_one()
+        if co_count == 0:
+            conn.execute(
+                text(
+                    "INSERT INTO m_companies (company_cd, company_nm) VALUES ('DEMO', 'Demo Company')"
+                )
+            )
+        co_id = conn.execute(
+            text(
+                "SELECT co_id FROM m_companies WHERE company_cd = 'DEMO' "
+                "AND deleted_at IS NULL LIMIT 1"
+            )
+        ).scalar_one_or_none()
+        if co_id is None:
+            co_id = conn.execute(
+                text(
+                    "SELECT co_id FROM m_companies WHERE deleted_at IS NULL "
+                    "ORDER BY co_id LIMIT 1"
+                )
+            ).scalar_one()
+        user_count = conn.execute(
+            text("SELECT COUNT(*) FROM m_users WHERE co_id = :co_id"),
+            {"co_id": co_id},
+        ).scalar_one()
+        if user_count == 0:
+            from app.auth_security import hash_password
+
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO m_users (co_id, user_cd, user_nm, password_hash, is_active)
+                    VALUES (:co_id, 'admin', 'Administrator', :ph, 1)
+                    """
+                ),
+                {"co_id": co_id, "ph": hash_password("admin")},
+            )
+
+    for table in _TENANT_TABLES:
+        if insp.has_table(table):
+            with engine.begin() as conn:
+                _ensure_tenant_columns_on_table(conn, table)

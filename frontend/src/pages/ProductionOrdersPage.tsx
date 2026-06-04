@@ -1,5 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react'
-import { TOOLBAR_HINT_AUTO_HIDE_MS } from '../constants/feedbackTiming'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from 'react'
+import { flushSync } from 'react-dom'
 import { useAppNavigate } from '../context/AppNavigateContext'
 import { api } from '../api/client'
 import { ErpGridPanel, erpRowClass } from '../components/erp/ErpGridPanel'
@@ -8,6 +16,8 @@ import { productionOrderListEditColumns } from '../components/erp/masterGridColu
 import { GridRowNumCell } from '../components/GridRowNumCell'
 import { ProductionOrderHeaderGridCell } from '../components/ProductionOrderHeaderGridCells'
 import { MasterGridToolbarActions } from '../components/masters/MasterGridToolbar'
+import { useRegisterToolbarHintClear } from '../context/ToolbarHintContext'
+import { ToolbarFeedback } from '../components/ToolbarFeedback'
 import { ProductionDetailSplit } from '../components/ProductionDetailSplit'
 import { ListDetailSplitLayout } from '../components/ListDetailSplitLayout'
 import { ProductionProcessInputPanels } from '../components/ProductionProcessInputPanels'
@@ -23,6 +33,7 @@ import { useMasterCatalog } from '../context/MasterCatalogContext'
 import { useItemTypColors } from '../context/ItemTypColorContext'
 import type { ItemProcessesOut } from '../types/itemprocs'
 import type {
+  ProductionExcelImportResult,
   ProductionOrderDetail,
   ProductionOrderListItem,
   ProductionOrderUpdatePayload,
@@ -49,12 +60,14 @@ import {
   buildProductionOrderExportBodyRows,
   downloadProductionOrderExcel,
 } from '../utils/productionOrderExcel'
+import { mergeProductionOrderImportPreview } from '../utils/productionOrderExcelImport'
 import {
   buildInputPayload,
   buildProcessPayload,
   createBlankProcessRowForDetail,
   detailToEditInputRows,
   detailToEditProcessRows,
+  emptyEditInputRow,
   isActiveInputRow,
   isActiveProcessRow,
   isBlankInputRow,
@@ -75,10 +88,12 @@ import {
 } from '../utils/productionOrderTree'
 import {
   buildCreateProductionOrderPayload,
+  buildPreviewDetailFromHeaderRow,
   buildUpdateProductionOrderHeaderPayload,
   changedRegisteredHeaderOrderIds,
   emptyEditProductionOrderHeaderRow,
   filterProductionOrderParentItems,
+  headerRowHasResolvedItem,
   headerRowSnapshotsFromOrders,
   isActiveProductionOrderHeaderRow,
   isBlankProductionOrderHeaderRow,
@@ -88,9 +103,48 @@ import {
   type EditProductionOrderHeaderRow,
   type ProductionOrderHeaderRowSnapshot,
 } from '../utils/productionOrderListEdit'
+import {
+  buildHeaderListNavEntries,
+  findHeaderListNavIndex,
+  isFocusInHeaderListGrid,
+  isHeaderListArrowKey,
+  PRODUCTION_HEADER_LIST_SCROLL,
+  scheduleFocusHeaderListNavRow,
+  shouldIgnoreHeaderListArrowKey,
+  stepHeaderListNavIndex,
+  type HeaderListNavEntry,
+} from '../utils/headerListKeyboardNav'
+
+const ORDER_HEADER_PREVIEW_PREFIX = 'order-'
+
 const productionSourceLabel: Record<ProductionSourceType, string> = {
   manual: 'Manual',
   excel: 'Excel',
+}
+
+/** True when Process/Input panels show a row other than the selected saved order. */
+function isPreviewingAnotherOrder(
+  headerPreviewKey: string | null,
+  headerPreviewRow: EditProductionOrderHeaderRow | null,
+  selectedId: number | null
+): boolean {
+  if (selectedId == null || headerPreviewKey == null) return false
+  if (headerPreviewKey === `order-${selectedId}`) return false
+  if (headerPreviewRow?.production_order_id === selectedId) return false
+  return true
+}
+
+function validateRegisteredProcessRows(
+  processRows: EditProcessRow[],
+  items: Item[],
+  parentItemId: number,
+  orderPlannedQty: string | number
+): boolean {
+  const ctx = { parentItemId, orderPlannedQty }
+  const nonBlank = processRows.filter((r) => !isBlankProcessRow(r))
+  const lines = buildProcessPayload(processRows, items, ctx)
+  if (lines.length === 0) return false
+  return nonBlank.every((r) => isActiveProcessRow(r, processRows, items))
 }
 
 function getOrderExportCell(row: ProductionOrderListItem, key: string): string | number {
@@ -129,13 +183,32 @@ function getOrderExportCell(row: ProductionOrderListItem, key: string): string |
 const PANEL_SPLIT_LAYOUT_ID = 'production-orders-panels-v1'
 
 export function ProductionOrdersPage() {
+  const { ready: catalogReady } = useMasterCatalog()
+  if (!catalogReady) {
+    return (
+      <ErpScreen
+        className="erp-screen-stacked erp-screen-production-list"
+        title="Production Order List"
+      >
+        <div className="erp-production-list-bootstrap" aria-busy="true">
+          <p className="muted erp-grid-empty">Loading…</p>
+        </div>
+      </ErpScreen>
+    )
+  }
+  return <ProductionOrdersListMain />
+}
+
+function ProductionOrdersListMain() {
   const navigate = useAppNavigate()
   const [orders, setOrders] = useState<ProductionOrderListItem[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [detail, setDetail] = useState<ProductionOrderDetail | null>(null)
   const [statusFilter, setStatusFilter] = useState<'' | ProductionStatus>('registered')
-  const showHeaderNewRows = statusFilter === 'registered'
-  const [loading, setLoading] = useState(true)
+  const showHeaderNewRows =
+    statusFilter === 'registered' || (statusFilter === '' && orders.length === 0)
+  const [loading, setLoading] = useState(false)
+  const [ordersHydrated, setOrdersHydrated] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const { items: masterItems, locations: masterLocations, itemtyps } = useMasterCatalog()
   const { colorForItem } = useItemTypColors()
@@ -157,6 +230,11 @@ export function ProductionOrdersPage() {
   >(() => new Map())
   const [headerRowError, setHeaderRowError] = useState<string | null>(null)
   const [headerSuccess, setHeaderSuccess] = useState<string | null>(null)
+  const [orderActionSuccess, setOrderActionSuccess] = useState<string | null>(null)
+  const [orderActionError, setOrderActionError] = useState<string | null>(null)
+  const [cancelActionSuccess, setCancelActionSuccess] = useState<string | null>(null)
+  const [cancelActionError, setCancelActionError] = useState<string | null>(null)
+  const [headerPreviewKey, setHeaderPreviewKey] = useState<string | null>(null)
   const [editProcessRows, setEditProcessRows] = useState<EditProcessRow[]>([])
   const [editInputRows, setEditInputRows] = useState<EditInputRow[]>([])
   const [processRowError, setProcessRowError] = useState<string | null>(null)
@@ -191,6 +269,10 @@ export function ProductionOrdersPage() {
   const processInputLayoutApiRef = useRef<{ saveLayouts: () => void; isDirty: boolean } | null>(
     null
   )
+  const isResettingRef = useRef(false)
+  const persistGenerationRef = useRef(0)
+  const excelImportResultRef = useRef<ProductionExcelImportResult | null>(null)
+  const [isResetting, setIsResetting] = useState(false)
   const panelSplit = useProductionPanelSplitLayout(PANEL_SPLIT_LAYOUT_ID)
   const [processInputGridDirty, setProcessInputGridDirty] = useState(false)
   const [exportingExcel, setExportingExcel] = useState(false)
@@ -199,6 +281,8 @@ export function ProductionOrdersPage() {
     {}
   )
   const [panelResetNonce, setPanelResetNonce] = useState(0)
+  /** Bumped on Reset / detail reload so Process–Input grids re-sync from server data. */
+  const [detailRevision, setDetailRevision] = useState(0)
 
   const handleInputColumnFiltersChange = useCallback(
     (filters: Record<string, Set<string>>) => {
@@ -220,7 +304,11 @@ export function ProductionOrdersPage() {
   const [loadingAllOrderInputs, setLoadingAllOrderInputs] = useState(false)
 
   const loadOrders = useCallback(async () => {
-    setLoading(true)
+    const keepListGridVisible = statusFilter === 'registered'
+    if (!keepListGridVisible) {
+      setLoading(true)
+      setOrdersHydrated(false)
+    }
     setError(null)
     try {
       const rows = await api.listProductionOrders({
@@ -228,11 +316,20 @@ export function ProductionOrdersPage() {
       })
       setOrders(rows)
       setGridHiddenOrderIds(new Set())
-      setSelectedId((prev) => (prev && rows.some((r) => r.production_order_id === prev) ? prev : (rows[0]?.production_order_id ?? null)))
+      let nextSelected: number | null = null
+      setSelectedId((prev) => {
+        nextSelected =
+          prev && rows.some((r) => r.production_order_id === prev)
+            ? prev
+            : (rows[0]?.production_order_id ?? null)
+        return nextSelected
+      })
+      setHeaderPreviewKey(nextSelected != null ? `order-${nextSelected}` : null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load production orders')
     } finally {
-      setLoading(false)
+      if (!keepListGridVisible) setLoading(false)
+      setOrdersHydrated(true)
     }
   }, [statusFilter])
 
@@ -240,20 +337,19 @@ export function ProductionOrdersPage() {
     if (!showHeaderNewRows) setSelectedHeaderNewRowKeys(new Set())
   }, [showHeaderNewRows])
 
-  useEffect(() => {
-    if (!headerSuccess) return
-    const timer = window.setTimeout(() => setHeaderSuccess(null), 4000)
-    return () => window.clearTimeout(timer)
-  }, [headerSuccess])
+  const clearToolbarActionFeedback = useCallback(() => {
+    setHeaderRowError(null)
+    setHeaderSuccess(null)
+    setOrderActionSuccess(null)
+    setOrderActionError(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
+    setProcessStatusMessage(null)
+    setInputStatusMessage(null)
+    setReloadItemProcessesError(null)
+  }, [])
 
-  useEffect(() => {
-    if (!processStatusMessage) return
-    const timer = window.setTimeout(
-      () => setProcessStatusMessage(null),
-      TOOLBAR_HINT_AUTO_HIDE_MS
-    )
-    return () => window.clearTimeout(timer)
-  }, [processStatusMessage])
+  useRegisterToolbarHintClear(clearToolbarActionFeedback)
 
   const loadDetail = useCallback(async (orderId: number | null) => {
     setProcessStatusMessage(null)
@@ -273,6 +369,7 @@ export function ProductionOrdersPage() {
       if (requestId !== detailRequestRef.current) return
       loadedDetailOrderIdRef.current = row.production_order_id
       setDetail(row)
+      setDetailRevision((n) => n + 1)
     } catch (e) {
       if (requestId !== detailRequestRef.current) return
       loadedDetailOrderIdRef.current = null
@@ -295,32 +392,88 @@ export function ProductionOrdersPage() {
       if (order.status !== 'registered') continue
       edits.set(order.production_order_id, listOrderToEditHeaderRow(order))
     }
-    setRegisteredHeaderEdits(edits)
-    setSavedRegisteredHeaderSnapshots(headerRowSnapshotsFromOrders(orders))
+    setRegisteredHeaderEdits((prev) => {
+      if (prev.size === 0 && edits.size === 0) return prev
+      return edits
+    })
+    setSavedRegisteredHeaderSnapshots((prev) => {
+      const next = headerRowSnapshotsFromOrders(orders)
+      if (prev.size === 0 && next.size === 0) return prev
+      return next
+    })
   }, [orders])
 
   useEffect(() => {
-    setSelectedOrderIds(new Set())
-  }, [statusFilter])
+    setSelectedOrderIds((prev) => (prev.size === 0 ? prev : new Set()))
+    clearToolbarActionFeedback()
+  }, [statusFilter, clearToolbarActionFeedback])
 
   useEffect(() => {
     if (selectedId == null) {
+      if (loading) return
+      if (
+        detail == null &&
+        loadedDetailOrderIdRef.current == null &&
+        !detailLoading
+      ) {
+        return
+      }
       void loadDetail(null)
       return
     }
     if (loadedDetailOrderIdRef.current === selectedId) return
     void loadDetail(selectedId)
-  }, [selectedId, orders, loadDetail])
+  }, [selectedId, orders, loadDetail, loading, detail, detailLoading])
 
-  const canEditPlan = detail?.status === 'registered'
-  const canEditActuals = detail?.status === 'approved'
+  const headerPreviewRow = useMemo((): EditProductionOrderHeaderRow | null => {
+    if (headerPreviewKey) {
+      const fromNew = headerNewRows.find((r) => r.key === headerPreviewKey)
+      if (fromNew) return fromNew
+      const m = /^order-(\d+)$/.exec(headerPreviewKey)
+      if (m) return registeredHeaderEdits.get(Number(m[1])) ?? null
+    }
+    if (selectedId != null) {
+      const registered = registeredHeaderEdits.get(selectedId)
+      if (registered) return registered
+      const order = orders.find((o) => o.production_order_id === selectedId)
+      if (order) return listOrderToEditHeaderRow(order)
+      return null
+    }
+    for (let hi = 0; hi < headerNewRows.length; hi++) {
+      const row = headerNewRows[hi]
+      if (row.parent_item_id === '') continue
+      if (hi === headerNewRows.length - 1 && isBlankProductionOrderHeaderRow(row)) continue
+      return row
+    }
+    return null
+  }, [headerPreviewKey, headerNewRows, registeredHeaderEdits, selectedId, orders])
+
+  const panelDetail = useMemo((): ProductionOrderDetail | null => {
+    const fromHeader = headerPreviewRow
+      ? buildPreviewDetailFromHeaderRow(headerPreviewRow)
+      : null
+    if (
+      detail &&
+      selectedId === detail.production_order_id &&
+      fromHeader &&
+      fromHeader.parent_item_id === detail.parent_item_id
+    ) {
+      return detail
+    }
+    if (fromHeader) return fromHeader
+    if (detail && selectedId === detail.production_order_id) return detail
+    return null
+  }, [detail, selectedId, headerPreviewRow])
+
+  const canEditPlan = panelDetail?.status === 'registered'
+  const canEditActuals = panelDetail?.status === 'approved'
   const canEditDetail = canEditPlan || canEditActuals
 
   useEffect(() => {
-    if (!detail) return
+    if (!panelDetail) return
     let cancelled = false
     const wipIds = collectProductionOrderWipIds({
-      detail,
+      detail: panelDetail,
       inputRows: editInputRows,
       items: masterItems,
       itemtyps,
@@ -340,8 +493,8 @@ export function ProductionOrdersPage() {
       cancelled = true
     }
   }, [
-    detail?.production_order_id,
-    detail?.status,
+    panelDetail?.production_order_id,
+    panelDetail?.status,
     editInputRows,
     masterItems,
     itemtyps,
@@ -349,13 +502,20 @@ export function ProductionOrdersPage() {
   ])
 
   useEffect(() => {
-    if (!detail || !canEditDetail) {
-      setEditProcessRows([])
-      setEditInputRows([])
+    if (!panelDetail || !canEditDetail) {
+      if (!headerPreviewRow?.parent_item_id) {
+        setEditProcessRows((prev) => (prev.length === 0 ? prev : []))
+        setEditInputRows((prev) => (prev.length === 0 ? prev : []))
+      }
       return
     }
     setReloadItemProcessesError(null)
-    const process = detailToEditProcessRows(detail)
+    const hasSavedLines =
+      panelDetail.lines.length > 0 || panelDetail.inputs.length > 0
+    if (canEditPlan && !hasSavedLines) {
+      return
+    }
+    const process = detailToEditProcessRows(panelDetail)
     setEditProcessRows(
       canEditPlan
         ? ensureTrailingBlankRow(
@@ -365,11 +525,96 @@ export function ProductionOrdersPage() {
           )
         : process
     )
-    setEditInputRows(detailToEditInputRows(detail))
+    setEditInputRows(detailToEditInputRows(panelDetail))
     setProcessRowError(null)
     setInputRowError(null)
-  }, [detail?.production_order_id, detail?.status, canEditDetail, canEditPlan])
+  }, [
+    panelDetail?.production_order_id,
+    panelDetail?.status,
+    panelDetail?.lines.length,
+    panelDetail?.inputs.length,
+    panelDetail?.parent_item_id,
+    canEditDetail,
+    canEditPlan,
+    headerPreviewRow?.parent_item_id,
+    detailRevision,
+  ])
 
+  useEffect(() => {
+    const row = headerPreviewRow
+    if (!row || row.parent_item_id === '' || !canEditPlan) return
+    if (
+      row.production_order_id != null &&
+      (detailLoading || detail?.production_order_id !== row.production_order_id)
+    ) {
+      return
+    }
+    const itemId = Number(row.parent_item_id)
+    const hasSavedLines =
+      panelDetail != null &&
+      panelDetail.production_order_id === (row.production_order_id ?? 0) &&
+      panelDetail.parent_item_id === itemId &&
+      (panelDetail.lines.length > 0 || panelDetail.inputs.length > 0)
+    if (hasSavedLines) return
+
+    let cancelled = false
+    const plannedQty = row.planned_qty.trim() || '1'
+    const lot = row.lot.trim() || '*'
+
+    const applyEmptyAddRows = () => {
+      setEditProcessRows(
+        ensureTrailingBlankRow([], isBlankProcessRow, () =>
+          createBlankProcessRowForDetail([])
+        )
+      )
+      setEditInputRows([emptyEditInputRow(1)])
+    }
+
+    void (async () => {
+      try {
+        let data = itemProcessCache.get(itemId)
+        if (!data) {
+          data = await api.getItemProcesses(itemId)
+          if (cancelled) return
+          setItemProcessCache((prev) => {
+            const next = new Map(prev)
+            next.set(itemId, data!)
+            return next
+          })
+        }
+        if (!data.processes.length) {
+          applyEmptyAddRows()
+          return
+        }
+        setEditProcessRows(
+          ensureTrailingBlankRow(
+            itemProcessesToProductionEditRows(data, plannedQty, 'registered'),
+            isBlankProcessRow,
+            (rows) => createBlankProcessRowForDetail(rows)
+          )
+        )
+        setEditInputRows(itemProcessesToProductionInputRows(data, 'registered', lot))
+      } catch {
+        if (!cancelled) applyEmptyAddRows()
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    headerPreviewRow?.key,
+    headerPreviewRow?.parent_item_id,
+    headerPreviewRow?.production_order_id,
+    canEditPlan,
+    detail?.production_order_id,
+    detailLoading,
+    panelDetail?.production_order_id,
+    panelDetail?.lines.length,
+    panelDetail?.inputs.length,
+    panelDetail?.parent_item_id,
+    detailRevision,
+  ])
 
   const statusOptions: Array<{ value: '' | ProductionStatus; label: string }> = [
     { value: '', label: 'All' },
@@ -408,12 +653,26 @@ export function ProductionOrdersPage() {
   const hasBulkSelection = selectedOrderIds.size > 0
   const hasListSelection =
     hasBulkSelection || (showHeaderNewRows && selectedHeaderNewRowKeys.size > 0)
+  const showSingleOrderActions = selectedId != null && !hasListSelection
 
-  const canReverseOrder = detail?.status === 'approved'
-  const canDelete = detail?.status === 'registered'
+  /** Ordered row to reverse: focused row, or sole checked approved row. */
+  const cancelTargetOrderId = useMemo(() => {
+    if (selectedId != null) {
+      const focused = orders.find((r) => r.production_order_id === selectedId)
+      if (focused?.status === 'approved') return selectedId
+    }
+    const approvedChecked = orders.filter(
+      (r) => selectedOrderIds.has(r.production_order_id) && r.status === 'approved'
+    )
+    if (approvedChecked.length === 1) return approvedChecked[0]!.production_order_id
+    return null
+  }, [orders, selectedId, selectedOrderIds])
+
+  const showCancelButton = cancelTargetOrderId != null
+  const canDelete = selectedOrder?.status === 'registered'
 
   const handleReloadFromItemProcesses = useCallback(async () => {
-    if (!detail || !canEditPlan) return
+    if (!panelDetail || !canEditPlan) return
     if (editProcessRows.some((row) => row.status === 'completed')) {
       setReloadItemProcessesError('Cannot reload after a process step is completed.')
       return
@@ -432,26 +691,26 @@ export function ProductionOrdersPage() {
     setProcessStatusMessage(null)
     setInputStatusMessage(null)
     try {
-      const data = await api.getItemProcesses(detail.parent_item_id)
+      const data = await api.getItemProcesses(panelDetail.parent_item_id)
       if (!data.processes.length) {
         setReloadItemProcessesError('No item processes are defined for this item.')
         return
       }
       const nextProcessRows = ensureTrailingBlankRow(
-        itemProcessesToProductionEditRows(data, detail.planned_qty, detail.status),
+        itemProcessesToProductionEditRows(data, panelDetail.planned_qty, panelDetail.status),
         isBlankProcessRow,
         (rows) => createBlankProcessRowForDetail(rows)
       )
       const nextInputRows = itemProcessesToProductionInputRows(
         data,
-        detail.status,
-        detail.lot
+        panelDetail.status,
+        panelDetail.lot
       )
       setEditProcessRows(nextProcessRows)
       setEditInputRows(nextInputRows)
       setItemProcessCache((prev) => {
         const next = new Map(prev)
-        next.set(detail.parent_item_id, data)
+        next.set(panelDetail.parent_item_id, data)
         return next
       })
       setReloadFromMasterNonce((n) => n + 1)
@@ -463,7 +722,7 @@ export function ProductionOrdersPage() {
     } finally {
       setReloadingFromItemProcesses(false)
     }
-  }, [detail, canEditPlan, editProcessRows])
+  }, [panelDetail, canEditPlan, editProcessRows])
 
   const handleDelete = async () => {
     if (!selectedId || detail?.status !== 'registered') return
@@ -472,9 +731,15 @@ export function ProductionOrdersPage() {
     setSubmitting(true)
     setError(null)
     setSuccess(null)
+    setHeaderRowError(null)
+    setHeaderSuccess(null)
+    setOrderActionSuccess(null)
+    setOrderActionError(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
     try {
       await api.deleteProductionOrder(orderId)
-      setSuccess('Production order deleted.')
+      setHeaderSuccess('Production order deleted.')
       if (selectedId === orderId) {
         setSelectedId(null)
         loadedDetailOrderIdRef.current = null
@@ -482,7 +747,9 @@ export function ProductionOrdersPage() {
       }
       await loadOrders()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete production order')
+      setHeaderRowError(
+        e instanceof Error ? e.message : 'Failed to delete production order'
+      )
     } finally {
       setSubmitting(false)
     }
@@ -553,6 +820,9 @@ export function ProductionOrdersPage() {
       status: detail.status,
       orderPlannedQty: detail.planned_qty,
       processRows: editProcessRows,
+      locations: masterLocations,
+      items: masterItems,
+      itemtyps,
     }
     const activeInputRows = editInputRows.filter(isActiveInputRow)
     const partialInputRows = editInputRows.some(
@@ -628,6 +898,9 @@ export function ProductionOrdersPage() {
       status: detail.status,
       orderPlannedQty,
       processRows: editProcessRows,
+      locations: masterLocations,
+      items: masterItems,
+      itemtyps,
     }
     const payload: ProductionOrderUpdatePayload = {}
 
@@ -737,6 +1010,10 @@ export function ProductionOrdersPage() {
     setSubmitting(true)
     setError(null)
     setSuccess(null)
+    setOrderActionError(null)
+    setOrderActionSuccess(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
     try {
       if (canEditPlan) {
         const saved = await saveProcessAndInputs()
@@ -744,17 +1021,19 @@ export function ProductionOrdersPage() {
       }
       const row = await api.approveProductionOrder(selectedId)
       setDetail(row)
-      setSuccess('Production order ordered.')
+      setOrderActionSuccess('Production order ordered.')
       await loadOrders()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to order production')
+      setOrderActionError(
+        e instanceof Error ? e.message : 'Failed to order production'
+      )
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleReverseOrder = async () => {
-    if (!selectedId || detail?.status !== 'approved') return
+  const handleReverseOrder = useCallback(async () => {
+    if (cancelTargetOrderId == null) return
     if (
       !confirm(
         'Reverse this order to Registered? Posted process steps will be reversed.'
@@ -765,17 +1044,22 @@ export function ProductionOrdersPage() {
     setSubmitting(true)
     setError(null)
     setSuccess(null)
+    setCancelActionError(null)
+    setCancelActionSuccess(null)
     try {
-      const row = await api.cancelProductionOrder(selectedId)
+      const row = await api.cancelProductionOrder(cancelTargetOrderId)
       setDetail(row)
-      setSuccess('Order reversed; production order is registered again.')
+      setSelectedId(cancelTargetOrderId)
+      setCancelActionSuccess('Order reversed; production order is registered again.')
       await loadOrders()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to reverse order')
+      setCancelActionError(
+        e instanceof Error ? e.message : 'Failed to reverse order'
+      )
     } finally {
       setSubmitting(false)
     }
-  }
+  }, [cancelTargetOrderId, loadOrders])
 
   const handleBulkOrder = async () => {
     const targets = orders.filter(
@@ -795,6 +1079,10 @@ export function ProductionOrdersPage() {
     setSubmitting(true)
     setError(null)
     setSuccess(null)
+    setOrderActionError(null)
+    setOrderActionSuccess(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
     try {
       for (const row of targets) {
         if (selectedId === row.production_order_id && detail?.status === 'registered') {
@@ -804,11 +1092,17 @@ export function ProductionOrdersPage() {
         await api.approveProductionOrder(row.production_order_id)
       }
       setSelectedOrderIds(new Set())
-      setSuccess(`Ordered ${targets.length} production order(s).`)
+      setOrderActionSuccess(
+        targets.length === 1
+          ? 'Ordered 1 production order.'
+          : `Ordered ${targets.length} production orders.`
+      )
       await loadOrders()
       if (selectedId) await loadDetail(selectedId)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to order production')
+      setOrderActionError(
+        e instanceof Error ? e.message : 'Failed to order production'
+      )
     } finally {
       setSubmitting(false)
     }
@@ -825,6 +1119,8 @@ export function ProductionOrdersPage() {
     setSubmitting(true)
     setError(null)
     setSuccess(null)
+    setHeaderRowError(null)
+    setHeaderSuccess(null)
     try {
       if (newRowKeys.length > 0) {
         setHeaderNewRows((rows) =>
@@ -841,7 +1137,7 @@ export function ProductionOrdersPage() {
       }
       setSelectedOrderIds(new Set())
       if (savedTargets.length > 0) {
-        setSuccess(`Deleted ${total} production order row(s).`)
+        setHeaderSuccess(`Deleted ${total} production order row(s).`)
         if (selectedId && savedTargets.some((r) => r.production_order_id === selectedId)) {
           setSelectedId(null)
           loadedDetailOrderIdRef.current = null
@@ -849,10 +1145,12 @@ export function ProductionOrdersPage() {
         }
         await loadOrders()
       } else {
-        setSuccess(`Removed ${newRowKeys.length} unsaved row(s).`)
+        setHeaderSuccess(`Removed ${newRowKeys.length} unsaved row(s).`)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete production order')
+      setHeaderRowError(
+        e instanceof Error ? e.message : 'Failed to delete production order'
+      )
     } finally {
       setSubmitting(false)
     }
@@ -908,6 +1206,12 @@ export function ProductionOrdersPage() {
       setLoadingAllOrderInputs(false)
       return
     }
+    const needsAllOrderDetails =
+      orderTraceabilityEnabled || Object.keys(inputColumnFilters).length > 0
+    if (!needsAllOrderDetails) {
+      setLoadingAllOrderInputs(false)
+      return
+    }
     let cancelled = false
     setLoadingAllOrderInputs(true)
     ;(async () => {
@@ -938,7 +1242,7 @@ export function ProductionOrdersPage() {
     return () => {
       cancelled = true
     }
-  }, [visibleOrders])
+  }, [visibleOrders, orderTraceabilityEnabled, inputColumnFilters])
 
   const allOrdersForHeaderFilter = useMemo(
     () =>
@@ -1024,10 +1328,6 @@ export function ProductionOrdersPage() {
     if (!orderTraceabilityEnabled) return []
     return allOrdersForHeaderFilter
   }, [orderTraceabilityEnabled, allOrdersForHeaderFilter])
-
-  const showDetailPanels =
-    !detailLoading &&
-    (detail != null || (orderTraceabilityEnabled && visibleOrders.length > 0))
 
   const headerGridDeleteSelectionCount = useMemo(() => {
     const orderCount = ordersForHeaderGrid.filter((row) =>
@@ -1142,6 +1442,7 @@ export function ProductionOrdersPage() {
   const ordersGrid = useExcelLikeGrid({
     columns: productionOrderListEditColumns,
     rows: ordersForHeaderGrid,
+    getFilterOptionRows: () => visibleOrders,
     getFilterValue: getOrderFilterValue,
     rowDelete: {
       label: 'Delete row',
@@ -1154,29 +1455,106 @@ export function ProductionOrdersPage() {
       getExportValue: getOrderExportCell,
       runExport: () => void runProductionListExport(),
     },
+    excelImport: {
+      parseFile: async (file) => {
+        const result = await api.importProductionExcel(file)
+        excelImportResultRef.current = result
+        return []
+      },
+      applyParsedRows: async () => {
+        const result = excelImportResultRef.current
+        excelImportResultRef.current = null
+        setHeaderRowError(null)
+        setHeaderSuccess(null)
+        if (!result) return
+        try {
+          const merged = mergeProductionOrderImportPreview(
+            result,
+            registeredHeaderEdits,
+            headerNewRows,
+            masterItems
+          )
+          setRegisteredHeaderEdits(merged.registeredEdits)
+          setHeaderNewRows(merged.headerNewRows)
+          const parts: string[] = []
+          if (merged.insertedCount > 0) {
+            parts.push(
+              merged.insertedCount === 1
+                ? '1 row added to grid'
+                : `${merged.insertedCount} rows added to grid`
+            )
+          }
+          if (merged.updatedCount > 0) {
+            parts.push(
+              merged.updatedCount === 1
+                ? '1 row updated in grid'
+                : `${merged.updatedCount} rows updated in grid`
+            )
+          }
+          if (result.errors.length > 0) {
+            setHeaderRowError(result.errors.join(' '))
+          }
+          if (parts.length > 0) {
+            setHeaderSuccess(`Import: ${parts.join(', ')}. Click Update to persist.`)
+          } else if (result.errors.length === 0) {
+            setHeaderSuccess('Import completed. Click Update to persist.')
+          }
+          const firstNew = merged.headerNewRows.find(
+            (row) => row.pendingExcelImport && isActiveProductionOrderHeaderRow(row)
+          )
+          const firstUpdate = result.rows.find(
+            (row) => row.action === 'update' && row.production_order_id != null
+          )
+          if (firstNew) {
+            setHeaderPreviewKey(firstNew.key)
+          } else if (firstUpdate?.production_order_id != null) {
+            setSelectedId(firstUpdate.production_order_id)
+            loadedDetailOrderIdRef.current = null
+            await loadDetail(firstUpdate.production_order_id)
+          }
+        } catch (e) {
+          setError(e instanceof Error ? e.message : 'Failed to apply import')
+        }
+      },
+    },
   })
   ordersGridRef.current = ordersGrid
 
   useEffect(() => {
-    if (!detail) {
-      setTreeHighlight(null)
+    if (!panelDetail) {
+      setTreeHighlight((prev) => (prev == null ? prev : null))
       if (treeOnSelect) {
-        setTreeTitle(null)
-        setTreeLines([])
+        setTreeTitle((prev) => (prev == null ? prev : null))
+        setTreeLines((prev) => (prev.length === 0 ? prev : []))
       }
     }
-  }, [detail?.production_order_id, treeOnSelect])
+  }, [panelDetail?.production_order_id, treeOnSelect])
 
   const activateOrder = useCallback(
     (row: ProductionOrderListItem) => {
+      setHeaderPreviewKey(`${ORDER_HEADER_PREVIEW_PREFIX}${row.production_order_id}`)
       if (selectedId === row.production_order_id) {
         void loadDetail(row.production_order_id)
         return
       }
+      clearToolbarActionFeedback()
       setSelectedId(row.production_order_id)
     },
-    [selectedId, loadDetail]
+    [selectedId, loadDetail, clearToolbarActionFeedback]
   )
+
+  const isSavedHeaderRowActive = useCallback(
+    (orderId: number) =>
+      selectedId === orderId ||
+      headerPreviewKey === `${ORDER_HEADER_PREVIEW_PREFIX}${orderId}`,
+    [selectedId, headerPreviewKey]
+  )
+
+  useEffect(() => {
+    if (selectedId != null) {
+      setHeaderPreviewKey(`${ORDER_HEADER_PREVIEW_PREFIX}${selectedId}`)
+    }
+  }, [selectedId])
 
   const handleOrderRowFocusCapture = useCallback(
     (row: ProductionOrderListItem) => (e: FocusEvent<HTMLTableRowElement>) => {
@@ -1198,25 +1576,48 @@ export function ProductionOrdersPage() {
   }, [])
 
   const handleReload = useCallback(async () => {
-    setError(null)
-    setSuccess(null)
-    setProcessRowError(null)
-    setInputRowError(null)
-    setProcessStatusMessage(null)
-    setInputStatusMessage(null)
-    setOrderTraceabilityEnabled(false)
-    setInputColumnFilters({})
-    setTreeOnSelect(true)
-    ordersGrid.clearColumnFilters()
-    setPanelResetNonce((n) => n + 1)
-    await loadOrders()
-    if (selectedId != null) {
-      await loadDetail(selectedId)
-    } else {
-      loadedDetailOrderIdRef.current = null
-      setDetail(null)
-      setEditProcessRows([])
-      setEditInputRows([])
+    if (isResettingRef.current) return
+    isResettingRef.current = true
+    setIsResetting(true)
+    persistGenerationRef.current += 1
+    const reloadSelectedId = selectedId
+    try {
+      flushSync(() => {
+        setError(null)
+        setSuccess(null)
+        setProcessRowError(null)
+        setInputRowError(null)
+        setProcessStatusMessage(null)
+        setInputStatusMessage(null)
+    setHeaderRowError(null)
+    setHeaderSuccess(null)
+    setOrderActionSuccess(null)
+    setOrderActionError(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
+    setReloadItemProcessesError(null)
+        setOrderTraceabilityEnabled(false)
+        setInputColumnFilters({})
+        setTreeOnSelect(true)
+        setSelectedOrderIds(new Set())
+        setSelectedHeaderNewRowKeys(new Set())
+        setHeaderNewRows([emptyEditProductionOrderHeaderRow()])
+        setHeaderPreviewKey(reloadSelectedId != null ? `order-${reloadSelectedId}` : null)
+        setEditProcessRows([])
+        setEditInputRows([])
+        loadedDetailOrderIdRef.current = null
+        setDetail(null)
+        setDetailRevision((n) => n + 1)
+        ordersGrid.clearColumnFilters()
+        setPanelResetNonce((n) => n + 1)
+      })
+      await loadOrders()
+      if (reloadSelectedId != null) {
+        await loadDetail(reloadSelectedId)
+      }
+    } finally {
+      isResettingRef.current = false
+      setIsResetting(false)
     }
   }, [loadOrders, loadDetail, selectedId, ordersGrid.clearColumnFilters])
 
@@ -1224,11 +1625,14 @@ export function ProductionOrdersPage() {
     (layout: GridColumnLayout) => {
       orderLayoutRef.current = layout
       ordersGrid.onLayoutReady(layout)
-      setOrderGridLayoutApi((prev) =>
-        prev && prev.saveLayout === layout.saveLayout && prev.isDirty === layout.isDirty
+      setOrderGridLayoutApi((prev) => {
+        const next = { saveLayout: layout.saveLayout, isDirty: layout.isDirty }
+        return prev &&
+          prev.saveLayout === next.saveLayout &&
+          prev.isDirty === next.isDirty
           ? prev
-          : { saveLayout: layout.saveLayout, isDirty: layout.isDirty }
-      )
+          : next
+      })
     },
     [ordersGrid.onLayoutReady]
   )
@@ -1244,6 +1648,9 @@ export function ProductionOrdersPage() {
           () => emptyEditProductionOrderHeaderRow()
         )
       )
+      if (headerRowHasResolvedItem(patch)) {
+        setHeaderPreviewKey(key)
+      }
       setHeaderRowError(null)
       setHeaderSuccess(null)
     },
@@ -1259,11 +1666,94 @@ export function ProductionOrdersPage() {
         next.set(orderId, { ...row, ...patch })
         return next
       })
+      if (headerRowHasResolvedItem(patch)) {
+        setHeaderPreviewKey(`order-${orderId}`)
+      }
       setHeaderRowError(null)
       setHeaderSuccess(null)
     },
     []
   )
+
+  const handleHeaderEditRowFocusCapture = useCallback(
+    (row: EditProductionOrderHeaderRow) => (e: FocusEvent<HTMLTableRowElement>) => {
+      const el = e.target
+      if (
+        !(
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLSelectElement ||
+          el instanceof HTMLTextAreaElement
+        )
+      ) {
+        return
+      }
+      const nextPreviewKey =
+        row.production_order_id != null ? `order-${row.production_order_id}` : row.key
+      if (nextPreviewKey !== headerPreviewKey) {
+        clearToolbarActionFeedback()
+      }
+      setHeaderPreviewKey(nextPreviewKey)
+      if (row.production_order_id != null) {
+        const order = orders.find((o) => o.production_order_id === row.production_order_id)
+        if (order) activateOrder(order)
+      }
+    },
+    [orders, activateOrder, headerPreviewKey, clearToolbarActionFeedback]
+  )
+
+  const headerNavEntries = useMemo(
+    () =>
+      buildHeaderListNavEntries(
+        ordersGrid.displayRows.map((row) => row.production_order_id),
+        visibleHeaderNewRows,
+        isBlankProductionOrderHeaderRow
+      ),
+    [ordersGrid.displayRows, visibleHeaderNewRows]
+  )
+
+  const applyHeaderNavEntry = useCallback(
+    (entry: HeaderListNavEntry) => {
+      if (entry.type === 'saved') {
+        const order = orders.find((o) => o.production_order_id === entry.id)
+        if (order) activateOrder(order)
+        return
+      }
+      clearToolbarActionFeedback()
+      setHeaderPreviewKey(entry.key)
+    },
+    [orders, activateOrder, clearToolbarActionFeedback]
+  )
+
+  const moveHeaderNav = useCallback(
+    (delta: number, previousFocus?: EventTarget | null) => {
+      const index = findHeaderListNavIndex(headerNavEntries, {
+        savedId: selectedId,
+        previewKey: headerPreviewKey,
+        savedKeyPrefix: ORDER_HEADER_PREVIEW_PREFIX,
+      })
+      const nextIndex = stepHeaderListNavIndex(index, delta, headerNavEntries.length)
+      if (nextIndex < 0) return
+      const entry = headerNavEntries[nextIndex]
+      if (entry) {
+        applyHeaderNavEntry(entry)
+        scheduleFocusHeaderListNavRow(entry, PRODUCTION_HEADER_LIST_SCROLL, previousFocus)
+      }
+    },
+    [headerNavEntries, selectedId, headerPreviewKey, applyHeaderNavEntry]
+  )
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!isHeaderListArrowKey(e.key)) return
+      if (e.defaultPrevented) return
+      if (shouldIgnoreHeaderListArrowKey(e.target)) return
+      if (!isFocusInHeaderListGrid(e.target)) return
+      e.preventDefault()
+      moveHeaderNav(e.key === 'ArrowDown' ? 1 : -1, e.target)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [moveHeaderNav])
 
   const commitHeaderSentinelOnEnter = useCallback((row: EditProductionOrderHeaderRow) => {
     setHeaderNewRows((rows) => {
@@ -1279,14 +1769,36 @@ export function ProductionOrdersPage() {
 
   const handleHeaderCellKeyDown = useCallback(
     (e: KeyboardEvent, row: EditProductionOrderHeaderRow) => {
+      if (isHeaderListArrowKey(e.key)) {
+        e.preventDefault()
+        moveHeaderNav(e.key === 'ArrowDown' ? 1 : -1, e.target)
+        return
+      }
       if (e.key !== 'Enter') return
       e.preventDefault()
       commitHeaderSentinelOnEnter(row)
     },
-    [commitHeaderSentinelOnEnter]
+    [commitHeaderSentinelOnEnter, moveHeaderNav]
+  )
+
+  const handleSavedHeaderRowKeyDown = useCallback(
+    (e: KeyboardEvent, editRow: EditProductionOrderHeaderRow | undefined) => {
+      if (editRow) {
+        handleHeaderCellKeyDown(e, editRow)
+        return
+      }
+      if (isHeaderListArrowKey(e.key)) {
+        e.preventDefault()
+        moveHeaderNav(e.key === 'ArrowDown' ? 1 : -1, e.target)
+      }
+    },
+    [handleHeaderCellKeyDown, moveHeaderNav]
   )
 
   const handleUpdateHeaderOrders = useCallback(async () => {
+    if (isResettingRef.current) return
+    const saveGeneration = persistGenerationRef.current
+
     const saveError = showHeaderNewRows
       ? productionOrderHeaderRowSaveError(headerNewRows)
       : null
@@ -1312,15 +1824,22 @@ export function ProductionOrdersPage() {
       return
     }
 
+    const previewingOther = isPreviewingAnotherOrder(
+      headerPreviewKey,
+      headerPreviewRow,
+      selectedId
+    )
+
     const selectedHeaderRow =
       selectedId != null ? registeredHeaderEdits.get(selectedId) : undefined
     const selectedOrderPlannedQty = selectedHeaderRow?.planned_qty ?? detail?.planned_qty
     const selectedHeaderDirty =
-      selectedId != null && toUpdate.includes(selectedId)
+      selectedId != null && !previewingOther && toUpdate.includes(selectedId)
     const processDirty =
       selectedId != null &&
       detail != null &&
       canEditDetail &&
+      !previewingOther &&
       isProductionProcessDirty(
         detail,
         editProcessRows,
@@ -1331,6 +1850,7 @@ export function ProductionOrdersPage() {
       selectedId != null &&
       detail != null &&
       canEditDetail &&
+      !previewingOther &&
       isProductionInputDirty(
         detail,
         editInputRows,
@@ -1341,6 +1861,7 @@ export function ProductionOrdersPage() {
       selectedId != null &&
       detail != null &&
       canEditDetail &&
+      !previewingOther &&
       (selectedHeaderDirty || processDirty || inputDirty)
     const toUpdateOthers = toUpdate.filter((orderId) => orderId !== selectedId)
 
@@ -1350,31 +1871,78 @@ export function ProductionOrdersPage() {
       setHeaderSuccess(message)
       return
     }
+
+    if (selectedNeedsSave && processDirty && detail?.status === 'registered') {
+      const parentItemId =
+        selectedHeaderRow && selectedHeaderRow.parent_item_id !== ''
+          ? Number(selectedHeaderRow.parent_item_id)
+          : detail.parent_item_id
+      if (
+        !validateRegisteredProcessRows(
+          editProcessRows,
+          masterItems,
+          parentItemId,
+          selectedOrderPlannedQty ?? detail.planned_qty
+        )
+      ) {
+        setProcessRowError('process_validation')
+        return
+      }
+    }
+
+    if (newActive.length > 0) {
+      const processRow =
+        newActive.find((r) => r.key === headerPreviewKey) ??
+        newActive.find((r) => r.key === headerPreviewRow?.key) ??
+        newActive[0]
+      if (
+        !validateRegisteredProcessRows(
+          editProcessRows,
+          masterItems,
+          Number(processRow.parent_item_id),
+          processRow.planned_qty
+        )
+      ) {
+        setProcessRowError('process_validation')
+        return
+      }
+    }
+
     setSubmitting(true)
     setError(null)
     setSuccess(null)
     setHeaderRowError(null)
     setHeaderSuccess(null)
+    setOrderActionSuccess(null)
+    setOrderActionError(null)
+    setCancelActionSuccess(null)
+    setCancelActionError(null)
     setProcessStatusMessage(null)
     setInputStatusMessage(null)
+    setProcessRowError(null)
     try {
+      if (saveGeneration !== persistGenerationRef.current) return
+
       let lastTouchedId: number | null = null
       for (const orderId of toUpdateOthers) {
+        if (saveGeneration !== persistGenerationRef.current) return
         const row = registeredHeaderEdits.get(orderId)!
         await api.updateProductionOrder(orderId, buildUpdateProductionOrderHeaderPayload(row))
         lastTouchedId = orderId
       }
       for (const row of newActive) {
+        if (saveGeneration !== persistGenerationRef.current) return
         const created = await api.createProductionOrder(buildCreateProductionOrderPayload(row))
         lastTouchedId = created.production_order_id
       }
       if (selectedNeedsSave) {
+        if (saveGeneration !== persistGenerationRef.current) return
         const ok = await saveSelectedOrderDirtyParts({
           header: selectedHeaderDirty,
           process: processDirty,
           input: inputDirty,
         })
-        if (!ok) return
+        if (!ok || saveGeneration !== persistGenerationRef.current) return
         lastTouchedId = selectedId
       }
       setHeaderNewRows([emptyEditProductionOrderHeaderRow()])
@@ -1384,17 +1952,22 @@ export function ProductionOrdersPage() {
       const message = savedCountMessage(savedCount, 'production order')
       setHeaderSuccess(message)
       await loadOrders()
+      if (saveGeneration !== persistGenerationRef.current) return
       if (lastTouchedId != null) {
         setSelectedId(lastTouchedId)
         await loadDetail(lastTouchedId)
       }
     } catch (e) {
-      setHeaderRowError(e instanceof Error ? e.message : 'Failed to update production order')
+      if (saveGeneration === persistGenerationRef.current) {
+        setHeaderRowError(e instanceof Error ? e.message : 'Failed to update production order')
+      }
     } finally {
       setSubmitting(false)
     }
   }, [
     headerNewRows,
+    headerPreviewKey,
+    headerPreviewRow,
     registeredHeaderEdits,
     savedRegisteredHeaderSnapshots,
     selectedId,
@@ -1431,11 +2004,13 @@ export function ProductionOrdersPage() {
       className="erp-screen-stacked erp-screen-production-list"
       title="Production Order List"
       onRefresh={() => void handleReload()}
+      refreshDisabled={submitting || isResetting}
       onSaveGrid={handleSaveAllGridLayouts}
       saveGridIsDirty={saveGridIsDirty}
     >
       {ordersGrid.filterMenuElement}
       {ordersGrid.contextMenuElement}
+      {ordersHydrated ? (
       <ListDetailSplitLayout
         listHeightRatio={panelSplit.layout.listHeightRatio}
         onListHeightRatioChange={panelSplit.setListHeightRatio}
@@ -1445,13 +2020,14 @@ export function ProductionOrdersPage() {
         titleBarStyle="section"
         panelClassName="erp-panel-orders-header"
         columns={productionOrderListEditColumns}
-        loading={loading}
-        isEmpty={!loading && orders.length === 0}
+        loading={loading && !showHeaderNewRows}
+        isEmpty={!loading && headerListRowCount === 0}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableListRowsCount}
             selectedCount={selectableListSelectedCount}
             onSelectAll={() => {
+              clearToolbarActionFeedback()
               setSelectedOrderIds(
                 new Set(selectableOrderRows.map((r) => r.production_order_id))
               )
@@ -1462,6 +2038,7 @@ export function ProductionOrdersPage() {
               }
             }}
             onClearSelection={() => {
+              clearToolbarActionFeedback()
               setSelectedOrderIds(new Set())
               setSelectedHeaderNewRowKeys(new Set())
             }}
@@ -1475,7 +2052,10 @@ export function ProductionOrdersPage() {
                   key={s.value || 'all'}
                   type="button"
                   className={`erp-tab ${statusFilter === s.value ? 'active' : ''}`}
-                  onClick={() => setStatusFilter(s.value)}
+                  onClick={() => {
+                    clearToolbarActionFeedback()
+                    setStatusFilter(s.value)
+                  }}
                 >
                   {s.label}
                 </button>
@@ -1486,36 +2066,32 @@ export function ProductionOrdersPage() {
             </div>
             <div className="erp-production-order-header-actions-right">
               <MasterGridToolbarActions
-                submitting={submitting || exportingExcel}
-                rowError={headerRowError}
-                statusMessage={headerSuccess}
+                submitting={submitting || exportingExcel || isResetting}
+                rowError={null}
+                statusMessage={null}
                 onSave={() => void handleUpdateHeaderOrders()}
               />
-              {hasListSelection && (
-                <>
-                  {bulkOrderTargetCount > 0 && (
-                    <button
-                      type="button"
-                      className="btn erp-btn erp-btn-approve"
-                      disabled={submitting || exportingExcel}
-                      onClick={() => void handleBulkOrder()}
-                    >
-                      Order
-                    </button>
-                  )}
-                  {bulkDeleteTargetCount > 0 && (
-                    <button
-                      type="button"
-                      className="btn erp-btn erp-btn-cancel"
-                      disabled={submitting || exportingExcel}
-                      onClick={() => void handleBulkDelete()}
-                    >
-                      Delete
-                    </button>
-                  )}
-                </>
+              {hasListSelection && bulkOrderTargetCount > 0 && (
+                <button
+                  type="button"
+                  className="btn erp-btn erp-btn-approve"
+                  disabled={submitting || exportingExcel}
+                  onClick={() => void handleBulkOrder()}
+                >
+                  Order
+                </button>
               )}
-              {!hasListSelection && selectedId && canApproveSelected && (
+              {hasListSelection && bulkDeleteTargetCount > 0 && (
+                <button
+                  type="button"
+                  className="btn erp-btn erp-btn-cancel"
+                  disabled={submitting || exportingExcel}
+                  onClick={() => void handleBulkDelete()}
+                >
+                  Delete
+                </button>
+              )}
+              {showSingleOrderActions && canApproveSelected && (
                 <button
                   type="button"
                   className="btn erp-btn erp-btn-approve"
@@ -1525,17 +2101,29 @@ export function ProductionOrdersPage() {
                   Order
                 </button>
               )}
-              {!hasListSelection && selectedId && canReverseOrder && (
-                <button
-                  type="button"
-                  className="btn erp-btn erp-btn-cancel"
-                  disabled={submitting || exportingExcel}
-                  onClick={() => void handleReverseOrder()}
-                >
-                  Cancel
-                </button>
-              )}
-              {!hasListSelection && selectedId && canDelete && (
+              {orderActionSuccess || orderActionError ? (
+                <>
+                  <ToolbarFeedback message={orderActionSuccess} type="success" />
+                  <ToolbarFeedback message={orderActionError} type="error" />
+                </>
+              ) : null}
+              {showCancelButton || cancelActionSuccess || cancelActionError ? (
+                <>
+                  {showCancelButton ? (
+                    <button
+                      type="button"
+                      className="btn erp-btn erp-btn-cancel"
+                      disabled={submitting || exportingExcel}
+                      onClick={() => void handleReverseOrder()}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                  <ToolbarFeedback message={cancelActionSuccess} type="success" />
+                  <ToolbarFeedback message={cancelActionError} type="error" />
+                </>
+              ) : null}
+              {showSingleOrderActions && canDelete && (
                 <button
                   type="button"
                   className="btn erp-btn erp-btn-cancel"
@@ -1545,6 +2133,8 @@ export function ProductionOrdersPage() {
                   Delete
                 </button>
               )}
+              <ToolbarFeedback message={headerSuccess} type="success" />
+              <ToolbarFeedback message={headerRowError} type="error" />
             </div>
           </div>
         }
@@ -1566,13 +2156,20 @@ export function ProductionOrdersPage() {
               <tr
                 key={row.production_order_id}
                 data-production-order-id={row.production_order_id}
-                className={`${erpRowClass(index, selectedId === row.production_order_id)}${
+                className={`${erpRowClass(index, isSavedHeaderRowActive(row.production_order_id))}${
                   headerEditable ? ' erp-grid-row-editing' : ''
                 }`}
-                onFocusCapture={handleOrderRowFocusCapture(row)}
+                tabIndex={-1}
+                onFocusCapture={
+                  headerEditable
+                    ? handleHeaderEditRowFocusCapture(editRow!)
+                    : handleOrderRowFocusCapture(row)
+                }
+                onKeyDown={(e) => handleSavedHeaderRowKeyDown(e, editRow)}
                 onClick={(e) => {
                   if ((e.target as HTMLElement).closest('button, textarea, .erp-col-check')) return
                   activateOrder(row)
+                  e.currentTarget.focus()
                 }}
                 onDoubleClick={(event) => {
                   event.preventDefault()
@@ -1598,6 +2195,7 @@ export function ProductionOrdersPage() {
                               checked={selectedOrderIds.has(row.production_order_id)}
                               aria-label={`Select order ${row.production_order_id}`}
                               onChange={(e) => {
+                                clearToolbarActionFeedback()
                                 setSelectedOrderIds((prev) => {
                                   const next = new Set(prev)
                                   if (e.target.checked) next.add(row.production_order_id)
@@ -1650,6 +2248,7 @@ export function ProductionOrdersPage() {
                           listIdPrefix: `production-list-order-${row.production_order_id}`,
                           onUpdate: (patch) =>
                             updateRegisteredHeaderRow(row.production_order_id, patch),
+                          onKeyDown: handleHeaderCellKeyDown,
                         })
                         return cell ?? <td key={col.key} />
                       }
@@ -1670,6 +2269,7 @@ export function ProductionOrdersPage() {
                             checked={selectedOrderIds.has(row.production_order_id)}
                             aria-label={`Select order ${row.production_order_id}`}
                             onChange={(e) => {
+                              clearToolbarActionFeedback()
                               setSelectedOrderIds((prev) => {
                                 const next = new Set(prev)
                                 if (e.target.checked) next.add(row.production_order_id)
@@ -1765,10 +2365,18 @@ export function ProductionOrdersPage() {
               return (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
+                  data-header-new-key={row.key}
+                  className={`${erpRowClass(index, headerPreviewKey === row.key)} erp-grid-row-editing${
                     isSentinel ? ' erp-grid-row-sentinel' : ''
                   }`}
-                  onClick={(e) => e.stopPropagation()}
+                  tabIndex={-1}
+                  onFocusCapture={handleHeaderEditRowFocusCapture(row)}
+                  onKeyDown={(e) => handleHeaderCellKeyDown(e, row)}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button, input, select, .erp-col-check')) return
+                    setHeaderPreviewKey(row.key)
+                    e.currentTarget.focus()
+                  }}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -1789,6 +2397,7 @@ export function ProductionOrdersPage() {
                               checked={selectedHeaderNewRowKeys.has(row.key)}
                               aria-label={`Select new order row ${index + 1}`}
                               onChange={(e) => {
+                                clearToolbarActionFeedback()
                                 setSelectedHeaderNewRowKeys((prev) => {
                                   const next = new Set(prev)
                                   if (e.target.checked) next.add(row.key)
@@ -1855,19 +2464,9 @@ export function ProductionOrdersPage() {
           )
         }
       >
-          {!showDetailPanels ? (
-            <div className="erp-panel erp-panel-grow erp-detail-panel">
-              <div className="erp-panel-content erp-detail-content erp-detail-content-split">
-                <p className="muted erp-grid-empty">
-                  {detailLoading || loadingAllOrderInputs
-                    ? 'Loading…'
-                    : 'Select an order.'}
-                </p>
-              </div>
-            </div>
-          ) : (
             <ProductionProcessInputPanels
-              detail={detail}
+              detail={panelDetail}
+              emptyMessage="Enter Item Code."
               orderTraceabilityEnabled={orderTraceabilityEnabled}
               onOrderTraceabilityChange={setOrderTraceabilityEnabled}
               allOrdersForInput={allOrdersForInput}
@@ -1881,7 +2480,7 @@ export function ProductionOrdersPage() {
               canEditPlan={canEditPlan}
               canEditActuals={canEditActuals}
               hideInputFromLocation
-              hideInputActualQty={detail.status === 'registered'}
+              hideInputActualQty={panelDetail?.status === 'registered'}
               autoSelectProcess="last"
               items={masterItems}
               locations={masterLocations}
@@ -1913,10 +2512,14 @@ export function ProductionOrdersPage() {
                 onProcessHeightRatioChange: panelSplit.setProcessHeightRatio,
               }}
             />
-          )}
       </ProductionDetailSplit>
         }
       />
+      ) : (
+        <div className="erp-production-list-bootstrap" aria-busy="true">
+          <p className="muted erp-grid-empty">Loading…</p>
+        </div>
+      )}
     </ErpScreen>
   )
 }

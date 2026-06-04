@@ -23,6 +23,7 @@ import {
   rowNumColumnWidthForRowCount,
 } from '../utils/gridColumnWidth'
 import type { GridColumnLayoutOptions } from './useGridColumnLayoutOptions'
+import { useGridLayoutScope } from '../context/AuthContext'
 
 export { GRID_ABS_MIN_COL_WIDTH as GRID_MIN_COL_WIDTH } from '../utils/gridColumnWidth'
 export type { GridColumnLayoutOptions } from './useGridColumnLayoutOptions'
@@ -36,7 +37,8 @@ export function useGridColumnLayout(
   columns: GridColumnDef[],
   options?: GridColumnLayoutOptions
 ) {
-  const storageKey = gridStorageKey(gridId)
+  const layoutScope = useGridLayoutScope()
+  const storageKey = gridStorageKey(gridId, layoutScope)
   const keysSignature = columnKeys(columns).join('|')
   const onLayoutChange = options?.onLayoutChange
   const pinFirst = options?.pinFirst
@@ -154,14 +156,15 @@ export function useGridColumnLayout(
     persistGridLayout(storageKey, payload)
     setSavedSnapshot(payload)
     notifyChange()
-  }, [order, widthsByKey, storageKey, notifyChange, pinFirst])
+  }, [order, widthsByKey, storageKey, notifyChange, pinFirstSignature])
 
   const orderedColumns = useMemo(() => {
     const byKey = new Map(columns.map((col) => [col.key, col]))
     const rawKeys = pinFirst?.length ? pinKeysFirst(order, pinFirst) : order
     const keys = dedupeColumnOrder(rawKeys)
     return keys.map((key) => byKey.get(key)).filter((col): col is GridColumnDef => col != null)
-  }, [order, columns, pinFirst])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pinFirstSignature tracks pinFirst content
+  }, [order, columns, pinFirstSignature])
 
   const widths = useMemo(
     () => orderedColumns.map((col) => widthsByKey[col.key] ?? col.defaultWidth),
@@ -220,7 +223,7 @@ export function useGridColumnLayout(
       })
       notifyChange()
     },
-    [notifyChange, pinFirst]
+    [notifyChange, pinFirstSignature]
   )
 
   const endColumnDrag = useCallback(() => {

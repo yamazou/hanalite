@@ -1,5 +1,4 @@
 import * as XLSX from 'xlsx'
-import XLSXStyle from 'xlsx-js-style'
 
 const RED_FONT = { color: { rgb: 'FF0000' } }
 
@@ -18,13 +17,14 @@ export function downloadExcelSheet(
 }
 
 /** Header + data cells at the given column indices use red font. */
-export function downloadExcelSheetWithRedColumns(
+export async function downloadExcelSheetWithRedColumns(
   sheetName: string,
   headers: string[],
   rows: (string | number)[][],
   filename: string,
   redColumnIndices: number[]
-) {
+): Promise<void> {
+  const { default: XLSXStyle } = await import('xlsx-js-style')
   const redColumns = new Set(redColumnIndices)
   const data = [headers, ...rows]
   const worksheet = XLSX.utils.aoa_to_sheet(data)

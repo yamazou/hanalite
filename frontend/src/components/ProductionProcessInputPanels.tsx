@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../api/client'
 import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
 import { erpRowClass } from './erp/ErpGridPanel'
@@ -27,14 +27,16 @@ import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
-import { collectUniqueFilterValues, toFilterCellValue } from '../utils/gridColumnFilter'
+import { toFilterCellValue } from '../utils/gridColumnFilter'
 import { isGridDataColumn } from '../utils/excelLikeGrid'
 import { gridColumnLayoutOptions } from '../hooks/useGridColumnLayoutOptions'
 import type { Item } from '../types'
 import type { LocationMaster } from '../types/masters'
+import { locationHasTypCd } from '../utils/locationTypCd'
 import type { ProductionOrderDetail } from '../types/production'
 import { ColoredItemCode, ColoredItemName } from './ColoredItemText'
 import { useItemTypColors } from '../context/ItemTypColorContext'
+import { useMasterCatalog } from '../context/MasterCatalogContext'
 import { itemTextColorStyle } from '../utils/itemTypColor'
 import {
   createBlankInputRowForDetail,
@@ -64,6 +66,22 @@ import {
   type EditProcessRow,
 } from '../utils/productionEdit'
 import { formatQty } from '../utils/format'
+import {
+  buildGridRowNavKeys,
+  findGridRowNavIndex,
+  GRID_ROW_NAV_KEY_ATTR,
+  gridRowKeyFromFocus,
+  isFocusInHeaderListGrid,
+  isFocusInProductionInputGrid,
+  isFocusInProductionProcessGrid,
+  isHeaderListArrowKey,
+  PRODUCTION_INPUT_SCROLL,
+  PRODUCTION_PROCESS_SCROLL,
+  resolveGridNavAnchorKey,
+  scheduleFocusGridNavRow,
+  shouldIgnoreHeaderListArrowKey,
+  stepHeaderListNavIndex,
+} from '../utils/headerListKeyboardNav'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
 import { processLinesFromDetail } from '../utils/productionProcessDisplay'
 import { GridItemDatalistField, GridItemResolvedInput, type GridItemDatalistItem } from './GridItemDatalistField'
@@ -136,7 +154,7 @@ const inputEditColumns: GridColumnDef[] = [
   { key: 'item_nm', label: 'Item Name', defaultWidth: 160 },
   { key: 'from_location', label: 'From Location', defaultWidth: 100 },
   { key: 'lot', label: 'Lot', defaultWidth: 100 },
-  { key: 'req_qty', label: 'Plan Input Qty', defaultWidth: 96, className: 'erp-col-num', headerRequired: true },
+  { key: 'req_qty', label: 'Planned Input Qty', defaultWidth: 96, className: 'erp-col-num', headerRequired: true },
   { key: 'consume_qty', label: 'Actual Input Qty', defaultWidth: 104, className: 'erp-col-num' },
 ]
 
@@ -307,6 +325,7 @@ export function ProductionProcessInputPanels({
   loadingAllOrderInputs = false,
   panelResetNonce = 0,
 }: Props) {
+  const { revision: catalogRevision } = useMasterCatalog()
   const isProductionListInputScope = onOrderTraceabilityChange != null
 
   const showAllOrdersInputs = isProductionListInputScope && orderTraceabilityEnabled
@@ -395,11 +414,11 @@ export function ProductionProcessInputPanels({
   processRowsRef.current = processRows
 
   const processLocations = useMemo(
-    () => locations.filter((loc) => loc.location_type === 'Process'),
+    () => locations.filter((loc) => locationHasTypCd(loc, 'Process')),
     [locations]
   )
   const rmLocations = useMemo(
-    () => locations.filter((loc) => loc.location_type === 'RM'),
+    () => locations.filter((loc) => locationHasTypCd(loc, 'RM')),
     [locations]
   )
 
@@ -421,7 +440,7 @@ export function ProductionProcessInputPanels({
 
   const useEditProcessRows = canEditPlan || canEditActuals
 
-  const activateProcessRow = (key: string) => {
+  const activateProcessRow = useCallback((key: string) => {
     const row = processRowsRef.current.find((r) => r.key === key)
     if (!row || isProcessRowBlank(row)) return
     pinnedProcessLineNoRef.current = row.line_no
@@ -429,11 +448,13 @@ export function ProductionProcessInputPanels({
     setTreeProcessHighlightKey(key)
     setSelectedInputKey(null)
     setSelectedInputKeys(new Set())
-  }
+  }, [isProcessRowBlank])
 
-  const activateInputRow = (key: string) => {
+  const activateInputRow = useCallback((key: string) => {
+    const row = inputRowsRef.current.find((r) => r.key === key)
+    if (!row || isInputRowBlank(row)) return
     setSelectedInputKey(key)
-  }
+  }, [isInputRowBlank])
 
   const toggleInputRowRead = (key: string) => {
     setSelectedInputKey((prev) => (prev === key ? null : key))
@@ -460,6 +481,7 @@ export function ProductionProcessInputPanels({
             inputRows,
             locations,
             items: items as ItemListRow[],
+            itemtyps: itemtyps ?? [],
             itemProcessCache,
           })
         : buildProductionOrderTree({
@@ -496,6 +518,7 @@ export function ProductionProcessInputPanels({
     processColumnsMode,
     itemProcessCache,
     itemtyps,
+    catalogRevision,
   ])
 
   useEffect(() => {
@@ -1061,19 +1084,12 @@ export function ProductionProcessInputPanels({
 
   const inputColumnFiltersEnabled = onInputColumnFiltersChange != null
 
-  const traceabilityGridRowsRef = useRef(fullAggregatedInputRows)
-  traceabilityGridRowsRef.current = fullAggregatedInputRows
-
-  const getTraceabilityFilterOptions = useCallback(
-    (columnKey: string) =>
-      collectUniqueFilterValues(
-        rowsForTraceabilityFilterPicklist({
-          gridRows: traceabilityGridRowsRef.current,
-        }),
-        columnKey,
-        productionAggregatedInputFilterValue
-      ),
-    []
+  const getTraceabilityFilterOptionRows = useCallback(
+    () =>
+      rowsForTraceabilityFilterPicklist({
+        gridRows: fullAggregatedInputRows,
+      }),
+    [fullAggregatedInputRows]
   )
 
   const getAggregatedInputFilterOptionValue = useCallback(
@@ -1085,7 +1101,7 @@ export function ProductionProcessInputPanels({
   const inputEditExcel = useExcelLikeGrid({
     columns: editInputColumnsActive,
     rows: visibleEditInputs,
-    getFilterOptions: inputColumnFiltersEnabled ? getTraceabilityFilterOptions : undefined,
+    getFilterOptionRows: inputColumnFiltersEnabled ? getTraceabilityFilterOptionRows : undefined,
     getFilterValue: inputEditFilterValue,
     getFilterOptionValue: inputColumnFiltersEnabled
       ? getAggregatedInputFilterOptionValue
@@ -1128,7 +1144,7 @@ export function ProductionProcessInputPanels({
   const inputReadExcel = useExcelLikeGrid({
     columns: inputGridColumns,
     rows: inputReadUsesAggregatedRows ? fullAggregatedInputRows : visibleInputs,
-    getFilterOptions: inputColumnFiltersEnabled ? getTraceabilityFilterOptions : undefined,
+    getFilterOptionRows: inputColumnFiltersEnabled ? getTraceabilityFilterOptionRows : undefined,
     getFilterValue: inputReadFilterValue,
     getFilterOptionValue: inputColumnFiltersEnabled
       ? getAggregatedInputFilterOptionValue
@@ -1146,6 +1162,188 @@ export function ProductionProcessInputPanels({
     rowCount: processReadExcel.displayRows.length,
   })
   const showExpandedInputView = inputReadUsesAggregatedRows
+
+  const processEditNavKeys = useMemo(
+    () => buildGridRowNavKeys(processEditExcel.displayRows, (row) => !isProcessRowBlank(row)),
+    [processEditExcel.displayRows, isProcessRowBlank]
+  )
+
+  const processReadNavKeys = useMemo(
+    () => processReadExcel.displayRows.map((row) => row.key),
+    [processReadExcel.displayRows]
+  )
+
+  const inputEditNavKeys = useMemo(
+    () => buildGridRowNavKeys(inputEditDisplayRows, (row) => !isInputRowBlank(row)),
+    [inputEditDisplayRows, isInputRowBlank]
+  )
+
+  const inputReadNavKeys = useMemo(() => {
+    if (inputReadUsesAggregatedRows) {
+      return inputReadExcel.displayRows.map((row) => (row as AggregatedProductionInputRow).key)
+    }
+    return inputReadExcel.displayRows.map((row) =>
+      String((row as NonNullable<ProductionOrderDetail['inputs']>[number]).prd_order_input_id)
+    )
+  }, [inputReadUsesAggregatedRows, inputReadExcel.displayRows])
+
+  const moveProcessNav = useCallback(
+    (delta: number, fromKey?: string | null, previousFocus?: EventTarget | null) => {
+      const keys = useEditProcessRows ? processEditNavKeys : processReadNavKeys
+      const anchorKey = resolveGridNavAnchorKey(
+        keys,
+        fromKey ?? gridRowKeyFromFocus(previousFocus ?? null),
+        selectedProcessKey
+      )
+      const index = findGridRowNavIndex(keys, anchorKey)
+      const nextIndex = stepHeaderListNavIndex(index, delta, keys.length)
+      if (nextIndex < 0) return
+      const key = keys[nextIndex]
+      if (!key) return
+      if (useEditProcessRows) {
+        activateProcessRow(key)
+      } else {
+        setSelectedProcessKey(key)
+        setTreeProcessHighlightKey(key)
+      }
+      scheduleFocusGridNavRow(key, PRODUCTION_PROCESS_SCROLL, previousFocus)
+    },
+    [
+      useEditProcessRows,
+      processEditNavKeys,
+      processReadNavKeys,
+      selectedProcessKey,
+      activateProcessRow,
+    ]
+  )
+
+  const moveInputNav = useCallback(
+    (delta: number, fromKey?: string | null, previousFocus?: EventTarget | null) => {
+      const keys =
+        useEditProcessRows && !showExpandedInputView ? inputEditNavKeys : inputReadNavKeys
+      const anchorKey = resolveGridNavAnchorKey(
+        keys,
+        fromKey ?? gridRowKeyFromFocus(previousFocus ?? null),
+        selectedInputKey
+      )
+      const index = findGridRowNavIndex(keys, anchorKey)
+      const nextIndex = stepHeaderListNavIndex(index, delta, keys.length)
+      if (nextIndex < 0) return
+      const key = keys[nextIndex]
+      if (!key) return
+      if (useEditProcessRows && !showExpandedInputView) {
+        activateInputRow(key)
+      } else {
+        setSelectedInputKey(key)
+      }
+      scheduleFocusGridNavRow(key, PRODUCTION_INPUT_SCROLL, previousFocus)
+    },
+    [
+      useEditProcessRows,
+      showExpandedInputView,
+      inputEditNavKeys,
+      inputReadNavKeys,
+      selectedInputKey,
+      activateInputRow,
+    ]
+  )
+
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (!isHeaderListArrowKey(e.key)) return
+      if (e.defaultPrevented) return
+      if (shouldIgnoreHeaderListArrowKey(e.target)) return
+      if (isFocusInHeaderListGrid(e.target)) return
+      if (isFocusInProductionInputGrid(e.target)) {
+        e.preventDefault()
+        moveInputNav(
+          e.key === 'ArrowDown' ? 1 : -1,
+          gridRowKeyFromFocus(e.target) ?? selectedInputKey,
+          e.target
+        )
+        return
+      }
+      if (isFocusInProductionProcessGrid(e.target)) {
+        e.preventDefault()
+        moveProcessNav(
+          e.key === 'ArrowDown' ? 1 : -1,
+          gridRowKeyFromFocus(e.target) ?? selectedProcessKey,
+          e.target
+        )
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [moveInputNav, moveProcessNav, selectedInputKey, selectedProcessKey])
+
+  const handleProcessRowKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLTableRowElement>) => {
+      if (!isHeaderListArrowKey(e.key)) return
+      e.preventDefault()
+      moveProcessNav(
+        e.key === 'ArrowDown' ? 1 : -1,
+        gridRowKeyFromFocus(e.target) ?? selectedProcessKey,
+        e.target
+      )
+    },
+    [moveProcessNav, selectedProcessKey]
+  )
+
+  const handleInputRowKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLTableRowElement>) => {
+      if (!isHeaderListArrowKey(e.key)) return
+      e.preventDefault()
+      moveInputNav(
+        e.key === 'ArrowDown' ? 1 : -1,
+        gridRowKeyFromFocus(e.target) ?? selectedInputKey,
+        e.target
+      )
+    },
+    [moveInputNav, selectedInputKey]
+  )
+
+  const handleProcessRowFocusCapture = useCallback(
+    (key: string) => (e: FocusEvent<HTMLTableRowElement>) => {
+      const el = e.target
+      if (
+        !(
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLSelectElement ||
+          el instanceof HTMLTextAreaElement
+        )
+      ) {
+        return
+      }
+      if (useEditProcessRows) {
+        activateProcessRow(key)
+        return
+      }
+      setSelectedProcessKey(key)
+      setTreeProcessHighlightKey(key)
+    },
+    [useEditProcessRows, activateProcessRow]
+  )
+
+  const handleInputRowFocusCapture = useCallback(
+    (key: string) => (e: FocusEvent<HTMLTableRowElement>) => {
+      const el = e.target
+      if (
+        !(
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLSelectElement ||
+          el instanceof HTMLTextAreaElement
+        )
+      ) {
+        return
+      }
+      if (useEditProcessRows && !showExpandedInputView) {
+        activateInputRow(key)
+        return
+      }
+      setSelectedInputKey(key)
+    },
+    [useEditProcessRows, showExpandedInputView, activateInputRow]
+  )
 
   useEffect(() => {
     if (!isProductionListInputScope) return
@@ -1262,19 +1460,23 @@ export function ProductionProcessInputPanels({
 
   useEffect(() => {
     processEditExcel.onLayoutReady(processEditLayout)
-  }, [processEditLayout.isDirty, processEditLayout.saveLayout, processEditExcel.onLayoutReady])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layout object recreated each render
+  }, [processEditLayout.isDirty, processEditExcel.onLayoutReady])
 
   useEffect(() => {
     inputEditExcel.onLayoutReady(inputEditLayout)
-  }, [inputEditLayout.isDirty, inputEditLayout.saveLayout, inputEditExcel.onLayoutReady])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputEditLayout.isDirty, inputEditExcel.onLayoutReady])
 
   useEffect(() => {
     processReadExcel.onLayoutReady(lineLayout)
-  }, [lineLayout.isDirty, lineLayout.saveLayout, processReadExcel.onLayoutReady])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineLayout.isDirty, processReadExcel.onLayoutReady])
 
   useEffect(() => {
     inputReadExcel.onLayoutReady(inputLayout)
-  }, [inputLayout.isDirty, inputLayout.saveLayout, inputReadExcel.onLayoutReady])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputLayout.isDirty, inputReadExcel.onLayoutReady])
 
   if (loading) {
     if (embedded) return <p className="muted erp-grid-empty">Loading process and input…</p>
@@ -1282,17 +1484,6 @@ export function ProductionProcessInputPanels({
       <div className="erp-panel erp-panel-grow erp-detail-panel">
         <div className="erp-panel-content erp-detail-content">
           <p className="muted erp-grid-empty">Loading process and input…</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!detail && !showAllOrdersInputs) {
-    if (embedded) return null
-    return (
-      <div className="erp-panel erp-panel-grow erp-detail-panel">
-        <div className="erp-panel-content erp-detail-content">
-          <p className="muted erp-grid-empty">{emptyMessage}</p>
         </div>
       </div>
     )
@@ -1348,8 +1539,15 @@ export function ProductionProcessInputPanels({
             filteredAggregatedInputRows.map((ln, idx) => (
               <tr
                 key={ln.key}
+                {...{ [GRID_ROW_NAV_KEY_ATTR]: ln.key }}
                 className={erpRowClass(idx, selectedInputKey === ln.key)}
                 onClick={() => toggleInputRowRead(ln.key)}
+                onKeyDown={handleInputRowKeyDown}
+                tabIndex={-1}
+                onMouseDown={(e) => {
+                  if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
+                  e.currentTarget.focus()
+                }}
               >
                 {inputLayout.orderedColumns.map((col) => {
                   switch (col.key) {
@@ -1481,8 +1679,16 @@ export function ProductionProcessInputPanels({
                       return (
                       <tr
                         key={row.key}
+                        {...{ [GRID_ROW_NAV_KEY_ATTR]: row.key }}
                         className={erpRowClass(index, selectedProcessKey === row.key) ?? undefined}
-                        onClick={selectProcessRow}
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          selectProcessRow()
+                          if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
+                          e.currentTarget.focus()
+                        }}
+                        onFocusCapture={handleProcessRowFocusCapture(row.key)}
+                        onKeyDown={handleProcessRowKeyDown}
                       >
                         {processEditLayout.orderedColumns.map((col) => {
                           switch (col.key) {
@@ -1733,7 +1939,7 @@ export function ProductionProcessInputPanels({
                                       step="0.001"
                                       value={row.planned_qty}
                                       placeholder={gridCellPlaceholder(
-                                        'Plan Qty',
+                                        'Planned Qty',
                                         isBlankProcessRow(row)
                                       )}
                                       onFocus={selectProcessRow}
@@ -1872,16 +2078,21 @@ export function ProductionProcessInputPanels({
                   {...inputEditTableProps}
                 >
                   <tbody>
-                    {inputEditDisplayRows.map((row, index) => (
+                    {inputEditDisplayRows.map((row, index) => {
+                      const selectInputRow = () => activateInputRow(row.key)
+                      return (
                       <tr
                         key={row.key}
+                        {...{ [GRID_ROW_NAV_KEY_ATTR]: row.key }}
                         className={
                           erpRowClass(
                             index,
                             selectedInputKey === row.key || selectedInputKeys.has(row.key)
                           ) ?? undefined
                         }
-                        onClick={() => activateInputRow(row.key)}
+                        onClick={selectInputRow}
+                        onFocusCapture={handleInputRowFocusCapture(row.key)}
+                        onKeyDown={handleInputRowKeyDown}
                       >
                         {inputEditLayout.orderedColumns.map((col) => {
                           switch (col.key) {
@@ -1936,6 +2147,7 @@ export function ProductionProcessInputPanels({
                                       onChange={(value) =>
                                         updateInputRow(row.key, itemCdFieldPatch(items, value))
                                       }
+                                      onFocus={selectInputRow}
                                     />
                                   ) : (
                                     <GridItemResolvedInput
@@ -1946,6 +2158,7 @@ export function ProductionProcessInputPanels({
                                       onChange={(value) =>
                                         updateInputRow(row.key, itemCdFieldPatch(items, value))
                                       }
+                                      onFocus={selectInputRow}
                                     />
                                   )}
                                 </td>
@@ -1977,6 +2190,7 @@ export function ProductionProcessInputPanels({
                                       onChange={(value) =>
                                         updateInputRow(row.key, itemNmFieldPatch(items, value))
                                       }
+                                      onFocus={selectInputRow}
                                     />
                                   ) : (
                                     <GridItemResolvedInput
@@ -1987,6 +2201,7 @@ export function ProductionProcessInputPanels({
                                       onChange={(value) =>
                                         updateInputRow(row.key, itemNmFieldPatch(items, value))
                                       }
+                                      onFocus={selectInputRow}
                                     />
                                   )}
                                 </td>
@@ -2011,6 +2226,7 @@ export function ProductionProcessInputPanels({
                                   <select
                                     className="erp-grid-input"
                                     value={row.from_location_id}
+                                    onFocus={selectInputRow}
                                     onChange={(e) =>
                                       updateInputRow(row.key, {
                                         from_location_id:
@@ -2044,6 +2260,7 @@ export function ProductionProcessInputPanels({
                                     <input
                                       className="erp-grid-input"
                                       value={row.lot}
+                                      onFocus={selectInputRow}
                                       onChange={(e) =>
                                         updateInputRow(row.key, { lot: e.target.value })
                                       }
@@ -2070,6 +2287,7 @@ export function ProductionProcessInputPanels({
                                       min="0.001"
                                       step="0.001"
                                       value={row.req_qty}
+                                      onFocus={selectInputRow}
                                       onChange={(e) =>
                                         updateInputRow(row.key, { req_qty: e.target.value })
                                       }
@@ -2099,6 +2317,7 @@ export function ProductionProcessInputPanels({
                                       min="0.001"
                                       step="0.001"
                                       value={row.consume_qty}
+                                      onFocus={selectInputRow}
                                       onChange={(e) =>
                                         updateInputRow(row.key, { consume_qty: e.target.value })
                                       }
@@ -2111,7 +2330,8 @@ export function ProductionProcessInputPanels({
                           }
                         })}
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </ResizableGridTable>
               </div>
@@ -2178,15 +2398,22 @@ export function ProductionProcessInputPanels({
                 {processReadExcel.displayRows.length === 0 ? (
                   <tr>
                     <td colSpan={lineLayout.orderedColumns.length} className="erp-grid-empty-cell">
-                      No process steps
+                      {!detail ? emptyMessage : 'No process steps'}
                     </td>
                   </tr>
                 ) : (
                   processReadExcel.displayRows.map((ln, idx) => (
                     <tr
                       key={ln.key}
+                      {...{ [GRID_ROW_NAV_KEY_ATTR]: ln.key }}
                       className={erpRowClass(idx, selectedProcessKey === ln.key)}
                       onClick={() => toggleProcessRowRead(ln.key)}
+                      onKeyDown={handleProcessRowKeyDown}
+                      tabIndex={-1}
+                      onMouseDown={(e) => {
+                        if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
+                        e.currentTarget.focus()
+                      }}
                     >
                       {lineLayout.orderedColumns.map((col) => {
                         switch (col.key) {
@@ -2277,22 +2504,32 @@ export function ProductionProcessInputPanels({
                 {inputReadExcel.displayRows.length === 0 ? (
                   <tr>
                     <td colSpan={inputLayout.orderedColumns.length} className="erp-grid-empty-cell">
-                      {selectedProcessKey == null
-                        ? GRID_COPY.inputSelectProcessMsg
-                        : 'No child items for selected process'}
+                      {!detail
+                        ? emptyMessage
+                        : selectedProcessKey == null
+                          ? GRID_COPY.inputSelectProcessMsg
+                          : 'No child items for selected process'}
                     </td>
                   </tr>
                 ) : (
                   inputReadExcel.displayRows.map((ln, idx) => {
                     const detailInput = ln as NonNullable<ProductionOrderDetail['inputs']>[number]
+                    const inputNavKey = String(detailInput.prd_order_input_id)
                     return (
                       <tr
                         key={detailInput.prd_order_input_id}
+                        {...{ [GRID_ROW_NAV_KEY_ATTR]: inputNavKey }}
                         className={erpRowClass(
                           idx,
-                          selectedInputKey === String(detailInput.prd_order_input_id)
+                          selectedInputKey === inputNavKey
                         )}
-                        onClick={() => toggleInputRowRead(String(detailInput.prd_order_input_id))}
+                        onClick={() => toggleInputRowRead(inputNavKey)}
+                        onKeyDown={handleInputRowKeyDown}
+                        tabIndex={-1}
+                        onMouseDown={(e) => {
+                          if ((e.target as HTMLElement).closest('input, select, textarea, button')) return
+                          e.currentTarget.focus()
+                        }}
                       >
                         {inputLayout.orderedColumns.map((col) => {
                           switch (col.key) {

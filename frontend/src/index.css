@@ -40,6 +40,16 @@ body {
   color: var(--text);
 }
 
+.api-readiness-panel {
+  max-width: 40rem;
+  margin: 2rem auto;
+}
+
+.api-readiness-detail {
+  font-size: 0.68rem;
+  word-break: break-word;
+}
+
 /* Keep all ERP UI text at normal weight (incl. tabs, headers, grid, strong). */
 .app,
 .app * {
@@ -349,6 +359,15 @@ body,
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.main-tab-panel > * {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .main-tab-panel[hidden] {
@@ -1037,8 +1056,15 @@ input[type='file'] {
   flex-shrink: 0;
 }
 
-.erp-panel-title-actions .erp-save-grid-hint {
-  color: rgba(255, 255, 255, 0.92);
+.erp-panel-title-actions .erp-save-grid-hint,
+.erp-panel-title-bar .erp-toolbar-feedback--success {
+  color: #f1f8e9;
+  text-shadow: 0 1px 2px rgba(27, 61, 27, 0.5);
+}
+
+.erp-panel-title-bar .erp-toolbar-feedback--error {
+  color: #ffcdd2;
+  text-shadow: 0 1px 2px rgba(27, 61, 27, 0.5);
 }
 
 .erp-panel-body {
@@ -1367,7 +1393,7 @@ input[type='file'] {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .erp-tree-panel-sidebar {
@@ -1383,7 +1409,7 @@ input[type='file'] {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
 }
 
 
@@ -1623,6 +1649,14 @@ input[type='file'] {
 }
 
 /* Production Order List — compact screen title row (Save Grid / Reset). */
+.erp-production-list-bootstrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .erp-screen-production-list {
   gap: 2px;
 }
@@ -1819,14 +1853,14 @@ input[type='file'] {
   line-height: 1.5;
 }
 
-/* Sidebar tree: fill the split column (must follow .erp-tree-view — same specificity, later wins). */
+/* Sidebar tree: scroll on .erp-tree-panel-body; view grows with content. */
 .erp-tree-view.erp-tree-view-fill {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
   max-height: none;
-  height: 100%;
+  height: auto;
   margin-bottom: 0;
-  overflow: auto;
+  overflow: visible;
 }
 
 .erp-tree-line {
@@ -2310,7 +2344,9 @@ select.erp-input option {
 }
 
 .erp-grid-resizable th {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 2;
   max-width: 0;
   background: linear-gradient(180deg, #e8f3e8 0%, var(--erp-grid-head) 100%);
   font-weight: normal;
@@ -2319,6 +2355,11 @@ select.erp-input option {
   color: var(--erp-title-dark);
   padding-left: 26px;
   padding-right: 10px;
+}
+
+.erp-grid-resizable th.erp-th-dragging,
+.erp-grid-resizable th.erp-th-resizing {
+  z-index: 5;
 }
 
 .erp-grid-resizable th.erp-th-compact {
@@ -2649,8 +2690,8 @@ body.erp-col-resizing {
 }
 
 .erp-grid.erp-grid-resizable thead th {
-  position: relative;
-  top: auto;
+  position: sticky;
+  top: 0;
   z-index: 2;
 }
 
@@ -3454,8 +3495,23 @@ body.erp-split-row-resizing {
   > * {
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
   max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.erp-production-detail-tree .erp-tree-panel-sidebar,
+.erp-production-detail-tree .erp-production-detail-section-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.erp-production-detail-tree .erp-tree-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .erp-production-detail-tree .erp-tree-view,
@@ -3467,8 +3523,7 @@ body.erp-split-row-resizing {
   font-size: 0.72rem;
   box-sizing: border-box;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 /* Match Input Item / Process grid row height (erp-grid-resizable td: 22px). */
@@ -3770,4 +3825,127 @@ body.erp-split-row-resizing {
 .api-status-4,
 .api-status-5 {
   color: #c62828;
+}
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--erp-bg);
+  padding: 24px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 8px;
+  padding: 28px 32px;
+  box-shadow: 0 4px 16px rgba(27, 61, 27, 0.08);
+}
+
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 12px;
+}
+
+.login-logo {
+  display: block;
+  width: 100%;
+  max-width: 196px;
+  height: auto;
+  object-fit: contain;
+}
+
+.login-subtitle {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  color: var(--erp-text);
+}
+
+.login-card input,
+.login-card select {
+  padding: 8px 10px;
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.login-card button[type='submit'] {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 16px;
+  background: var(--erp-accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.login-card button[type='submit']:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  margin: 0 0 8px;
+}
+
+.login-hint {
+  margin: 16px 0 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.sidebar-session {
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  background: var(--erp-surface);
+  border: 1px solid var(--erp-border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+
+.sidebar-session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  color: var(--erp-text);
+}
+
+.sidebar-session-company {
+  font-weight: 600;
+  color: var(--erp-title-dark);
+}
+
+.sidebar-logout {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--erp-border);
+  border-radius: 4px;
+  background: var(--erp-toolbar);
+  color: var(--erp-text);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.sidebar-logout:hover {
+  background: var(--erp-grid-hover);
 }

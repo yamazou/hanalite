@@ -14,6 +14,7 @@ import {
   headerEditFromDraft,
   isBlankDraftLine,
   lineToEditRow,
+  type DraftLineValidationOpts,
 } from '../utils/draftEdit'
 import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gridTrailingBlankRow'
 import { mergeDraftLineImportRows } from '../utils/draftLineExcelImport'
@@ -22,6 +23,8 @@ import { dateInputToIso } from '../utils/format'
 type UseDraftEditOptions = {
   /** Receipt List: do not track or patch header fields in the list UI. */
   listLinesOnly?: boolean
+  /** Receipt List detail: location column is hidden; keep location_id from loaded lines. */
+  omitLineLocation?: boolean
 }
 
 export function useDraftEdit(
@@ -31,6 +34,11 @@ export function useDraftEdit(
   options?: UseDraftEditOptions
 ) {
   const listLinesOnly = options?.listLinesOnly === true
+  const omitLineLocation = options?.omitLineLocation === true
+  const lineOpts: DraftLineValidationOpts | undefined = omitLineLocation
+    ? { omitLocation: true }
+    : undefined
+  const isBlankLine = (row: EditLineRow) => isBlankDraftLine(row, lineOpts)
   const [draft, setDraft] = useState<DraftDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,7 +70,7 @@ export function useDraftEdit(
         setEditLines(
           ensureTrailingBlankRow(
             data.lines.map(lineToEditRow),
-            isBlankDraftLine,
+            isBlankLine,
             (rows) => emptyEditLine(rows.length + 1)
           )
         )
@@ -119,7 +127,7 @@ export function useDraftEdit(
         prev,
         key,
         patch,
-        isBlankDraftLine,
+        isBlankLine,
         (rows) => emptyEditLine(rows.length + 1)
       ).map((row, index) => ({ ...row, line_no: index + 1 }))
     )
@@ -133,7 +141,7 @@ export function useDraftEdit(
         prev
           .filter((row) => !drop.has(row.key))
           .map((row, index) => ({ ...row, line_no: index + 1 })),
-        isBlankDraftLine,
+        isBlankLine,
         (rows) => emptyEditLine(rows.length + 1)
       )
     )
@@ -144,6 +152,17 @@ export function useDraftEdit(
     removeRows([key])
   }
 
+  const applyEditLines = useCallback((rows: EditLineRow[]) => {
+    setRowError(null)
+    setEditLines(
+      ensureTrailingBlankRow(
+        rows.map((row, index) => ({ ...row, line_no: index + 1 })),
+        isBlankLine,
+        (list) => emptyEditLine(list.length + 1)
+      )
+    )
+  }, [])
+
   const importLines = (parsed: Record<string, string>[]) => {
     setRowError(null)
     let added = 0
@@ -152,7 +171,7 @@ export function useDraftEdit(
       added = result.added
       return ensureTrailingBlankRow(
         result.rows.map((row, index) => ({ ...row, line_no: index + 1 })),
-        isBlankDraftLine,
+        isBlankLine,
         (rows) => emptyEditLine(rows.length + 1)
       )
     })
@@ -164,7 +183,10 @@ export function useDraftEdit(
   }
 
   const buildPayloadLines = () => {
-    return activeEditLines(editLines).map((row, index) => ({
+    const rowsForSave = activeEditLines(editLines, lineOpts).filter(
+      (row) => !omitLineLocation || row.location_id !== ''
+    )
+    return rowsForSave.map((row, index) => ({
       ...(row.item_id !== '' ? { item_id: Number(row.item_id) } : { item_id: null }),
       item_cd: row.item_cd.trim() || null,
       item_nm: row.item_nm.trim() || null,
@@ -193,7 +215,10 @@ export function useDraftEdit(
     setRowError(null)
     const lineError = draftLinesSaveError(
       editLines,
-      'Enter at least one line with item code or name, location, lot, and quantity.'
+      omitLineLocation
+        ? 'Enter at least one line with item code or name, lot, and quantity.'
+        : 'Enter at least one line with item code or name, location, lot, and quantity.',
+      lineOpts
     )
     if (lineError) {
       setRowError(lineError)
@@ -221,7 +246,7 @@ export function useDraftEdit(
         setEditLines(
           ensureTrailingBlankRow(
             updated.lines.map(lineToEditRow),
-            isBlankDraftLine,
+            isBlankLine,
             (rows) => emptyEditLine(rows.length + 1)
           )
         )
@@ -250,6 +275,7 @@ export function useDraftEdit(
     updateLine,
     removeRow,
     removeRows,
+    applyEditLines,
     importLines,
     items,
     suppliers,

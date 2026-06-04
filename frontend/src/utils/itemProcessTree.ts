@@ -8,7 +8,13 @@ import {
   isBlankItemProcessRow,
   resolveItemProcessInputFromLocationCd,
 } from './itemProcessEdit'
+import { formatItemCodeName } from './format'
 import type { ProductionTreeData } from './productionOrderTree'
+import {
+  processRowsFromSavedItemProcesses,
+  resolveInputFromLocationCdForStep,
+  isBlankProcessRowLike,
+} from './inputFromLocation'
 import {
   buildInputTreeLine,
   buildProcessTreeLine,
@@ -83,6 +89,7 @@ export function appendSavedItemProcessSubtree(
   const parent = { item_id: saved.item_id, item_cd: saved.item_cd }
 
   const processes = processStepsTreeDisplayOrder(saved.processes)
+  const subprocessProcessRows = processRowsFromSavedItemProcesses(saved.processes)
   for (const proc of processes) {
     const processLine = buildProcessTreeLine(
       {
@@ -101,6 +108,15 @@ export function appendSavedItemProcessSubtree(
 
     const procInputs = [...proc.inputs].sort((a, b) => a.input_no - b.input_no)
     for (const inp of procInputs) {
+      const fromCd = resolveInputFromLocationCdForStep(
+        proc.line_no,
+        inp.item_id,
+        subprocessProcessRows,
+        locations,
+        items,
+        itemtyps ?? [],
+        isBlankProcessRowLike
+      )
       lines.push(
         buildInputTreeLine(
           {
@@ -109,7 +125,7 @@ export function appendSavedItemProcessSubtree(
             item_cd: inp.item_cd,
             item_nm: inp.item_nm,
             req_qty: inp.req_qty,
-            from_location_cd: inp.from_location_cd,
+            from_location_cd: fromCd,
           },
           proc.wip_location_cd,
           items,
@@ -147,7 +163,8 @@ function appendEditProcessBranch(
   locations: LocationMaster[],
   cache: Map<number, ItemProcessesOut>,
   visited: Set<number>,
-  fgParent: { item_id: number; item_cd: string }
+  fgParent: { item_id: number; item_cd: string },
+  itemtyps: ItemTyp[]
 ): void {
   const wip = locations.find((loc) => loc.location_id === proc.wip_location_id)
   const wipCd = wip?.location_cd ?? ''
@@ -176,7 +193,14 @@ function appendEditProcessBranch(
   )
 
   for (const inp of inputs) {
-    const fromCd = resolveItemProcessInputFromLocationCd(proc.line_no, processRows, locations)
+    const fromCd = resolveItemProcessInputFromLocationCd(
+      proc.line_no,
+      inp.item_id,
+      processRows,
+      locations,
+      items,
+      itemtyps
+    )
     lines.push(
       buildInputTreeLine(
         {
@@ -201,7 +225,8 @@ function appendEditProcessBranch(
         items,
         locations,
         cache,
-        visited
+        visited,
+        itemtyps
       )
     }
   }
@@ -214,10 +239,11 @@ export function buildItemProcessMasterTree(params: {
   inputRows: EditInputRow[]
   locations: LocationMaster[]
   items: ItemListRow[]
+  itemtyps: ItemTyp[]
   itemProcessCache: Map<number, ItemProcessesOut>
 }): ProductionTreeData {
-  const { detail, processRows, inputRows, locations, items, itemProcessCache } = params
-  const title = `Tree: ${detail.parent_item_cd} ${detail.parent_item_nm}`
+  const { detail, processRows, inputRows, locations, items, itemtyps, itemProcessCache } = params
+  const title = `Tree: ${formatItemCodeName(detail.parent_item_cd, detail.parent_item_nm)}`
   const lines: BomTreeLine[] = [
     {
       indent: 0,
@@ -247,7 +273,8 @@ export function buildItemProcessMasterTree(params: {
       locations,
       itemProcessCache,
       visited,
-      fgParent
+      fgParent,
+      itemtyps
     )
   }
 

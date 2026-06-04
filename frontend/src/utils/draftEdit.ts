@@ -4,7 +4,15 @@ import { parseDateInputValue } from './format'
 export const APPROVE_ITEM_CD_REQUIRED_MSG =
   'Please enter the item code. This code will be used to generate the master.'
 
-export function isBlankDraftLine(row: EditLineRow): boolean {
+export type DraftLineValidationOpts = {
+  /** Receipt List detail: location is not edited in the grid. */
+  omitLocation?: boolean
+}
+
+export function isBlankDraftLine(row: EditLineRow, opts?: DraftLineValidationOpts): boolean {
+  if (opts?.omitLocation) {
+    return row.item_id === '' && !row.lot.trim() && !row.qty.trim()
+  }
   return (
     row.item_id === '' &&
     row.location_id === '' &&
@@ -13,7 +21,10 @@ export function isBlankDraftLine(row: EditLineRow): boolean {
   )
 }
 
-export function isActiveEditLine(row: EditLineRow): boolean {
+export function isActiveEditLine(row: EditLineRow, opts?: DraftLineValidationOpts): boolean {
+  if (opts?.omitLocation) {
+    return row.item_id !== '' && Boolean(row.lot.trim()) && Boolean(row.qty)
+  }
   return (
     row.item_id !== '' &&
     row.location_id !== '' &&
@@ -22,13 +33,20 @@ export function isActiveEditLine(row: EditLineRow): boolean {
   )
 }
 
-export function activeEditLines(rows: EditLineRow[]): EditLineRow[] {
-  return rows.filter(isActiveEditLine)
+export function activeEditLines(
+  rows: EditLineRow[],
+  opts?: DraftLineValidationOpts
+): EditLineRow[] {
+  return rows.filter((row) => isActiveEditLine(row, opts))
 }
 
 /** First validation problem on partially filled lines, or null if save can proceed. */
-export function draftLinesSaveError(rows: EditLineRow[], fallback: string): string | null {
-  const active = activeEditLines(rows)
+export function draftLinesSaveError(
+  rows: EditLineRow[],
+  fallback: string,
+  opts?: DraftLineValidationOpts
+): string | null {
+  const active = activeEditLines(rows, opts)
   if (active.length > 0) {
     for (const row of active) {
       const qtyNum = Number(row.qty)
@@ -42,13 +60,15 @@ export function draftLinesSaveError(rows: EditLineRow[], fallback: string): stri
     return null
   }
 
-  const partial = rows.filter((r) => !isBlankDraftLine(r) && !isActiveEditLine(r))
+  const partial = rows.filter(
+    (r) => !isBlankDraftLine(r, opts) && !isActiveEditLine(r, opts)
+  )
   if (partial.length > 0) {
     const row = partial[0]
     if (row.item_id === '' && !row.item_cd.trim() && !row.item_nm.trim()) {
       return `Line ${row.line_no}: enter item code or name.`
     }
-    if (row.location_id === '') {
+    if (!opts?.omitLocation && row.location_id === '') {
       return `Line ${row.line_no}: select a location.`
     }
     if (!row.lot.trim()) {

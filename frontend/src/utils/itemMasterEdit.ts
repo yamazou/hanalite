@@ -1,4 +1,5 @@
 import type { ItemListRow, ItemPayload } from '../types/masters'
+import { EMPTY_MASTER_ROW_DATES, type MasterRowDates } from './masterGridDates'
 
 export type EditItemRow = {
   key: string
@@ -8,7 +9,7 @@ export type EditItemRow = {
   itemtyp_id: number | ''
   supplier_ids: (number | '')[]
   customer_ids: (number | '')[]
-}
+} & MasterRowDates
 
 let nextKey = 0
 
@@ -23,13 +24,15 @@ export function listRowToEditItemRow(row: ItemListRow): EditItemRow {
     item_id: row.item_id,
     item_cd: row.item_cd,
     item_nm: row.item_nm,
-    itemtyp_id: row.itemtyp_id,
+    itemtyp_id: row.itemtyp_id ?? '',
     supplier_ids: [
       row.supplier1_id ?? '',
       row.supplier2_id ?? '',
       row.supplier3_id ?? '',
     ],
     customer_ids: [row.customer1_id ?? '', row.customer2_id ?? ''],
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   }
 }
 
@@ -41,6 +44,7 @@ export function emptyEditItemRow(defaultItemtypId?: number | ''): EditItemRow {
     itemtyp_id: defaultItemtypId ?? '',
     supplier_ids: ['', '', ''],
     customer_ids: ['', ''],
+    ...EMPTY_MASTER_ROW_DATES,
   }
 }
 
@@ -64,7 +68,7 @@ export function buildItemPayload(row: EditItemRow): ItemPayload {
   return {
     item_cd: row.item_cd.trim(),
     item_nm: row.item_nm.trim(),
-    itemtyp_id: Number(row.itemtyp_id),
+    itemtyp_id: row.itemtyp_id === '' ? null : Number(row.itemtyp_id),
     supplier1_id: supplierIds[0] !== '' ? Number(supplierIds[0]) : null,
     supplier2_id: supplierIds[1] !== '' ? Number(supplierIds[1]) : null,
     supplier3_id: supplierIds[2] !== '' ? Number(supplierIds[2]) : null,
@@ -77,7 +81,7 @@ export function buildItemPayload(row: EditItemRow): ItemPayload {
 export type ItemRowSnapshot = {
   item_cd: string
   item_nm: string
-  itemtyp_id: number
+  itemtyp_id: number | null
   supplier1_id: number | null
   supplier2_id: number | null
   supplier3_id: number | null

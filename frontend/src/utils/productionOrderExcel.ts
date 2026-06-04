@@ -1,4 +1,5 @@
 import type { LocationMaster } from '../types/masters'
+import { locationHasTypCd } from './locationTypCd'
 import type {
   ProductionOrderDetail,
   ProductionOrderInput,
@@ -28,14 +29,14 @@ export const PRODUCTION_ORDER_EXCEL_SHEET = 'Production Order List'
 
 export const PRODUCTION_ORDER_EXCEL_HEADERS = [
   'Order',
-  'Production Date',
+  'Planned Date',
   'Reference No.',
   'Source',
   'Status',
   'Item Code',
   'Item Name',
   'Lot',
-  'Plan Qty',
+  'Planned Qty',
   'Actual Qty',
   'Steps',
   'Created',
@@ -45,13 +46,13 @@ export const PRODUCTION_ORDER_EXCEL_HEADERS = [
   'Location Name',
   'Output Item Code',
   'Output Item Name',
-  'Process Plan Qty',
+  'Process Planned Qty',
   'Process Actual Qty',
   'Process Status',
   'Input Item Code',
   'Input Item Name',
   'From Location',
-  'Plan Input Qty',
+  'Planned Input Qty',
   'Actual Input Qty',
   'Input Lot',
 ] as const
@@ -227,7 +228,7 @@ export function buildProductionOrderExportBodyRows(args: {
   liveEditsByOrderId: Map<number, ProductionOrderExportLiveEdits>
   locations: LocationMaster[]
 }): (string | number)[][] {
-  const processLocations = args.locations.filter((loc) => loc.location_type === 'Process')
+  const processLocations = args.locations.filter((loc) => locationHasTypCd(loc, 'Process'))
   const rows: (string | number)[][] = []
 
   for (const order of args.orders) {

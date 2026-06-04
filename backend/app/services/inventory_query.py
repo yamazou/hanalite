@@ -9,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.deps import get_tenant
 from app.models.inventory import InvBalance, InvCurrent, InvGrgi, MoveTyp
 from app.models.masters import Item, ItemTyp, Location
 from app.schemas.inventory import (
@@ -20,6 +21,7 @@ from app.schemas.inventory import (
     LotTraceHistory,
     LotTraceResult,
 )
+from app.tenant import stamp_new, stamp_update
 
 
 class InventoryQueryError(Exception):
@@ -29,7 +31,7 @@ class InventoryQueryError(Exception):
 _FAR_FUTURE = datetime(9999, 12, 31, 23, 59, 59)
 
 
-def _gr_dates_by_lot_subquery():
+def _gr_dates_by_lot_subquery(co_id: int):
     """Earliest GR actual_at per item, location, and lot."""
     return (
         select(
@@ -40,7 +42,9 @@ def _gr_dates_by_lot_subquery():
         )
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
         .where(
+            InvGrgi.co_id == co_id,
             InvGrgi.deleted_at.is_(None),
+            MoveTyp.co_id == co_id,
             MoveTyp.deleted_at.is_(None),
             func.upper(MoveTyp.movetyps_cd) == "GR",
         )
@@ -55,7 +59,8 @@ def pick_oldest_gr_lot_for_item(
     location_id: int | None = None,
 ) -> str | None:
     """FIFO lot from current stock (qty > 0) by earliest GR date."""
-    gr_dates = _gr_dates_by_lot_subquery()
+    ctx = get_tenant()
+    gr_dates = _gr_dates_by_lot_subquery(ctx.co_id)
 
     def _pick(*, loc_id: int | None) -> str | None:
         stmt = (
@@ -68,6 +73,7 @@ def pick_oldest_gr_lot_for_item(
                 & (gr_dates.c.gr_lot == InvCurrent.lot),
             )
             .where(
+                InvCurrent.co_id == ctx.co_id,
                 InvCurrent.item_id == item_id,
                 InvCurrent.deleted_at.is_(None),
                 InvCurrent.qty > 0,
@@ -96,7 +102,8 @@ def list_current_stock(
     location_q: str | None = None,
     include_zero: bool = False,
 ) -> list[CurrentStockItem]:
-    gr_dates = _gr_dates_by_lot_subquery()
+    ctx = get_tenant()
+    gr_dates = _gr_dates_by_lot_subquery(ctx.co_id)
 
     stmt = (
         select(
@@ -118,7 +125,14 @@ def list_current_stock(
             & (gr_dates.c.gr_location_id == InvCurrent.location_id)
             & (gr_dates.c.gr_lot == InvCurrent.lot),
         )
-        .where(InvCurrent.deleted_at.is_(None), Item.deleted_at.is_(None))
+        .where(
+            InvCurrent.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            ItemTyp.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvCurrent.deleted_at.is_(None),
+            Item.deleted_at.is_(None),
+        )
     )
     if not include_zero:
         stmt = stmt.where(InvCurrent.qty > 0)
@@ -172,10 +186,11 @@ def list_current_stock(
 
 
 def suggest_current_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    ctx = get_tenant()
     stmt = (
         select(InvCurrent.lot)
         .distinct()
-        .where(InvCurrent.deleted_at.is_(None))
+        .where(InvCurrent.co_id == ctx.co_id, InvCurrent.deleted_at.is_(None))
         .order_by(InvCurrent.lot)
     )
     if q:
@@ -189,6 +204,7 @@ def suggest_current_lots(db: Session, q: str | None = None, *, limit: int = 20) 
 def list_grgi_history(
     db: Session, limit: int = 50, location_id: int | None = None
 ) -> list[GrgiHistoryItem]:
+    ctx = get_tenant()
     stmt = (
         select(
             InvGrgi,
@@ -201,7 +217,13 @@ def list_grgi_history(
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
         .join(Location, Location.location_id == InvGrgi.location_id)
-        .where(InvGrgi.deleted_at.is_(None))
+        .where(
+            InvGrgi.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            MoveTyp.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvGrgi.deleted_at.is_(None),
+        )
     )
     if location_id:
         stmt = stmt.where(InvGrgi.location_id == location_id)
@@ -228,6 +250,7 @@ def list_grgi_history(
 
 
 def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTraceResult:
+    ctx = get_tenant()
     lot = lot.strip()
     if not lot:
         raise InventoryQueryError("Lot number is required.")
@@ -244,7 +267,14 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
         .join(Item, Item.item_id == InvCurrent.item_id)
         .join(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .join(Location, Location.location_id == InvCurrent.location_id)
-        .where(InvCurrent.deleted_at.is_(None), InvCurrent.lot == lot)
+        .where(
+            InvCurrent.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            ItemTyp.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvCurrent.deleted_at.is_(None),
+            InvCurrent.lot == lot,
+        )
         .order_by(InvCurrent.location_id, InvCurrent.item_id)
     ).all()
 
@@ -260,7 +290,14 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
         .join(Item, Item.item_id == InvGrgi.item_id)
         .join(MoveTyp, MoveTyp.movetyps_id == InvGrgi.movetyps_id)
         .join(Location, Location.location_id == InvGrgi.location_id)
-        .where(InvGrgi.deleted_at.is_(None), InvGrgi.lot == lot)
+        .where(
+            InvGrgi.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            MoveTyp.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvGrgi.deleted_at.is_(None),
+            InvGrgi.lot == lot,
+        )
         .order_by(InvGrgi.actual_at.asc(), InvGrgi.inv_grgi_id.asc())
     ).all()
 
@@ -268,7 +305,13 @@ def trace_lot(db: Session, lot: str, location_id: int | None = None) -> LotTrace
         select(InvBalance, Item.item_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvBalance.item_id)
         .join(Location, Location.location_id == InvBalance.location_id)
-        .where(InvBalance.deleted_at.is_(None), InvBalance.lot == lot)
+        .where(
+            InvBalance.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvBalance.deleted_at.is_(None),
+            InvBalance.lot == lot,
+        )
         .order_by(InvBalance.period_year_month.desc())
     ).all()
     if location_id:
@@ -334,11 +377,17 @@ def list_balances(
     location_id: int | None = None,
     location_q: str | None = None,
 ) -> list[BalanceItem]:
+    ctx = get_tenant()
     stmt = (
         select(InvBalance, Item.item_nm, Location.location_cd, Location.location_nm)
         .join(Item, Item.item_id == InvBalance.item_id)
         .join(Location, Location.location_id == InvBalance.location_id)
-        .where(InvBalance.deleted_at.is_(None))
+        .where(
+            InvBalance.co_id == ctx.co_id,
+            Item.co_id == ctx.co_id,
+            Location.co_id == ctx.co_id,
+            InvBalance.deleted_at.is_(None),
+        )
     )
     if period:
         stmt = stmt.where(InvBalance.period_year_month == period)
@@ -376,6 +425,7 @@ def list_balances(
 
 
 def create_period_balance(db: Session, period: str, location_id: int | None = None) -> int:
+    ctx = get_tenant()
     if not re.match(r"^\d{6}$", period):
         raise InventoryQueryError("Period must be YYYYMM format.")
 
@@ -383,7 +433,11 @@ def create_period_balance(db: Session, period: str, location_id: int | None = No
     month = int(period[4:6])
     beg_at = datetime(year, month, 1)
 
-    currents_stmt = select(InvCurrent).where(InvCurrent.deleted_at.is_(None), InvCurrent.qty > 0)
+    currents_stmt = select(InvCurrent).where(
+        InvCurrent.co_id == ctx.co_id,
+        InvCurrent.deleted_at.is_(None),
+        InvCurrent.qty > 0,
+    )
     if location_id:
         currents_stmt = currents_stmt.where(InvCurrent.location_id == location_id)
     currents = db.scalars(currents_stmt).all()
@@ -393,6 +447,7 @@ def create_period_balance(db: Session, period: str, location_id: int | None = No
     for c in currents:
         existing = db.scalar(
             select(InvBalance).where(
+                InvBalance.co_id == ctx.co_id,
                 InvBalance.period_year_month == period,
                 InvBalance.item_id == c.item_id,
                 InvBalance.location_id == c.location_id,
@@ -403,32 +458,37 @@ def create_period_balance(db: Session, period: str, location_id: int | None = No
             existing.qty = c.qty
             existing.beg_qty = c.qty
             existing.beg_at = beg_at
-            existing.updated_at = now
             existing.deleted_at = None
+            stamp_update(existing, ctx)
         else:
-            db.add(
-                InvBalance(
-                    period_year_month=period,
-                    item_id=c.item_id,
-                    location_id=c.location_id,
-                    qty=c.qty,
-                    lot=c.lot,
-                    beg_at=beg_at,
-                    beg_qty=c.qty,
-                    created_at=now,
-                    updated_at=now,
-                )
+            row = InvBalance(
+                period_year_month=period,
+                item_id=c.item_id,
+                location_id=c.location_id,
+                qty=c.qty,
+                lot=c.lot,
+                beg_at=beg_at,
+                beg_qty=c.qty,
+                created_at=now,
+                updated_at=now,
             )
+            stamp_new(row, ctx)
+            db.add(row)
         count += 1
     db.commit()
     return count
 
 
 def list_movetyps_for_manual(db: Session) -> list[MoveTyp]:
+    ctx = get_tenant()
     return list(
         db.scalars(
             select(MoveTyp)
-            .where(MoveTyp.deleted_at.is_(None), MoveTyp.movetyps_cd.in_(["GR", "GI", "MV"]))
+            .where(
+                MoveTyp.co_id == ctx.co_id,
+                MoveTyp.deleted_at.is_(None),
+                MoveTyp.movetyps_cd.in_(["GR", "GI", "MV"]),
+            )
             .order_by(MoveTyp.movetyps_id)
         ).all()
     )

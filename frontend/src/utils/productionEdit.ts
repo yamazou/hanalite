@@ -15,6 +15,8 @@ import type {
 } from '../types/production'
 
 import type { Item } from '../types'
+import type { ItemTyp, LocationMaster } from '../types/masters'
+import { resolveInputFromLocationIdForStep } from './inputFromLocation'
 import type { ItemProcInput, ItemProcessesOut } from '../types/itemprocs'
 import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
 
@@ -161,6 +163,9 @@ export type InputConsumeQtyContext = {
   status: ProductionStatus
   orderPlannedQty: string | number
   processRows?: EditProcessRow[]
+  locations?: LocationMaster[]
+  items?: Item[]
+  itemtyps?: ItemTyp[]
 }
 
 export type ProcessPayloadContext = {
@@ -429,9 +434,22 @@ function resolveProcessPlannedQty(
 
 export function resolveInputFromLocationId(
   row: EditInputRow,
-  processRows: EditProcessRow[]
+  processRows: EditProcessRow[],
+  catalog?: Pick<InputConsumeQtyContext, 'locations' | 'items' | 'itemtyps'>
 ): number | '' {
   if (row.from_location_id !== '') return row.from_location_id
+  const { locations, items, itemtyps } = catalog ?? {}
+  if (locations && items && itemtyps) {
+    return resolveInputFromLocationIdForStep(
+      row.line_no,
+      row.item_id,
+      processRows,
+      locations,
+      items,
+      itemtyps,
+      isBlankProcessRow
+    )
+  }
   const proc = processRows.find(
     (entry) => entry.line_no === row.line_no && !isBlankProcessRow(entry)
   )
@@ -572,7 +590,7 @@ export function buildInputPayload(
   return rows
     .filter(isActiveInputRow)
     .map((row) => {
-      const fromLocationId = resolveInputFromLocationId(row, processRows)
+      const fromLocationId = resolveInputFromLocationId(row, processRows, context)
       if (fromLocationId === '') return null
       const consumeQty = resolveInputConsumeQty(row, context)
       if (!Number.isFinite(consumeQty) || consumeQty <= 0) return null

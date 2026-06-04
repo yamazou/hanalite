@@ -99,6 +99,7 @@ class DraftListItem(BaseModel):
     status: DraftStatus
     receipt_at: datetime
     reference_no: str | None
+    suppliers_id: int | None = None
     supplier_nm: str | None = None
     notes: str | None = None
     line_count: int

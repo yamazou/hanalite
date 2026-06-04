@@ -21,6 +21,7 @@ export interface DraftListItem {
   source_type: SourceType
   receipt_at: string
   reference_no: string | null
+  suppliers_id?: number | null
   supplier_nm: string | null
   notes: string | null
   line_count: number
@@ -72,7 +73,7 @@ export interface Item {
   item_id: number
   item_cd: string
   item_nm: string
-  itemtyp_id: number
+  itemtyp_id: number | null
 }
 
 export interface Supplier {

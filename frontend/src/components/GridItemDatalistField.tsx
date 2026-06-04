@@ -97,12 +97,14 @@ export function GridItemResolvedInput({
   placeholder,
   onChange,
   onFocus,
+  onKeyDown,
 }: {
   value: string
   style?: CSSProperties
   placeholder?: string
   onChange: (value: string) => void
   onFocus?: () => void
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
 }) {
   return (
     <input
@@ -114,6 +116,7 @@ export function GridItemResolvedInput({
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onFocus={onFocus}
+      onKeyDown={onKeyDown}
       onChange={(event) => onChange(event.target.value)}
       onBlur={(event) => onChange(event.currentTarget.value)}
     />

@@ -88,12 +88,6 @@ def main() -> int:
         print("\nStart API: uvicorn app.main:app --host 127.0.0.1 --port 8000")
         return 1
 
-    code, raw = req("GET", "/pch-receipt-drafts/template")
-    if code == 200 and isinstance(raw, bytes) and len(raw) > 1000:
-        ok("excel template download")
-    else:
-        fail("excel template", f"code={code}")
-
     code, locations = req("GET", "/masters/locations")
     if code == 200 and isinstance(locations, list) and len(locations) > 0:
         ok("masters locations list")
@@ -126,22 +120,6 @@ def main() -> int:
     else:
         fail("manual draft create", str(draft))
         manual_id = None
-
-    if isinstance(raw, bytes):
-        code, excel_draft = multipart_import(
-            "/pch-receipt-drafts/import",
-            raw,
-            "hanalite_receipt_template.xlsx",
-            {"receipt_at": receipt_at, "reference_no": "VERIFY-EXCEL"},
-        )
-        if code == 201 and excel_draft.get("source_type") == "excel":
-            ok("excel import")
-            excel_id = excel_draft["inv_receipt_draft_id"]
-        else:
-            fail("excel import", str(excel_draft))
-            excel_id = None
-    else:
-        excel_id = None
 
     try:
         from fpdf import FPDF
@@ -178,7 +156,7 @@ def main() -> int:
     else:
         pdf_id = None
 
-    approve_id = excel_id or manual_id
+    approve_id = manual_id
     if approve_id:
         code, approved = req("POST", f"/pch-receipt-drafts/{approve_id}/approve")
         if code == 200 and approved.get("status") == "approved":
@@ -239,12 +217,6 @@ def main() -> int:
 
     print("\nDelivery drafts (sls-delivery-drafts)")
 
-    code, raw_dlv_tpl = req("GET", "/sls-delivery-drafts/template")
-    if code == 200 and isinstance(raw_dlv_tpl, bytes) and len(raw_dlv_tpl) > 1000:
-        ok("delivery excel template download")
-    else:
-        fail("delivery excel template", f"code={code}")
-
     delivery_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     delivery_lot = stock_lot or f"LOT-DLV-{datetime.now().strftime('%H%M%S')}"
     code, delivery_draft = req(
@@ -270,22 +242,6 @@ def main() -> int:
     else:
         fail("delivery manual draft create", str(delivery_draft))
         delivery_manual_id = None
-
-    if isinstance(raw_dlv_tpl, bytes) and stock_lot:
-        code, delivery_excel = multipart_import(
-            "/sls-delivery-drafts/import",
-            raw_dlv_tpl,
-            "hanalite_delivery_template.xlsx",
-            {"delivery_at": delivery_at, "reference_no": "VERIFY-DELIVERY-EXCEL"},
-        )
-        if code == 201 and delivery_excel.get("source_type") == "excel":
-            ok("delivery excel import")
-            delivery_excel_id = delivery_excel["sls_delivery_draft_id"]
-        else:
-            fail("delivery excel import", str(delivery_excel))
-            delivery_excel_id = None
-    else:
-        delivery_excel_id = None
 
     code, delivery_list = req("GET", "/sls-delivery-drafts")
     if code == 200 and isinstance(delivery_list, list):
@@ -315,13 +271,6 @@ def main() -> int:
             fail("delivery cancel approved draft", str(delivery_cancelled))
     elif delivery_manual_id:
         fail("delivery approve draft", "no stock lot from inventory GR; skipped GI test")
-
-    if delivery_excel_id:
-        code, delivery_pending_cancel = req("POST", f"/sls-delivery-drafts/{delivery_excel_id}/cancel")
-        if code == 200 and delivery_pending_cancel.get("status") == "cancelled":
-            ok("delivery cancel registered draft")
-        else:
-            fail("delivery cancel registered draft", str(delivery_pending_cancel))
 
     period = datetime.now().strftime("%Y%m")
     code, bal = req("POST", f"/inventory/balances?period={period}")

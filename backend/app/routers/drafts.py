@@ -2,6 +2,8 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+
+from app.deps import require_tenant
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -30,7 +32,6 @@ from app.services.drafts import (
     suggest_draft_lots,
     update_draft,
 )
-from app.services.excel_import import ExcelImportError, build_template_workbook, parse_excel_to_draft_create
 from app.services.pdf_import import (
     PdfImportError,
     get_attachment_full_path,
@@ -38,7 +39,11 @@ from app.services.pdf_import import (
     save_pdf_file,
 )
 
-router = APIRouter(prefix="/pch-receipt-drafts", tags=["pch-receipt-drafts"])
+router = APIRouter(
+    prefix="/pch-receipt-drafts",
+    tags=["pch-receipt-drafts"],
+    dependencies=[Depends(require_tenant)],
+)
 
 
 @router.get("", response_model=list[DraftListItem])
@@ -82,60 +87,14 @@ def api_create_draft(
     payload: DraftCreate,
     db: Annotated[Session, Depends(get_db)],
 ):
-    if not payload.lines:
-        raise HTTPException(status_code=400, detail="At least one line is required.")
     try:
-        draft = create_draft(db, payload, source_type="manual", require_lines=True)
-        return get_draft(db, draft.inv_receipt_draft_id)
-    except DraftServiceError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-
-@router.get("/template")
-def download_excel_template():
-    content = build_template_workbook()
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="hanalite_receipt_template.xlsx"'},
-    )
-
-
-@router.post("/import", response_model=DraftRead, status_code=201)
-async def api_import_excel(
-    db: Annotated[Session, Depends(get_db)],
-    file: UploadFile = File(..., description="Excel .xlsx file"),
-    receipt_at: str | None = Form(default=None),
-    suppliers_id: int | None = Form(default=None),
-    reference_no: str | None = Form(default=None),
-    notes: str | None = Form(default=None),
-):
-    filename = (file.filename or "").lower()
-    if not filename.endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
-
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Empty file.")
-
-    parsed_receipt_at = _parse_form_datetime(receipt_at)
-
-    try:
-        payload = parse_excel_to_draft_create(
+        draft = create_draft(
             db,
-            raw,
-            receipt_at=parsed_receipt_at,
-            suppliers_id=suppliers_id,
-            reference_no=reference_no,
-            notes=notes,
+            payload,
+            source_type="manual",
+            require_lines=bool(payload.lines),
         )
-        draft = create_draft(db, payload, source_type="excel", require_lines=True)
         return get_draft(db, draft.inv_receipt_draft_id)
-    except ExcelImportError as e:
-        msg = str(e)
-        if e.row:
-            msg = f"Row {e.row}: {msg}"
-        raise HTTPException(status_code=400, detail=msg) from e
     except DraftServiceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

@@ -13,6 +13,7 @@ import type {
   ItemPayload,
   ItemSearchRow,
   ItemTyp,
+  LocationTyp,
   MoveTypMaster,
   LocationMaster,
   SupplierMaster,
@@ -27,6 +28,7 @@ import type {
   MoveTyp,
 } from '../types/inventory'
 import type {
+  ProductionExcelImportResult,
   ProductionOrderCreatePayload,
   ProductionOrderDetail,
   ProductionOrderListItem,
@@ -44,6 +46,54 @@ export type ProductionOrderListFilters = {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 const API_PREFIX = '/api/v1'
+
+let apiAuthToken: string | null = null
+let apiUnauthorizedHandler: (() => void) | null = null
+
+export function setApiAuthToken(token: string | null): void {
+  apiAuthToken = token
+}
+
+export function setApiUnauthorizedHandler(handler: (() => void) | null): void {
+  apiUnauthorizedHandler = handler
+}
+
+/** Dev UI entry URL (Vite on port 5180). Do not open the API port (8000) in the browser. */
+export const HANALITE_APP_URL = 'http://localhost:5180/home'
+
+export function apiHealthCheckUrl(): string {
+  return `${API_BASE}${API_PREFIX}/health`
+}
+
+export type ApiHealthProbe =
+  | { state: 'ready' }
+  | { state: 'unreachable' }
+  | { state: 'database'; error: string | null }
+
+type HealthBody = {
+  status?: string
+  service?: string
+  database?: boolean
+  database_error?: string | null
+}
+
+export async function probeApiHealth(timeoutMs = 4000): Promise<ApiHealthProbe> {
+  try {
+    const res = await fetch(apiHealthCheckUrl(), {
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!res.ok) return { state: 'unreachable' }
+    const body = (await res.json()) as HealthBody
+    if (body.service !== 'hanalite-api') return { state: 'unreachable' }
+    if (body.status === 'ok' && body.database) return { state: 'ready' }
+    if (body.database === false) {
+      return { state: 'database', error: body.database_error ?? null }
+    }
+    return { state: 'unreachable' }
+  } catch {
+    return { state: 'unreachable' }
+  }
+}
 export type DraftListFilters = {
   status?: DraftStatus
   date_from?: string
@@ -127,8 +177,7 @@ function formatApiErrorDetail(detail: unknown): string {
   return parts.length > 0 ? parts.join('; ') : JSON.stringify(detail)
 }
 
-const API_UNAVAILABLE_MSG =
-  'Cannot reach the hanalite API. Start MySQL in XAMPP, run start-hanalite.bat, and wait until the API window shows "Application startup complete".'
+const API_UNAVAILABLE_MSG = `Cannot reach the hanalite API. Start MySQL in XAMPP, run start-hanalite.bat, wait until the "hanalite api" window shows "Application startup complete", then open ${HANALITE_APP_URL} (not port 8000). If the page was opened too early, refresh after the API is ready.`
 
 function isGenericServerError(status: number, detail: string): boolean {
   if (status < 500) return false
@@ -148,6 +197,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   if (!headers.has('Content-Type') && options?.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
+  if (apiAuthToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${apiAuthToken}`)
+  }
   let res: Response
   try {
     res = await fetch(url, {
@@ -156,6 +208,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     })
   } catch {
     throw new Error(API_UNAVAILABLE_MSG)
+  }
+
+  if (res.status === 401 && !path.startsWith('/auth/companies') && !path.startsWith('/auth/login')) {
+    apiUnauthorizedHandler?.()
   }
 
   if (!res.ok) {
@@ -188,6 +244,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string }>('/health'),
+
+  listLoginCompanies: () =>
+    request<import('../types/auth').LoginCompany[]>('/auth/companies'),
+
+  login: (payload: { company_cd: string; user_cd: string; password: string }) =>
+    request<import('../types/auth').LoginResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  listUsersMaster: () => request<import('../types/auth').UserMaster[]>('/auth/users'),
+
+  createUser: (payload: import('../types/auth').UserMasterCreatePayload) =>
+    request<import('../types/auth').UserMaster>('/auth/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateUser: (userId: number, payload: import('../types/auth').UserMasterUpdatePayload) =>
+    request<import('../types/auth').UserMaster>(`/auth/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteUser: (userId: number) =>
+    request<void>(`/auth/users/${userId}`, { method: 'DELETE' }),
+
+  listCompaniesMaster: () =>
+    request<import('../types/auth').CompanyMaster[]>('/masters/companies'),
+
+  createCompany: (payload: import('../types/auth').CompanyMasterCreatePayload) =>
+    request<import('../types/auth').CompanyMaster>('/masters/companies', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateCompany: (coId: number, payload: import('../types/auth').CompanyMasterUpdatePayload) =>
+    request<import('../types/auth').CompanyMaster>(`/masters/companies/${coId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteCompany: (coId: number) =>
+    request<void>(`/masters/companies/${coId}`, { method: 'DELETE' }),
 
   listDrafts: async (filters: DraftListFilters = {}, kind: DraftKind = 'receipt') => {
     const params = new URLSearchParams()
@@ -268,6 +368,7 @@ export const api = {
     itemtyp_cd: string
     itemtyp_nm: string
     itemtyp_color?: string | null
+    locationtyp_id?: number | null
   }) =>
     request<ItemTyp>('/masters/itemtyps', {
       method: 'POST',
@@ -275,7 +376,12 @@ export const api = {
     }),
   updateItemTyp: (
     itemtyp_id: number,
-    payload: { itemtyp_cd: string; itemtyp_nm: string; itemtyp_color?: string | null }
+    payload: {
+      itemtyp_cd: string
+      itemtyp_nm: string
+      itemtyp_color?: string | null
+      locationtyp_id?: number | null
+    }
   ) =>
     request<ItemTyp>(`/masters/itemtyps/${itemtyp_id}`, {
       method: 'PUT',
@@ -319,6 +425,23 @@ export const api = {
   deleteCustomer: (customers_id: number) =>
     request<void>(`/masters/customers/${customers_id}`, { method: 'DELETE' }),
 
+  listLocationtypsMaster: () => request<LocationTyp[]>('/masters/locationtyps'),
+  createLocationTyp: (payload: { locationtyp_cd: string; locationtyp_nm: string }) =>
+    request<LocationTyp>('/masters/locationtyps', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateLocationTyp: (
+    locationtyp_id: number,
+    payload: { locationtyp_cd: string; locationtyp_nm: string }
+  ) =>
+    request<LocationTyp>(`/masters/locationtyps/${locationtyp_id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteLocationTyp: (locationtyp_id: number) =>
+    request<void>(`/masters/locationtyps/${locationtyp_id}`, { method: 'DELETE' }),
+
   listMovetypsMaster: () => request<MoveTypMaster[]>('/masters/movetyps'),
   createMoveTyp: (payload: { movetyps_cd: string; movetyps_nm?: string | null }) =>
     request<MoveTypMaster>('/masters/movetyps', {
@@ -334,20 +457,26 @@ export const api = {
     request<void>(`/masters/movetyps/${movetyps_id}`, { method: 'DELETE' }),
 
   listLocationsMaster: () => request<LocationMaster[]>('/masters/locations'),
-  createLocation: (location_cd: string, location_nm: string, location_type: 'RM' | 'Process' | 'NG' | 'FG') =>
+  createLocation: (payload: {
+    location_cd: string
+    location_nm: string
+    locationtyp_id?: number | null
+  }) =>
     request<LocationMaster>('/masters/locations', {
       method: 'POST',
-      body: JSON.stringify({ location_cd, location_nm, location_type }),
+      body: JSON.stringify(payload),
     }),
   updateLocation: (
     location_id: number,
-    location_cd: string,
-    location_nm: string,
-    location_type: 'RM' | 'Process' | 'NG' | 'FG'
+    payload: {
+      location_cd: string
+      location_nm: string
+      locationtyp_id?: number | null
+    }
   ) =>
     request<LocationMaster>(`/masters/locations/${location_id}`, {
       method: 'PUT',
-      body: JSON.stringify({ location_cd, location_nm, location_type }),
+      body: JSON.stringify(payload),
     }),
   deleteLocation: (location_id: number) =>
     request<void>(`/masters/locations/${location_id}`, { method: 'DELETE' }),
@@ -387,46 +516,6 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
-
-  downloadTemplate: async (kind: DraftKind = 'receipt') => {
-    const url = `${API_BASE}${API_PREFIX}${draftBase(kind)}/template`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error('Failed to download template.')
-    const blob = await res.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = kind === 'delivery' ? 'hanalite_delivery_template.xlsx' : 'hanalite_receipt_template.xlsx'
-    a.click()
-    URL.revokeObjectURL(a.href)
-  },
-
-  importExcel: async (
-    file: File,
-    fields: {
-      receipt_at?: string
-      suppliers_id?: number
-      reference_no?: string
-      notes?: string
-    },
-    kind: DraftKind = 'receipt'
-  ) => {
-    const form = new FormData()
-    form.append('file', file)
-    if (fields.suppliers_id != null) form.append('suppliers_id', String(fields.suppliers_id))
-    if (fields.reference_no) form.append('reference_no', fields.reference_no)
-    if (fields.notes) form.append('notes', fields.notes)
-    const path = kind === 'delivery' ? '/sls-delivery-drafts/import' : '/pch-receipt-drafts/import'
-    if (kind === 'delivery' && fields.receipt_at) {
-      form.append('delivery_at', fields.receipt_at)
-    } else if (fields.receipt_at) {
-      form.append('receipt_at', fields.receipt_at)
-    }
-    const row = await request<any>(path, {
-      method: 'POST',
-      body: form,
-    })
-    return normalizeDetail(kind, row)
-  },
 
   importPdf: async (
     file: File,
@@ -586,7 +675,7 @@ export const api = {
   importProductionExcel: async (file: File) => {
     const form = new FormData()
     form.append('file', file)
-    return request<ProductionOrderDetail>('/production/orders/import', {
+    return request<ProductionExcelImportResult>('/production/orders/import', {
       method: 'POST',
       body: form,
     })

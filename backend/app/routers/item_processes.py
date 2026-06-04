@@ -1,6 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from app.deps import require_tenant
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -18,7 +20,11 @@ from app.services.itemprocs import (
     save_item_processes,
 )
 
-router = APIRouter(prefix="/masters/items", tags=["item-processes"])
+router = APIRouter(
+    prefix="/masters/items",
+    tags=["item-processes"],
+    dependencies=[Depends(require_tenant)],
+)
 
 
 def _handle_error(e: ItemProcError) -> HTTPException:

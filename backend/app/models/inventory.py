@@ -5,9 +5,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.models.tenant_mixin import TenantMixin
 
 
-class MoveTyp(Base):
+class MoveTyp(TenantMixin, Base):
     __tablename__ = "m_movetyps"
 
     movetyps_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -18,7 +19,7 @@ class MoveTyp(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class InvCurrent(Base):
+class InvCurrent(TenantMixin, Base):
     __tablename__ = "inv_currents"
 
     inv_current_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -31,7 +32,7 @@ class InvCurrent(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class InvBalance(Base):
+class InvBalance(TenantMixin, Base):
     __tablename__ = "inv_balances"
 
     inv_balance_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -47,7 +48,7 @@ class InvBalance(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class InvGrgi(Base):
+class InvGrgi(TenantMixin, Base):
     __tablename__ = "inv_grgi"
 
     inv_grgi_id: Mapped[int] = mapped_column(Integer, primary_key=True)

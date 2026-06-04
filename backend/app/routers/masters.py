@@ -1,9 +1,16 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+
+from app.deps import require_tenant
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.schemas.auth import (
+    CompanyMasterCreate,
+    CompanyMasterOut,
+    CompanyMasterUpdate,
+)
 from app.schemas.masters import (
     ItemCreate,
     ItemDetailOut,
@@ -12,6 +19,9 @@ from app.schemas.masters import (
     ItemTypCreate,
     ItemTypOut,
     ItemTypUpdate,
+    LocationTypCreate,
+    LocationTypOut,
+    LocationTypUpdate,
     LocationCreate,
     LocationOut,
     LocationUpdate,
@@ -26,24 +36,34 @@ from app.schemas.masters import (
     SupplierOut,
     SupplierUpdate,
 )
+from app.services.auth_service import (
+    AuthError,
+    create_company,
+    delete_company,
+    list_companies_master,
+    update_company,
+)
 from app.services.masters import (
     MasterError,
     create_customer,
     create_item,
     create_itemtyp,
     create_location,
+    create_locationtyp,
     create_movetyp,
     create_supplier,
     delete_customer,
     delete_item,
     delete_itemtyp,
     delete_location,
+    delete_locationtyp,
     delete_movetyp,
     delete_supplier,
     get_item,
     list_items,
     list_itemtyps,
     list_locations,
+    list_locationtyps,
     list_movetyps,
     list_customers,
     list_suppliers,
@@ -52,14 +72,23 @@ from app.services.masters import (
     update_item,
     update_itemtyp,
     update_location,
+    update_locationtyp,
     update_movetyp,
     update_supplier,
 )
 
-router = APIRouter(prefix="/masters", tags=["masters"])
+router = APIRouter(
+    prefix="/masters",
+    tags=["masters"],
+    dependencies=[Depends(require_tenant)],
+)
 
 
 def _handle_error(e: MasterError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(e))
+
+
+def _handle_auth_error(e: AuthError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(e))
 
 
@@ -174,6 +203,51 @@ def api_update_customer(
 def api_delete_customer(customers_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         delete_customer(db, customers_id)
+        db.commit()
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/locationtyps", response_model=list[LocationTypOut])
+def api_list_locationtyps(db: Annotated[Session, Depends(get_db)]):
+    return list_locationtyps(db)
+
+
+@router.post("/locationtyps", response_model=LocationTypOut, status_code=201)
+def api_create_locationtyp(
+    payload: LocationTypCreate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = create_locationtyp(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/locationtyps/{locationtyp_id}", response_model=LocationTypOut)
+def api_update_locationtyp(
+    locationtyp_id: int,
+    payload: LocationTypUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        row = update_locationtyp(db, locationtyp_id, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.delete("/locationtyps/{locationtyp_id}", status_code=204, response_class=Response)
+def api_delete_locationtyp(
+    locationtyp_id: int, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        delete_locationtyp(db, locationtyp_id)
         db.commit()
     except MasterError as e:
         db.rollback()
@@ -310,5 +384,39 @@ def api_delete_item(item_id: int, db: Annotated[Session, Depends(get_db)]):
     except MasterError as e:
         db.rollback()
         raise _handle_error(e) from e
+
+
+@router.get("/companies", response_model=list[CompanyMasterOut])
+def api_list_companies(db: Annotated[Session, Depends(get_db)]):
+    return list_companies_master(db)
+
+
+@router.post("/companies", response_model=CompanyMasterOut, status_code=201)
+def api_create_company(payload: CompanyMasterCreate, db: Annotated[Session, Depends(get_db)]):
+    try:
+        return create_company(db, payload)
+    except AuthError as e:
+        db.rollback()
+        raise _handle_auth_error(e) from e
+
+
+@router.put("/companies/{co_id}", response_model=CompanyMasterOut)
+def api_update_company(
+    co_id: int, payload: CompanyMasterUpdate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        return update_company(db, co_id, payload)
+    except AuthError as e:
+        db.rollback()
+        raise _handle_auth_error(e) from e
+
+
+@router.delete("/companies/{co_id}", status_code=204, response_class=Response)
+def api_delete_company(co_id: int, db: Annotated[Session, Depends(get_db)]):
+    try:
+        delete_company(db, co_id)
+    except AuthError as e:
+        db.rollback()
+        raise _handle_auth_error(e) from e
 
 

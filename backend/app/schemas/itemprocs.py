@@ -60,6 +60,8 @@ class ItemProcessFinalItemRead(BaseModel):
     item_nm: str
     itemtyp_cd: str
     customer_cd: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ItemProcessFinalItemsSave(BaseModel):

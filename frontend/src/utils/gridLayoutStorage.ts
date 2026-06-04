@@ -6,7 +6,15 @@ export type StoredGridLayout = {
   widths: Record<string, number>
 }
 
-export function gridStorageKey(gridId: string): string {
+/** Scope = logged-in company + user so each person keeps their own layouts. */
+export function gridLayoutScope(coId: number, userId: number): string {
+  return `${coId}:${userId}`
+}
+
+export function gridStorageKey(gridId: string, layoutScope?: string): string {
+  if (layoutScope) {
+    return `hanalite:grid:${layoutScope}:${gridId}`
+  }
   return `hanalite:grid:${gridId}`
 }
 

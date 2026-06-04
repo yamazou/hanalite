@@ -20,6 +20,7 @@ def item_q_tokens(item_q: str | None) -> list[str]:
 
 def draft_line_matches_item_q(
     *,
+    co_id: int,
     draft_id_col: ColumnElement[int],
     line_model: type,
     line_draft_id_col: InstrumentedAttribute[int],
@@ -58,9 +59,10 @@ def draft_line_matches_item_q(
         .select_from(line_model)
         .outerjoin(Item, Item.item_id == line_model.item_id)
         .where(
+            line_model.co_id == co_id,
             line_draft_id_col == draft_id_col,
             line_model.deleted_at.is_(None),
-            or_(Item.item_id.is_(None), Item.deleted_at.is_(None)),
+            or_(Item.item_id.is_(None), and_(Item.deleted_at.is_(None), Item.co_id == co_id)),
             and_(*(token_predicate(token) for token in tokens)),
         )
     )

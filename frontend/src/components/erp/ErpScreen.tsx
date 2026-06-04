@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { ToolbarHintProvider } from '../../context/ToolbarHintContext'
 import { Alert } from '../Alert'
 import { ErpPanelTitleBar } from './ErpPanelTitleBar'
 import { ErpTitleBarActions } from './ErpTitleBarActions'
@@ -64,34 +65,36 @@ export function ErpScreen({
   const showTitleBar = Boolean(title || hasTitleBarActions)
 
   return (
-    <div className={`erp-screen${className ? ` ${className}` : ''}`}>
-      {showTitleBar ? (
-        <ErpPanelTitleBar title={title ?? ''}>
-          {hasTitleBarActions ? (
-            <ErpTitleBarActions
-              titleActions={titleActions}
-              showSaveGridButton={showSaveGridButton}
-              onSaveGrid={onSaveGrid}
-              saveGridIsDirty={saveGridIsDirty}
-              saveGridDisabled={saveGridDisabled}
-              saveGridLabel={saveGridLabel}
-              saveGridSuccessMessage={saveGridSuccessMessage}
-              saveGridNoChangesMessage={saveGridNoChangesMessage}
-              onRefresh={onRefresh}
-              refreshLabel={refreshLabel}
-              refreshSuccessMessage={refreshSuccessMessage}
-              refreshDisabled={refreshDisabled}
-            />
-          ) : null}
-        </ErpPanelTitleBar>
-      ) : null}
-      {hasMessages ? (
-        <div className="erp-screen-messages" aria-live="polite">
-          {displayError && <Alert type="error" message={displayError} />}
-          {displaySuccess && <Alert type="success" message={displaySuccess} />}
-        </div>
-      ) : null}
-      {children}
-    </div>
+    <ToolbarHintProvider>
+      <div className={`erp-screen${className ? ` ${className}` : ''}`}>
+        {showTitleBar ? (
+          <ErpPanelTitleBar title={title ?? ''}>
+            {hasTitleBarActions ? (
+              <ErpTitleBarActions
+                titleActions={titleActions}
+                showSaveGridButton={showSaveGridButton}
+                onSaveGrid={onSaveGrid}
+                saveGridIsDirty={saveGridIsDirty}
+                saveGridDisabled={saveGridDisabled}
+                saveGridLabel={saveGridLabel}
+                saveGridSuccessMessage={saveGridSuccessMessage}
+                saveGridNoChangesMessage={saveGridNoChangesMessage}
+                onRefresh={onRefresh}
+                refreshLabel={refreshLabel}
+                refreshSuccessMessage={refreshSuccessMessage}
+                refreshDisabled={refreshDisabled}
+              />
+            ) : null}
+          </ErpPanelTitleBar>
+        ) : null}
+        {hasMessages ? (
+          <div className="erp-screen-messages" aria-live="polite">
+            {displayError && <Alert type="error" message={displayError} />}
+            {displaySuccess && <Alert type="success" message={displaySuccess} />}
+          </div>
+        ) : null}
+        {children}
+      </div>
+    </ToolbarHintProvider>
   )
 }

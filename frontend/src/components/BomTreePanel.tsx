@@ -25,6 +25,12 @@ type BomTreePanelProps = {
   expandMode?: BomTreeExpandMode
 }
 
+function treeScrollRoot(viewEl: HTMLDivElement | null): HTMLElement | null {
+  if (!viewEl) return null
+  const body = viewEl.closest('.erp-tree-panel-body')
+  return body instanceof HTMLElement ? body : viewEl
+}
+
 export function BomTreePanel({
   title,
   lines,
@@ -57,7 +63,8 @@ export function BomTreePanel({
   useEffect(() => {
     setExpanded(new Set())
     setExpandAll(false)
-    if (treeViewRef.current) treeViewRef.current.scrollTop = 0
+    const root = treeScrollRoot(treeViewRef.current)
+    if (root) root.scrollTop = 0
   }, [title, linesResetKey])
 
   useEffect(() => {
@@ -85,18 +92,21 @@ export function BomTreePanel({
   }, [])
 
   useEffect(() => {
-    const root = treeViewRef.current
-    if (!root || !highlight) return
-    const active = root.querySelector('.erp-tree-line-highlight')
+    const view = treeViewRef.current
+    const scrollEl = treeScrollRoot(view)
+    if (!view || !scrollEl || !highlight) return
+    const active = view.querySelector('.erp-tree-line-highlight')
     if (!(active instanceof HTMLElement)) return
-    const lineTop = active.offsetTop
-    const lineBottom = lineTop + active.offsetHeight
-    const viewTop = root.scrollTop
-    const viewBottom = viewTop + root.clientHeight
+    const scrollRect = scrollEl.getBoundingClientRect()
+    const lineRect = active.getBoundingClientRect()
+    const lineTop = lineRect.top - scrollRect.top + scrollEl.scrollTop
+    const lineBottom = lineTop + lineRect.height
+    const viewTop = scrollEl.scrollTop
+    const viewBottom = viewTop + scrollEl.clientHeight
     if (lineTop < viewTop) {
-      root.scrollTop = lineTop
+      scrollEl.scrollTop = lineTop
     } else if (lineBottom > viewBottom) {
-      root.scrollTop = lineBottom - root.clientHeight
+      scrollEl.scrollTop = lineBottom - scrollEl.clientHeight
     }
   }, [highlight, lines, expanded])
 
@@ -145,7 +155,7 @@ export function BomTreePanel({
                 </ColoredItemCode>
                 {line.item_nm ? (
                   <>
-                    {' '}
+                    <span className="erp-tree-item-sep"> - </span>
                     <ColoredItemName itemId={line.item_id} itemtypId={line.itemtyp_id}>
                       {line.item_nm}
                     </ColoredItemName>

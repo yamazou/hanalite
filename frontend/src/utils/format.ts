@@ -32,8 +32,16 @@ export function formatQty(qty: string | number): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 }
 
+/** Item Code and Item Name with a hyphen separator (tree, titles). */
+export function formatItemCodeName(item_cd: string, item_nm: string): string {
+  const cd = (item_cd ?? '').trim()
+  const nm = (item_nm ?? '').trim()
+  if (cd && nm) return `${cd} - ${nm}`
+  return cd || nm
+}
+
 export function formatItemLabel(item: { item_cd?: string; item_nm: string; item_id?: number }): string {
-  if (item.item_cd) return `${item.item_cd} — ${item.item_nm}`
+  if (item.item_cd) return formatItemCodeName(item.item_cd, item.item_nm)
   if (item.item_id != null) return `${item.item_nm} (ID:${item.item_id})`
   return item.item_nm
 }

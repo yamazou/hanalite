@@ -1,9 +1,5 @@
 from datetime import datetime
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-LocationType = Literal["RM", "Process", "NG", "FG"]
 
 
 def _normalize_itemtyp_color(value: str | None) -> str | None:
@@ -20,19 +16,41 @@ def _normalize_itemtyp_color(value: str | None) -> str | None:
     return s.upper()
 
 
+class LocationTypOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    locationtyp_id: int
+    locationtyp_cd: str
+    locationtyp_nm: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class LocationTypCreate(BaseModel):
+    locationtyp_cd: str = Field(min_length=1, max_length=50)
+    locationtyp_nm: str = Field(min_length=1, max_length=100)
+
+
+class LocationTypUpdate(BaseModel):
+    locationtyp_cd: str = Field(min_length=1, max_length=50)
+    locationtyp_nm: str = Field(min_length=1, max_length=100)
+
+
 class ItemTypOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     itemtyp_id: int
     itemtyp_cd: str
     itemtyp_nm: str
     itemtyp_color: str | None = None
+    locationtyp_id: int | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ItemTypCreate(BaseModel):
     itemtyp_cd: str = Field(min_length=1, max_length=50)
     itemtyp_nm: str = Field(min_length=1, max_length=100)
     itemtyp_color: str | None = None
+    locationtyp_id: int | None = Field(default=None, gt=0)
 
     @field_validator("itemtyp_color", mode="before")
     @classmethod
@@ -46,6 +64,7 @@ class ItemTypUpdate(BaseModel):
     itemtyp_cd: str = Field(min_length=1, max_length=50)
     itemtyp_nm: str = Field(min_length=1, max_length=100)
     itemtyp_color: str | None = None
+    locationtyp_id: int | None = Field(default=None, gt=0)
 
     @field_validator("itemtyp_color", mode="before")
     @classmethod
@@ -61,6 +80,7 @@ class SupplierOut(BaseModel):
     suppliers_cd: str
     suppliers_nm: str
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class SupplierCreate(BaseModel):
@@ -79,6 +99,7 @@ class CustomerOut(BaseModel):
     customers_cd: str
     customers_nm: str
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class CustomerCreate(BaseModel):
@@ -97,6 +118,7 @@ class MoveTypMasterOut(BaseModel):
     movetyps_cd: str
     movetyps_nm: str | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class MoveTypCreate(BaseModel):
@@ -114,28 +136,31 @@ class LocationOut(BaseModel):
     location_id: int
     location_cd: str
     location_nm: str
-    location_type: LocationType
+    locationtyp_id: int | None = None
+    locationtyp_cd: str | None = None
+    locationtyp_nm: str | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LocationCreate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
     location_nm: str = Field(default="", max_length=200)
-    location_type: LocationType
+    locationtyp_id: int | None = Field(default=None, gt=0)
 
 
 class LocationUpdate(BaseModel):
     location_cd: str = Field(min_length=1, max_length=50)
     location_nm: str = Field(default="", max_length=200)
-    location_type: LocationType
+    locationtyp_id: int | None = Field(default=None, gt=0)
 
 
 class ItemListOut(BaseModel):
     item_id: int
     item_cd: str
     item_nm: str
-    itemtyp_id: int
-    itemtyp_nm: str
+    itemtyp_id: int | None
+    itemtyp_nm: str | None = None
     supplier1_id: int | None = None
     supplier1_nm: str | None = None
     supplier2_id: int | None = None
@@ -144,6 +169,8 @@ class ItemListOut(BaseModel):
     customer1_nm: str | None = None
     customer2_id: int | None = None
     customer2_nm: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ItemSearchOut(BaseModel):
@@ -152,15 +179,15 @@ class ItemSearchOut(BaseModel):
     item_id: int
     item_cd: str
     item_nm: str
-    itemtyp_id: int
-    itemtyp_nm: str
+    itemtyp_id: int | None
+    itemtyp_nm: str | None = None
 
 
 class ItemDetailOut(BaseModel):
     item_id: int
     item_cd: str
     item_nm: str
-    itemtyp_id: int
+    itemtyp_id: int | None
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
@@ -171,7 +198,7 @@ class ItemDetailOut(BaseModel):
 class ItemCreate(BaseModel):
     item_cd: str = Field(min_length=1, max_length=50)
     item_nm: str = Field(default="", max_length=200)
-    itemtyp_id: int = Field(gt=0)
+    itemtyp_id: int | None = Field(default=None, gt=0)
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None
@@ -182,7 +209,7 @@ class ItemCreate(BaseModel):
 class ItemUpdate(BaseModel):
     item_cd: str = Field(min_length=1, max_length=50)
     item_nm: str = Field(default="", max_length=200)
-    itemtyp_id: int = Field(gt=0)
+    itemtyp_id: int | None = Field(default=None, gt=0)
     supplier1_id: int | None = None
     supplier2_id: int | None = None
     supplier3_id: int | None = None

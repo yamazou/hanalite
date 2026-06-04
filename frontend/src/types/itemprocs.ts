@@ -54,6 +54,8 @@ export interface ItemProcessFinalItem {
   item_nm: string
   itemtyp_cd: string
   customer_cd: string
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface ItemProcessFinalItemsSave {

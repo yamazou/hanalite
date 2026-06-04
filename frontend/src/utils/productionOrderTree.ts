@@ -3,7 +3,7 @@ import type { ItemProcessesOut } from '../types/itemprocs'
 import type { ItemTyp, LocationMaster } from '../types/masters'
 import type { ProductionOrderDetail } from '../types/production'
 import type { BomTreeLine, ProcessTreeHighlight } from './bomTree'
-import { formatQty } from './format'
+import { formatItemCodeName, formatQty } from './format'
 import {
   appendSavedItemProcessSubtree,
   isWipCatalogItem,
@@ -18,6 +18,7 @@ import {
   type EditInputRow,
   type EditProcessRow,
 } from './productionEdit'
+import { resolveInputFromLocationCdForStep } from './inputFromLocation'
 import { processLinesFromDetail } from './productionProcessDisplay'
 
 export type ProductionTreeData = {
@@ -209,7 +210,7 @@ export function buildProductionOrderTree(params: {
   const { detail, processRows, inputRows, locations, items, itemtyps = [], itemProcessCache, useEditRows } =
     params
   const visited = new Set<number>()
-  const title = `Tree: ${detail.parent_item_cd} ${detail.parent_item_nm}`
+  const title = `Tree: ${formatItemCodeName(detail.parent_item_cd, detail.parent_item_nm)}`
   const lines: BomTreeLine[] = [
     {
       indent: 0,
@@ -247,7 +248,15 @@ export function buildProductionOrderTree(params: {
         inputRows.filter((row) => row.line_no === proc.line_no && isTreeVisibleInputRow(row))
       )
       for (const inp of inputs) {
-        const fromLoc = locations.find((loc) => loc.location_id === inp.from_location_id)
+        const fromCd = resolveInputFromLocationCdForStep(
+          inp.line_no,
+          inp.item_id,
+          processRows,
+          locations,
+          items,
+          itemtyps,
+          isBlankProcessRow
+        )
         const itemId = inp.item_id !== '' ? Number(inp.item_id) : undefined
         const hasWipSubtree =
           itemId != null &&
@@ -261,7 +270,7 @@ export function buildProductionOrderTree(params: {
             item_cd: inp.item_cd,
             item_nm: inp.item_nm,
             req_qty: inp.req_qty,
-            from_location_cd: fromLoc?.location_cd ?? '',
+            from_location_cd: fromCd,
             level: 1,
           },
           wipCd,
@@ -307,6 +316,19 @@ export function buildProductionOrderTree(params: {
           String(a.item_cd).localeCompare(String(b.item_cd))
       )
     for (const inp of inputs) {
+      const processRowsForResolve = detail.lines.map((ln) => ({
+        line_no: ln.line_no,
+        wip_location_id: ln.wip_location_id,
+      }))
+      const fromCd = resolveInputFromLocationCdForStep(
+        inp.line_no,
+        inp.item_id,
+        processRowsForResolve,
+        locations,
+        items,
+        itemtyps,
+        () => false
+      )
       const hasWipSubtree =
         itemProcessCache?.has(inp.item_id) &&
         (itemProcessCache.get(inp.item_id)?.processes.length ?? 0) > 0 &&
@@ -318,7 +340,7 @@ export function buildProductionOrderTree(params: {
           item_cd: inp.item_cd,
           item_nm: inp.item_nm,
           req_qty: inp.req_qty,
-          from_location_cd: inp.from_location_cd ?? '',
+          from_location_cd: fromCd,
           level: inp.level,
         },
         line.wip_location_cd,

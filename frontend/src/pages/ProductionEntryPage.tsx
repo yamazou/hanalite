@@ -372,6 +372,9 @@ export function ProductionEntryPage() {
             status: detail.status,
             orderPlannedQty: detail.planned_qty,
             processRows: editProcessRows,
+            locations,
+            items,
+            itemtyps,
           })
           const processRows = editProcessRows.filter((r) => !isBlankProcessRow(r))
           const activeInputRows = editInputRows.filter(isActiveInputRow)
@@ -436,6 +439,9 @@ export function ProductionEntryPage() {
             status: row.status,
             orderPlannedQty: row.planned_qty,
             processRows: editProcessRows,
+            locations,
+            items,
+            itemtyps,
           })
           const processRows = editProcessRows.filter((r) => !isBlankProcessRow(r))
           const activeInputRows = editInputRows.filter(isActiveInputRow)
@@ -493,7 +499,7 @@ export function ProductionEntryPage() {
           <form className="erp-search-form erp-search-form-production-entry" onSubmit={createOrder}>
             <div className="erp-production-entry-row">
               <label className="erp-search-field erp-search-field-date erp-search-field-with-label">
-                <span className="bom-field-label bom-field-label-required">Production Date</span>
+                <span className="bom-field-label bom-field-label-required">Planned Date</span>
                 <input
                   className="erp-input"
                   type="date"
@@ -535,7 +541,7 @@ export function ProductionEntryPage() {
                 />
               </label>
               <label className="erp-search-field erp-search-field-qty erp-search-field-with-label">
-                <span className="bom-field-label bom-field-label-required">Plan Qty</span>
+                <span className="bom-field-label bom-field-label-required">Planned Qty</span>
                 <input
                   className="erp-input"
                   type="number"

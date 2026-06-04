@@ -51,15 +51,27 @@ export function DraftDetailPanel({
     locations,
   } = edit
 
+  const hideLocation = variant === 'receipt'
+
   const lineColumns = useMemo((): GridColumnDef[] => {
-    return [
+    const cols: GridColumnDef[] = [
       { key: 'item_cd', label: copy.itemCdLabel, defaultWidth: 110 },
       { key: 'item_nm', label: copy.itemNmLabel, defaultWidth: 160 },
       { key: 'lot', label: copy.lotLabel, defaultWidth: 100 },
-      { key: 'location', label: copy.locationLabel, defaultWidth: 140 },
-      { key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' },
     ]
-  }, [copy.itemCdLabel, copy.itemNmLabel, copy.locationLabel, copy.lotLabel, copy.qtyLabel])
+    if (!hideLocation) {
+      cols.push({ key: 'location', label: copy.locationLabel, defaultWidth: 140 })
+    }
+    cols.push({ key: 'qty', label: copy.qtyLabel, defaultWidth: 72, className: 'erp-col-num' })
+    return cols
+  }, [
+    hideLocation,
+    copy.itemCdLabel,
+    copy.itemNmLabel,
+    copy.locationLabel,
+    copy.lotLabel,
+    copy.qtyLabel,
+  ])
 
   const lineGridId = `${variant}-lines-readonly-v2`
 
@@ -147,6 +159,7 @@ export function DraftDetailPanel({
         <DraftEditableLineGrid
           variant={variant}
           scope="detail"
+          hideLocation={hideLocation}
           canEdit={canEdit}
           lines={editLines}
           items={items}
@@ -191,7 +204,6 @@ export function DraftDetailPanel({
         </ExcelLikeGridTable>
       )}
 
-      {canEdit && <p className="muted erp-detail-hint">{copy.listLinesEditHint}</p>}
     </div>
   )
 }

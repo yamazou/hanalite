@@ -5,21 +5,38 @@ from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.tenant_mixin import TenantMixin
 
 
-class ItemTyp(Base):
+class LocationTyp(TenantMixin, Base):
+    __tablename__ = "m_locationtyps"
+
+    locationtyp_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    locationtyp_cd: Mapped[str] = mapped_column(String(50))
+    locationtyp_nm: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ItemTyp(TenantMixin, Base):
     __tablename__ = "m_itemtyps"
 
     itemtyp_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     itemtyp_cd: Mapped[str] = mapped_column(String(50))
     itemtyp_nm: Mapped[str] = mapped_column(String(100))
     itemtyp_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    locationtyp_id: Mapped[int | None] = mapped_column(
+        ForeignKey("m_locationtyps.locationtyp_id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    locationtyp: Mapped["LocationTyp | None"] = relationship()
 
-class Supplier(Base):
+
+class Supplier(TenantMixin, Base):
     __tablename__ = "m_suppliers"
 
     suppliers_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -30,7 +47,7 @@ class Supplier(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class Customer(Base):
+class Customer(TenantMixin, Base):
     __tablename__ = "m_customers"
 
     customers_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -41,25 +58,31 @@ class Customer(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class Location(Base):
+class Location(TenantMixin, Base):
     __tablename__ = "m_locations"
 
     location_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     location_cd: Mapped[str] = mapped_column(String(50))
     location_nm: Mapped[str] = mapped_column(String(200))
-    location_type: Mapped[str] = mapped_column(String(20), default="Process")
+    locationtyp_id: Mapped[int | None] = mapped_column(
+        ForeignKey("m_locationtyps.locationtyp_id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    locationtyp: Mapped["LocationTyp | None"] = relationship()
 
-class Item(Base):
+
+class Item(TenantMixin, Base):
     __tablename__ = "m_items"
 
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     item_cd: Mapped[str] = mapped_column(String(50))
     item_nm: Mapped[str] = mapped_column(String(200))
-    itemtyp_id: Mapped[int] = mapped_column(ForeignKey("m_itemtyps.itemtyp_id"))
+    itemtyp_id: Mapped[int | None] = mapped_column(
+        ForeignKey("m_itemtyps.itemtyp_id"), nullable=True
+    )
     supplier1_id: Mapped[int | None] = mapped_column(ForeignKey("m_suppliers.suppliers_id"), nullable=True)
     supplier2_id: Mapped[int | None] = mapped_column(ForeignKey("m_suppliers.suppliers_id"), nullable=True)
     supplier3_id: Mapped[int | None] = mapped_column(ForeignKey("m_suppliers.suppliers_id"), nullable=True)
@@ -72,7 +95,7 @@ class Item(Base):
     itemtyp: Mapped["ItemTyp"] = relationship()
 
 
-class ItemProc(Base):
+class ItemProc(TenantMixin, Base):
     __tablename__ = "m_itemprocs"
 
     itemproc_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -93,7 +116,7 @@ class ItemProc(Base):
     )
 
 
-class ItemProcInput(Base):
+class ItemProcInput(TenantMixin, Base):
     __tablename__ = "m_itemproc_inputs"
 
     itemproc_input_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -109,7 +132,7 @@ class ItemProcInput(Base):
     item: Mapped["Item"] = relationship(foreign_keys=[item_id])
 
 
-class ItemProcRoot(Base):
+class ItemProcRoot(TenantMixin, Base):
     """Output items registered for Item Process (may exist before process steps are defined)."""
 
     __tablename__ = "m_itemproc_roots"

@@ -8,7 +8,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
 from app.config import settings
+from app.deps import TenantContextMiddleware
 from app.db_schema import (
+    ensure_auth_and_tenant_columns,
     ensure_drop_m_boms_table,
     ensure_itemprocs_tables,
     ensure_itemproc_roots_table,
@@ -20,16 +22,20 @@ from app.db_schema import (
     ensure_m_itemtyps_itemtyp_cd,
     ensure_m_itemtyps_itemtyp_color,
     ensure_m_movetyps_cd_nm,
+    ensure_m_locationtyps_and_itemtyp_link,
+    ensure_m_locations_locationtyp_id,
+    ensure_m_items_nullable_itemtyp_id,
     ensure_prd_order_inputs_columns,
     ensure_prd_order_lines_columns,
     ensure_prd_orders_header_columns,
 )
-from app.routers import delivery_drafts, drafts, health, inventory, item_processes, masters, production
+from app.routers import auth, delivery_drafts, drafts, health, inventory, item_processes, masters, production
 
 
 def _run_startup_schema_patches() -> None:
     """Apply lightweight schema patches; retry while MySQL is still starting (e.g. XAMPP boot)."""
     patches = (
+        ensure_auth_and_tenant_columns,
         ensure_drop_m_boms_table,
         ensure_m_customers_and_item_customer_cols,
         ensure_supplier_and_customer_codes,
@@ -44,6 +50,9 @@ def _run_startup_schema_patches() -> None:
         ensure_m_itemtyps_itemtyp_cd,
         ensure_m_itemtyps_itemtyp_color,
         ensure_m_movetyps_cd_nm,
+        ensure_m_locationtyps_and_itemtyp_link,
+        ensure_m_locations_locationtyp_id,
+        ensure_m_items_nullable_itemtyp_id,
     )
     max_attempts = 30
     delay_seconds = 2.0
@@ -82,10 +91,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TenantContextMiddleware)
 
 prefix = settings.api_prefix
 
 app.include_router(health.router, prefix=prefix)
+app.include_router(auth.router, prefix=prefix)
+app.include_router(auth.protected, prefix=prefix)
 app.include_router(drafts.router, prefix=prefix)
 app.include_router(delivery_drafts.router, prefix=prefix)
 app.include_router(masters.router, prefix=prefix)
@@ -99,7 +111,10 @@ async def unhandled_exception_handler(_request: Request, exc: Exception) -> JSON
     """Return the real error message instead of a generic 500 (helps diagnose MySQL vs app bugs)."""
     if isinstance(exc, HTTPException):
         raise exc
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    detail = str(exc)
+    if "was created in a different Context" in detail:
+        detail = "Internal server error. Please retry the request."
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 @app.get("/")

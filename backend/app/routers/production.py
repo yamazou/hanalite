@@ -3,10 +3,13 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+
+from app.deps import require_tenant
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.production import (
+    ProductionExcelImportResult,
     ProductionOrderCompleteLineIn,
     ProductionOrderCreate,
     ProductionOrderListItem,
@@ -30,10 +33,14 @@ from app.services.production import (
 )
 from app.services.production_excel_import import (
     ProductionExcelImportError,
-    parse_excel_to_production_create,
+    preview_production_orders_from_excel,
 )
 
-router = APIRouter(prefix="/production/orders", tags=["production"])
+router = APIRouter(
+    prefix="/production/orders",
+    tags=["production"],
+    dependencies=[Depends(require_tenant)],
+)
 
 
 def _handle_error(e: ProductionError) -> HTTPException:
@@ -79,7 +86,7 @@ def api_get_order(order_id: int, db: Annotated[Session, Depends(get_db)]):
 @router.post("", response_model=ProductionOrderRead, status_code=201)
 def api_create_order(payload: ProductionOrderCreate, db: Annotated[Session, Depends(get_db)]):
     try:
-        row = create_order(db, payload)
+        row = create_order(db, payload, source_type=payload.source_type)
         db.commit()
         return row
     except ProductionError as e:
@@ -87,11 +94,12 @@ def api_create_order(payload: ProductionOrderCreate, db: Annotated[Session, Depe
         raise _handle_error(e) from e
 
 
-@router.post("/import", response_model=ProductionOrderRead, status_code=201)
+@router.post("/import", response_model=ProductionExcelImportResult)
 async def api_import_order_excel(
     db: Annotated[Session, Depends(get_db)],
     file: UploadFile = File(..., description="Excel .xlsx file"),
 ):
+    """Parse Excel into import rows for the grid; persist via create/update order APIs."""
     filename = (file.filename or "").lower()
     if not filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported.")
@@ -99,12 +107,9 @@ async def api_import_order_excel(
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file.")
     try:
-        payload = parse_excel_to_production_create(db, raw)
-        row = create_order(db, payload, source_type="excel")
-        db.commit()
-        return row
-    except (ProductionExcelImportError, ProductionError) as e:
-        db.rollback()
+        preview_rows, row_errors = preview_production_orders_from_excel(db, raw)
+        return ProductionExcelImportResult(rows=preview_rows, errors=row_errors)
+    except ProductionExcelImportError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

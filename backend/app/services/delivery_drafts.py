@@ -3,6 +3,7 @@ from datetime import date, datetime, time
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.deps import get_tenant
 from app.models.drafts import SlsDeliveryDraft, SlsDeliveryDraftLine
 from app.models.masters import Item, Supplier
 from app.schemas.delivery_drafts import (
@@ -24,6 +25,7 @@ from app.services.draft_item_resolve import (
 from app.services.draft_search import draft_line_matches_item_q
 from app.services.inventory import InventoryError, apply_movement
 from app.services.masters import MasterError, resolve_location_id
+from app.tenant import stamp_new, stamp_update
 
 
 class DeliveryDraftServiceError(Exception):
@@ -42,8 +44,10 @@ def _item_ref_from_delivery_line(
 def _itemtyp_id_by_item_cd(db: Session, cds: set[str]) -> dict[str, int]:
     if not cds:
         return {}
+    ctx = get_tenant()
     rows = db.execute(
         select(Item.item_cd, Item.itemtyp_id).where(
+            Item.co_id == ctx.co_id,
             Item.deleted_at.is_(None),
             Item.item_cd.in_(list(cds)),
         )
@@ -104,6 +108,7 @@ def create_delivery_draft(
     source_type: str = "manual",
     require_lines: bool = True,
 ) -> SlsDeliveryDraft:
+    ctx = get_tenant()
     if require_lines and not payload.lines:
         raise DeliveryDraftServiceError("At least one line is required.")
 
@@ -118,6 +123,7 @@ def create_delivery_draft(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(draft, ctx)
     db.add(draft)
     db.flush()
 
@@ -136,9 +142,10 @@ def _add_delivery_line_entity(
     default_line_no: int,
     now: datetime,
 ) -> SlsDeliveryDraftLine:
+    ctx = get_tenant()
     item_id, item_cd, item_nm = _item_ref_from_delivery_line(line)
     if item_id is not None:
-        item = db.get(Item, item_id)
+        item = db.scalar(select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id))
         if not item or item.deleted_at is not None:
             raise DeliveryDraftServiceError(f"Item {item_id} not found.")
         item_cd = item_cd or item.item_cd
@@ -161,15 +168,18 @@ def _add_delivery_line_entity(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(entity, ctx)
     db.add(entity)
     return entity
 
 
 def add_delivery_draft_line(db: Session, draft_id: int, line: DeliveryDraftLineCreate) -> DeliveryDraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(selectinload(SlsDeliveryDraft.lines))
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -188,10 +198,12 @@ def add_delivery_draft_line(db: Session, draft_id: int, line: DeliveryDraftLineC
 
 
 def _load_registered_delivery_for_update(db: Session, draft_id: int) -> SlsDeliveryDraft:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(selectinload(SlsDeliveryDraft.lines))
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -211,6 +223,7 @@ def _apply_delivery_line_upsert(
     lines: list[DeliveryDraftLineUpsert],
     now: datetime,
 ) -> None:
+    ctx = get_tenant()
     active = {
         ln.sls_delivery_draft_line_id: ln
         for ln in draft.lines
@@ -226,7 +239,9 @@ def _apply_delivery_line_upsert(
                 raise DeliveryDraftServiceError(f"Line {line_in.sls_delivery_draft_line_id} not found.")
             item_id, item_cd, item_nm = _item_ref_from_delivery_line(line_in)
             if item_id is not None:
-                item = db.get(Item, item_id)
+                item = db.scalar(
+                    select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id)
+                )
                 if not item or item.deleted_at is not None:
                     raise DeliveryDraftServiceError(f"Item {item_id} not found.")
                 item_cd = item_cd or item.item_cd
@@ -244,7 +259,7 @@ def _apply_delivery_line_upsert(
             entity.lot = line_in.lot.strip()
             entity.qty = line_in.qty
             entity.line_no = line_no
-            entity.updated_at = now
+            stamp_update(entity, ctx)
             kept_ids.add(entity.sls_delivery_draft_line_id)
         else:
             _add_delivery_line_entity(db, draft_id, line_in, line_no, now)
@@ -252,17 +267,18 @@ def _apply_delivery_line_upsert(
     for line_id, entity in active.items():
         if line_id not in kept_ids:
             entity.deleted_at = now
-            entity.updated_at = now
+            stamp_update(entity, ctx)
 
 
 def update_delivery_draft(db: Session, draft_id: int, payload: DeliveryDraftUpdate) -> DeliveryDraftRead:
     draft = _load_registered_delivery_for_update(db, draft_id)
+    ctx = get_tenant()
     now = datetime.now()
     draft.delivery_at = payload.delivery_at
     draft.suppliers_id = payload.suppliers_id
     draft.reference_no = payload.reference_no
     draft.notes = payload.notes
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     _apply_delivery_line_upsert(db, draft_id, draft, payload.lines, now)
     db.commit()
     return get_delivery_draft(db, draft_id)
@@ -281,6 +297,7 @@ def list_delivery_drafts(
     item_q: str | None = None,
     lot: str | None = None,
 ) -> list[DeliveryDraftListItem]:
+    ctx = get_tenant()
     stmt = (
         select(
             SlsDeliveryDraft.sls_delivery_draft_id,
@@ -301,7 +318,10 @@ def list_delivery_drafts(
             (SlsDeliveryDraftLine.sls_delivery_draft_id == SlsDeliveryDraft.sls_delivery_draft_id)
             & (SlsDeliveryDraftLine.deleted_at.is_(None)),
         )
-        .where(SlsDeliveryDraft.deleted_at.is_(None))
+        .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
+            SlsDeliveryDraft.deleted_at.is_(None),
+        )
         .group_by(SlsDeliveryDraft.sls_delivery_draft_id)
         .order_by(SlsDeliveryDraft.created_at.desc())
     )
@@ -330,6 +350,7 @@ def list_delivery_drafts(
             )
         )
     item_match = draft_line_matches_item_q(
+        co_id=ctx.co_id,
         draft_id_col=SlsDeliveryDraft.sls_delivery_draft_id,
         line_model=SlsDeliveryDraftLine,
         line_draft_id_col=SlsDeliveryDraftLine.sls_delivery_draft_id,
@@ -370,6 +391,7 @@ def list_delivery_drafts(
 
 
 def get_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(
@@ -378,6 +400,7 @@ def get_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
             selectinload(SlsDeliveryDraft.supplier),
         )
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -395,10 +418,12 @@ def get_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
 
 
 def approve_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(selectinload(SlsDeliveryDraft.lines))
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -435,6 +460,7 @@ def approve_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
             )
         draft.status = "approved"
         draft.approved_at = datetime.now()
+        stamp_update(draft, ctx)
         db.commit()
     except InventoryError as e:
         db.rollback()
@@ -444,10 +470,12 @@ def approve_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
 
 
 def cancel_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(selectinload(SlsDeliveryDraft.lines))
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -479,6 +507,7 @@ def cancel_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
             draft.cancelled_at = datetime.now()
         else:
             raise DeliveryDraftServiceError(f"Draft cannot be cancelled (current: {draft.status}).")
+        stamp_update(draft, ctx)
         db.commit()
     except InventoryError as e:
         db.rollback()
@@ -488,9 +517,11 @@ def cancel_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
 
 
 def restore_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -504,12 +535,13 @@ def restore_delivery_draft(db: Session, draft_id: int) -> DeliveryDraftRead:
     now = datetime.now()
     draft.status = "registered"
     draft.cancelled_at = None
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     db.commit()
     return get_delivery_draft(db, draft_id)
 
 
 def suggest_delivery_draft_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    ctx = get_tenant()
     stmt = (
         select(SlsDeliveryDraftLine.lot)
         .distinct()
@@ -518,6 +550,8 @@ def suggest_delivery_draft_lots(db: Session, q: str | None = None, *, limit: int
             SlsDeliveryDraft.sls_delivery_draft_id == SlsDeliveryDraftLine.sls_delivery_draft_id,
         )
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
+            SlsDeliveryDraftLine.co_id == ctx.co_id,
             SlsDeliveryDraft.deleted_at.is_(None),
             SlsDeliveryDraftLine.deleted_at.is_(None),
         )
@@ -532,10 +566,12 @@ def suggest_delivery_draft_lots(db: Session, q: str | None = None, *, limit: int
 
 
 def delete_delivery_draft(db: Session, draft_id: int) -> None:
+    ctx = get_tenant()
     draft = db.scalar(
         select(SlsDeliveryDraft)
         .options(selectinload(SlsDeliveryDraft.lines))
         .where(
+            SlsDeliveryDraft.co_id == ctx.co_id,
             SlsDeliveryDraft.sls_delivery_draft_id == draft_id,
             SlsDeliveryDraft.deleted_at.is_(None),
         )
@@ -550,9 +586,9 @@ def delete_delivery_draft(db: Session, draft_id: int) -> None:
     for line in draft.lines:
         if line.deleted_at is None:
             line.deleted_at = now
-            line.updated_at = now
+            stamp_update(line, ctx)
     draft.deleted_at = now
-    draft.updated_at = now
+    stamp_update(draft, ctx)
     db.commit()
 
 

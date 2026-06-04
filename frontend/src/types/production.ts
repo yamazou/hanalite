@@ -154,6 +154,24 @@ export interface ProductionOrderDetail extends ProductionOrderListItem {
 
 }
 
+export interface ProductionExcelImportPreviewRow {
+  excel_row: number
+  action: 'insert' | 'update'
+  production_order_id?: number | null
+  production_date: string
+  reference_no: string | null
+  parent_item_id: number
+  parent_item_cd: string
+  parent_item_nm: string
+  planned_qty: string | number
+  lot: string
+}
+
+export interface ProductionExcelImportResult {
+  rows: ProductionExcelImportPreviewRow[]
+  errors: string[]
+}
+
 
 
 export interface ProductionOrderCreatePayload {
@@ -167,6 +185,8 @@ export interface ProductionOrderCreatePayload {
   planned_qty: number
 
   lot: string
+
+  source_type?: ProductionSourceType
 
   notes?: string | null
 

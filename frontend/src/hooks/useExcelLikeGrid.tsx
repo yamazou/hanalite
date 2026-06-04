@@ -124,15 +124,15 @@ export function useExcelLikeGrid<T>({
 
   const filterOptions = useMemo(() => {
     if (!filterMenu) return []
-    if (getFilterOptions) {
-      return getFilterOptions(filterMenu.key)
-    }
     const filterOptionSource = getFilterOptionRows?.() ?? filterOptionRows ?? rows
-    return collectUniqueFilterValues(
-      filterOptionSource,
-      filterMenu.key,
-      resolveFilterOptionValue
-    )
+    if (getFilterOptionRows || filterOptionRows || !getFilterOptions) {
+      return collectUniqueFilterValues(
+        filterOptionSource,
+        filterMenu.key,
+        resolveFilterOptionValue
+      )
+    }
+    return getFilterOptions(filterMenu.key)
   }, [
     filterMenu,
     filterOptionRows,

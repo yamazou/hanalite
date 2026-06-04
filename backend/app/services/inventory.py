@@ -4,8 +4,10 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.deps import get_tenant
 from app.models.inventory import InvCurrent, InvGrgi, MoveTyp
 from app.services.masters import resolve_location_id
+from app.tenant import stamp_new, stamp_update
 
 
 class InventoryError(Exception):
@@ -13,8 +15,13 @@ class InventoryError(Exception):
 
 
 def _get_movetyp(db: Session, name: str) -> MoveTyp:
+    ctx = get_tenant()
     row = db.scalar(
-        select(MoveTyp).where(MoveTyp.movetyps_cd == name, MoveTyp.deleted_at.is_(None))
+        select(MoveTyp).where(
+            MoveTyp.movetyps_cd == name,
+            MoveTyp.co_id == ctx.co_id,
+            MoveTyp.deleted_at.is_(None),
+        )
     )
     if not row:
         raise InventoryError(f"Movement type '{name}' not found.")
@@ -37,12 +44,14 @@ def apply_movement(
     move_qty: positive for GR, negative for reversal/cancel.
     movetyps_cd: GR, GI, or CAN
     """
+    ctx = get_tenant()
     movetyp = _get_movetyp(db, movetyps_cd)
     move_qty = Decimal(move_qty)
 
     current = db.scalar(
         select(InvCurrent)
         .where(
+            InvCurrent.co_id == ctx.co_id,
             InvCurrent.item_id == item_id,
             InvCurrent.location_id == location_id,
             InvCurrent.lot == lot,
@@ -67,20 +76,21 @@ def apply_movement(
 
     if current:
         current.qty = new_qty
+        stamp_update(current, ctx)
     else:
         if move_qty <= 0:
             raise InventoryError(f"No stock record for lot '{lot}' at location_id={location_id}.")
         now = datetime.now()
-        db.add(
-            InvCurrent(
-                item_id=item_id,
-                location_id=location_id,
-                qty=new_qty,
-                lot=lot,
-                created_at=now,
-                updated_at=now,
-            )
+        new_current = InvCurrent(
+            item_id=item_id,
+            location_id=location_id,
+            qty=new_qty,
+            lot=lot,
+            created_at=now,
+            updated_at=now,
         )
+        stamp_new(new_current, ctx)
+        db.add(new_current)
 
     now = datetime.now()
     grgi = InvGrgi(
@@ -95,6 +105,7 @@ def apply_movement(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(grgi, ctx)
     db.add(grgi)
     db.flush()
     return grgi
@@ -132,7 +143,10 @@ def apply_movement_by_movetyp_id(
     movetyps_id: int,
     actual_at: datetime,
 ) -> InvGrgi:
-    movetyp = db.get(MoveTyp, movetyps_id)
+    ctx = get_tenant()
+    movetyp = db.scalar(
+        select(MoveTyp).where(MoveTyp.movetyps_id == movetyps_id, MoveTyp.co_id == ctx.co_id)
+    )
     if not movetyp or movetyp.deleted_at is not None:
         raise InventoryError("Movement type not found.")
     if movetyp.movetyps_cd not in ("GR", "GI"):

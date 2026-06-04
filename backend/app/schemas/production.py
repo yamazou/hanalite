@@ -36,6 +36,7 @@ class ProductionOrderCreate(BaseModel):
     planned_qty: Decimal = Field(gt=0)
     lot: str = Field(min_length=1, max_length=50)
     notes: str | None = None
+    source_type: ProductionSourceType = "manual"
 
 
 class ProductionOrderUpdate(BaseModel):
@@ -132,5 +133,25 @@ class ProductionOrderRead(ProductionOrderListItem):
     lines: list[ProductionOrderLineRead]
     inputs: list[ProductionOrderInputRead]
     outputs: list[ProductionOrderOutputRead]
+
+
+class ProductionExcelImportPreviewRow(BaseModel):
+    excel_row: int
+    action: Literal["insert", "update"]
+    production_order_id: int | None = None
+    production_date: date
+    reference_no: str | None
+    parent_item_id: int
+    parent_item_cd: str
+    parent_item_nm: str
+    planned_qty: Decimal
+    lot: str
+
+
+class ProductionExcelImportResult(BaseModel):
+    """Parsed Excel rows for grid merge; persist on client Update (no DB write here)."""
+
+    rows: list[ProductionExcelImportPreviewRow] = []
+    errors: list[str] = []
 
 

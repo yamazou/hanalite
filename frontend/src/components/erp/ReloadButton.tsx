@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react'
-import { TOOLBAR_HINT_AUTO_HIDE_MS } from '../../constants/feedbackTiming'
+import { useCallback, useState } from 'react'
+import {
+  useRegisterToolbarHintClear,
+  useToolbarHintContext,
+} from '../../context/ToolbarHintContext'
+import { ToolbarFeedback } from '../ToolbarFeedback'
 
 const DEFAULT_SUCCESS = 'Reset.'
 
@@ -16,17 +20,14 @@ export function ReloadButton({
   label = 'Reset',
   successMessage = DEFAULT_SUCCESS,
 }: Props) {
+  const ctx = useToolbarHintContext()
   const [hint, setHint] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!hint) return
-    const t = window.setTimeout(() => setHint(null), TOOLBAR_HINT_AUTO_HIDE_MS)
-    return () => window.clearTimeout(t)
-  }, [hint])
+  const clearHint = useCallback(() => setHint(null), [])
+  useRegisterToolbarHintClear(clearHint)
 
   const handleClick = async () => {
-    setHint(null)
+    ctx?.clearToolbarHints()
     setLoading(true)
     try {
       await onReload()
@@ -46,7 +47,7 @@ export function ReloadButton({
       >
         {label}
       </button>
-      {hint ? <span className="erp-save-grid-hint muted">{hint}</span> : null}
+      <ToolbarFeedback message={hint} type="success" />
     </span>
   )
 }

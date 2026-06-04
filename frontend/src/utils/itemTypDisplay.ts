@@ -40,12 +40,14 @@ export function allowedItemtypIds(
   )
 }
 
-export function filterItemListRowsByItemtypIds<T extends { itemtyp_id: number }>(
+export function filterItemListRowsByItemtypIds<T extends { itemtyp_id: number | null }>(
   rows: T[],
   allowedIds: Set<number>
 ): T[] {
   if (allowedIds.size === 0) return []
-  return rows.filter((row) => allowedIds.has(row.itemtyp_id))
+  return rows.filter(
+    (row) => row.itemtyp_id != null && allowedIds.has(row.itemtyp_id)
+  )
 }
 
 export function findItemtypByKind(itemtyps: ItemTyp[], kind: 'WIP' | 'FG'): ItemTyp | undefined {

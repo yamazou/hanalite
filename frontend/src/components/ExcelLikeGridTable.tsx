@@ -1,4 +1,4 @@
-import { useEffect, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
 import { useGridColumnLayout, type GridColumnLayout } from '../hooks/useGridColumnLayout'
 import type { GridColumnLayoutOptions } from '../hooks/useGridColumnLayoutOptions'
 import {
@@ -68,16 +68,24 @@ export function ExcelLikeGridTable<T>({
     rowCount: layoutOptions?.rowCount ?? grid.displayRows.length,
   })
 
-  useEffect(() => {
-    grid.onLayoutReady(layout)
-  }, [layout, grid.onLayoutReady])
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
+  const onLayoutApiRef = useRef(onLayoutApi)
+  onLayoutApiRef.current = onLayoutApi
 
   useEffect(() => {
-    onLayoutApi?.({
-      saveLayout: layout.saveLayout,
-      isDirty: layout.isDirty,
+    grid.onLayoutReady(layoutRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- layout object is recreated each render
+  }, [layout.isDirty, grid.onLayoutReady])
+
+  useEffect(() => {
+    const current = layoutRef.current
+    onLayoutApiRef.current?.({
+      saveLayout: current.saveLayout,
+      isDirty: current.isDirty,
     })
-  }, [layout.saveLayout, layout.isDirty, onLayoutApi])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- saveLayout identity can change without dirty; parent only needs dirty transitions
+  }, [layout.isDirty])
 
   const handleContextMenu = (event: MouseEvent) => {
     if (onGridContextMenu) {

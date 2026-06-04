@@ -11,10 +11,13 @@ CREATE TABLE IF NOT EXISTS m_itemtyps (
     itemtyp_cd   VARCHAR(50) NOT NULL,
     itemtyp_nm   VARCHAR(100) NOT NULL,
     itemtyp_color VARCHAR(7) NULL DEFAULT NULL,
+    locationtyp_id INT UNSIGNED NULL DEFAULT NULL,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at   DATETIME NULL DEFAULT NULL,
-    PRIMARY KEY (itemtyp_id)
+    PRIMARY KEY (itemtyp_id),
+    KEY idx_itemtyps_locationtyp (locationtyp_id),
+    CONSTRAINT fk_itemtyps_locationtyp FOREIGN KEY (locationtyp_id) REFERENCES m_locationtyps (locationtyp_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_suppliers (
@@ -39,6 +42,17 @@ CREATE TABLE IF NOT EXISTS m_customers (
     UNIQUE KEY uk_customers_cd (customers_cd)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS m_locationtyps (
+    locationtyp_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    locationtyp_cd VARCHAR(50) NOT NULL,
+    locationtyp_nm VARCHAR(100) NOT NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at   DATETIME NULL DEFAULT NULL,
+    PRIMARY KEY (locationtyp_id),
+    UNIQUE KEY uk_locationtyps_cd (locationtyp_cd)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS m_movetyps (
     movetyps_id  INT UNSIGNED NOT NULL AUTO_INCREMENT,
     movetyps_cd  VARCHAR(50)  NOT NULL,
@@ -51,23 +65,25 @@ CREATE TABLE IF NOT EXISTS m_movetyps (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_locations (
-    location_id   INT UNSIGNED NOT NULL AUTO_INCREMENT,
-    location_cd   VARCHAR(50)  NOT NULL,
-    location_nm   VARCHAR(200) NOT NULL,
-    location_type VARCHAR(20)  NOT NULL DEFAULT 'Process',
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at    DATETIME NULL DEFAULT NULL,
+    location_id     INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    location_cd     VARCHAR(50)  NOT NULL,
+    location_nm     VARCHAR(200) NOT NULL,
+    locationtyp_id  INT UNSIGNED NULL DEFAULT NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at      DATETIME NULL DEFAULT NULL,
     PRIMARY KEY (location_id),
     UNIQUE KEY uk_locations_cd (location_cd),
-    UNIQUE KEY uk_locations_nm (location_nm)
+    UNIQUE KEY uk_locations_nm (location_nm),
+    KEY idx_locations_locationtyp (locationtyp_id),
+    CONSTRAINT fk_locations_locationtyp FOREIGN KEY (locationtyp_id) REFERENCES m_locationtyps (locationtyp_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS m_items (
     item_id      INT UNSIGNED NOT NULL AUTO_INCREMENT,
     item_cd      VARCHAR(50)  NOT NULL COMMENT 'Business item code (unique)',
     item_nm      VARCHAR(200) NOT NULL,
-    itemtyp_id   INT UNSIGNED NOT NULL,
+    itemtyp_id   INT UNSIGNED NULL,
     supplier1_id INT UNSIGNED NULL DEFAULT NULL,
     supplier2_id INT UNSIGNED NULL DEFAULT NULL,
     supplier3_id INT UNSIGNED NULL DEFAULT NULL,
@@ -153,10 +169,21 @@ SET FOREIGN_KEY_CHECKS = 1;
 INSERT INTO m_movetyps (movetyps_cd) VALUES ('GR'), ('GI'), ('MV')
 ON DUPLICATE KEY UPDATE movetyps_cd = VALUES(movetyps_cd);
 
-INSERT INTO m_locations (location_cd, location_nm, location_type) VALUES ('MAIN', 'Main Location', 'Process')
+INSERT INTO m_locationtyps (locationtyp_cd, locationtyp_nm) VALUES
+    ('RM', 'Raw Material'),
+    ('Process', 'Process'),
+    ('NG', 'NG'),
+    ('FG', 'Finished Goods')
+ON DUPLICATE KEY UPDATE locationtyp_nm = VALUES(locationtyp_nm);
+
+INSERT INTO m_locations (location_cd, location_nm, locationtyp_id)
+SELECT 'MAIN', 'Main Location', t.locationtyp_id
+FROM m_locationtyps t
+WHERE t.locationtyp_cd = 'Process' AND t.deleted_at IS NULL
+LIMIT 1
 ON DUPLICATE KEY UPDATE
     location_nm = VALUES(location_nm),
-    location_type = VALUES(location_type);
+    locationtyp_id = VALUES(locationtyp_id);
 
 INSERT INTO m_itemtyps (itemtyp_cd, itemtyp_nm) VALUES
     ('RM', 'Raw Material'),

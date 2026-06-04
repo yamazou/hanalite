@@ -2,6 +2,7 @@ import type { Item } from '../types'
 import type { ItemTyp } from '../types/masters'
 import type {
   ProductionOrderCreatePayload,
+  ProductionOrderDetail,
   ProductionOrderListItem,
   ProductionOrderUpdatePayload,
 } from '../types/production'
@@ -24,6 +25,8 @@ export type EditProductionOrderHeaderRow = {
   parent_item_nm: string
   planned_qty: string
   lot: string
+  /** Set when row was added from Excel import; create with source_type excel on Update. */
+  pendingExcelImport?: boolean
 }
 
 let nextKey = 0
@@ -138,6 +141,7 @@ export function buildCreateProductionOrderPayload(
     parent_item_id: Number(row.parent_item_id),
     planned_qty: Number(row.planned_qty),
     lot: row.lot.trim() || '*',
+    source_type: row.pendingExcelImport ? 'excel' : 'manual',
   }
 }
 
@@ -159,6 +163,50 @@ export function filterProductionOrderParentItems<T extends { itemtyp_id: number 
 ): T[] {
   const allowedIds = allowedItemtypIds(itemtyps, PRODUCTION_ORDER_PARENT_ITEMTYP_CDS)
   return filterItemListRowsByItemtypIds(items, allowedIds)
+}
+
+/** Minimal order detail for Process / Input panels before save (Item Code entered on header). */
+export function buildPreviewDetailFromHeaderRow(
+  row: EditProductionOrderHeaderRow
+): ProductionOrderDetail | null {
+  if (row.parent_item_id === '') return null
+  const plannedRaw = row.planned_qty.trim()
+  const plannedNum = Number(plannedRaw)
+  const plannedQty =
+    plannedRaw && !Number.isNaN(plannedNum) && plannedNum > 0 ? plannedNum : 1
+  return {
+    production_order_id: row.production_order_id ?? 0,
+    status: 'registered',
+    production_date: row.production_date,
+    reference_no: row.reference_no.trim() || null,
+    source_type: 'manual',
+    parent_item_id: Number(row.parent_item_id),
+    parent_item_cd: row.parent_item_cd,
+    parent_item_nm: row.parent_item_nm,
+    planned_qty: plannedQty,
+    actual_qty: null,
+    lot: row.lot.trim() || '*',
+    line_count: 0,
+    completed_line_count: 0,
+    created_at: null,
+    approved_at: null,
+    cancelled_at: null,
+    notes: null,
+    updated_at: null,
+    lines: [],
+    inputs: [],
+    outputs: [],
+  }
+}
+
+export function headerRowHasResolvedItem(
+  patch: Partial<EditProductionOrderHeaderRow>
+): boolean {
+  return (
+    'parent_item_id' in patch ||
+    'parent_item_cd' in patch ||
+    'parent_item_nm' in patch
+  )
 }
 
 export function processParentItemCdFieldPatch(
@@ -198,9 +246,9 @@ export function productionOrderHeaderRowSaveError(
 }
 
 const HEADER_FIELD_LABELS = {
-  production_date: 'Production Date',
+  production_date: 'Planned Date',
   item: 'Item',
-  planned_qty: 'Plan Qty',
+  planned_qty: 'Planned Qty',
 } as const
 
 type HeaderMissingField = keyof typeof HEADER_FIELD_LABELS

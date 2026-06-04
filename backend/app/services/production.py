@@ -7,6 +7,7 @@ from collections import defaultdict
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.deps import get_tenant
 from app.models.masters import Item, ItemTyp, Location
 from app.models.production import (
     ProductionOrder,
@@ -34,6 +35,7 @@ from app.services.itemprocs import (
     resolve_rm_location_id_for_itemproc_step,
 )
 from app.services.masters import MasterError
+from app.tenant import stamp_new, stamp_update
 
 
 class ProductionError(Exception):
@@ -45,14 +47,21 @@ def _now() -> datetime:
 
 
 def _active_order_or_error(db: Session, order_id: int) -> ProductionOrder:
-    row = db.get(ProductionOrder, order_id)
+    ctx = get_tenant()
+    row = db.scalar(
+        select(ProductionOrder).where(
+            ProductionOrder.production_order_id == order_id,
+            ProductionOrder.co_id == ctx.co_id,
+        )
+    )
     if not row or row.deleted_at is not None:
         raise ProductionError("Production order not found.")
     return row
 
 
 def _get_item_or_error(db: Session, item_id: int) -> Item:
-    item = db.get(Item, item_id)
+    ctx = get_tenant()
+    item = db.scalar(select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id))
     if not item or item.deleted_at is not None:
         raise ProductionError(f"Item {item_id} not found.")
     return item
@@ -61,7 +70,8 @@ def _get_item_or_error(db: Session, item_id: int) -> Item:
 def _get_item_optional(db: Session, item_id: int | None) -> Item | None:
     if item_id is None:
         return None
-    item = db.get(Item, int(item_id))
+    ctx = get_tenant()
+    item = db.scalar(select(Item).where(Item.item_id == int(item_id), Item.co_id == ctx.co_id))
     if not item or item.deleted_at is not None:
         return None
     return item
@@ -90,17 +100,22 @@ def _itemtyp_sort_key(itemtyp_cd: str = "", itemtyp_nm: str = "") -> int:
 
 
 def _get_location_or_error(db: Session, location_id: int) -> Location:
-    location = db.get(Location, location_id)
+    ctx = get_tenant()
+    location = db.scalar(
+        select(Location).where(Location.location_id == location_id, Location.co_id == ctx.co_id)
+    )
     if not location or location.deleted_at is not None:
         raise ProductionError(f"Location {location_id} not found.")
     return location
 
 
 def _order_lines(db: Session, order_id: int) -> list[ProductionOrderLine]:
+    ctx = get_tenant()
     return list(
         db.scalars(
             select(ProductionOrderLine)
             .where(
+                ProductionOrderLine.co_id == ctx.co_id,
                 ProductionOrderLine.production_order_id == order_id,
                 ProductionOrderLine.deleted_at.is_(None),
             )
@@ -166,9 +181,12 @@ def _line_output_item_id(db: Session, line: ProductionOrderLine, order: Producti
 
 
 def _itemtyp_fields_by_id(db: Session) -> dict[int, tuple[str, str]]:
+    ctx = get_tenant()
     return {
         int(t.itemtyp_id): (str(t.itemtyp_cd), str(t.itemtyp_nm))
-        for t in db.scalars(select(ItemTyp).where(ItemTyp.deleted_at.is_(None))).all()
+        for t in db.scalars(
+            select(ItemTyp).where(ItemTyp.co_id == ctx.co_id, ItemTyp.deleted_at.is_(None))
+        ).all()
     }
 
 
@@ -176,16 +194,18 @@ def _itemtyp_fields_by_id(db: Session) -> dict[int, tuple[str, str]]:
 def _replace_lines(db: Session, order: ProductionOrder, lines: list[ProductionOrderLineWrite]) -> None:
     if _has_posted_lines(db, order.production_order_id):
         raise ProductionError("Cannot edit process lines after a step is completed.")
+    ctx = get_tenant()
     now = _now()
     existing = db.scalars(
         select(ProductionOrderLine).where(
+            ProductionOrderLine.co_id == ctx.co_id,
             ProductionOrderLine.production_order_id == order.production_order_id,
             ProductionOrderLine.deleted_at.is_(None),
         )
     ).all()
     for row in existing:
         row.deleted_at = now
-        row.updated_at = now
+        stamp_update(row, ctx)
 
     existing_by_id = {int(r.prd_order_line_id): r for r in existing}
     for idx, line in enumerate(lines, start=1):
@@ -204,52 +224,54 @@ def _replace_lines(db: Session, order: ProductionOrder, lines: list[ProductionOr
             else (prev.actual_qty if prev is not None else None)
         )
         completed_at = prev.completed_at if prev is not None and status == "completed" else None
-        db.add(
-            ProductionOrderLine(
-                production_order_id=order.production_order_id,
-                line_no=line.line_no or idx,
-                rm_location_id=line.rm_location_id,
-                wip_location_id=line.wip_location_id,
-                output_item_id=line.output_item_id,
-                planned_qty=Decimal(line.planned_qty),
-                status=status,
-                actual_qty=actual_qty,
-                completed_at=completed_at,
-                created_at=now,
-                updated_at=now,
-            )
+        new_line = ProductionOrderLine(
+            production_order_id=order.production_order_id,
+            line_no=line.line_no or idx,
+            rm_location_id=line.rm_location_id,
+            wip_location_id=line.wip_location_id,
+            output_item_id=line.output_item_id,
+            planned_qty=Decimal(line.planned_qty),
+            status=status,
+            actual_qty=actual_qty,
+            completed_at=completed_at,
+            created_at=now,
+            updated_at=now,
         )
+        stamp_new(new_line, ctx)
+        db.add(new_line)
     db.flush()
 
 
 def _replace_inputs(db: Session, order: ProductionOrder, inputs: list[ProductionOrderInputWrite]) -> None:
+    ctx = get_tenant()
     now = _now()
     existing = db.scalars(
         select(ProductionOrderInput).where(
+            ProductionOrderInput.co_id == ctx.co_id,
             ProductionOrderInput.production_order_id == order.production_order_id,
             ProductionOrderInput.deleted_at.is_(None),
         )
     ).all()
     for row in existing:
         row.deleted_at = now
-        row.updated_at = now
+        stamp_update(row, ctx)
 
     for idx, line in enumerate(inputs, start=1):
         _get_item_or_error(db, line.item_id)
         _get_location_or_error(db, line.from_location_id)
-        db.add(
-            ProductionOrderInput(
-                production_order_id=order.production_order_id,
-                line_no=line.line_no or idx,
-                item_id=line.item_id,
-                from_location_id=line.from_location_id,
-                req_qty=Decimal(line.req_qty),
-                consume_qty=Decimal(line.consume_qty),
-                lot=(line.lot.strip() if line.lot else None),
-                created_at=now,
-                updated_at=now,
-            )
+        new_inp = ProductionOrderInput(
+            production_order_id=order.production_order_id,
+            line_no=line.line_no or idx,
+            item_id=line.item_id,
+            from_location_id=line.from_location_id,
+            req_qty=Decimal(line.req_qty),
+            consume_qty=Decimal(line.consume_qty),
+            lot=(line.lot.strip() if line.lot else None),
+            created_at=now,
+            updated_at=now,
         )
+        stamp_new(new_inp, ctx)
+        db.add(new_inp)
     db.flush()
 
 
@@ -262,6 +284,7 @@ def _create_lines_from_itemprocs(
         raise ProductionError(str(e)) from e
     if not proc_rows:
         return []
+    ctx = get_tenant()
     now = _now()
     lines: list[ProductionOrderLine] = []
     for proc in proc_rows:
@@ -280,6 +303,7 @@ def _create_lines_from_itemprocs(
             created_at=now,
             updated_at=now,
         )
+        stamp_new(line, ctx)
         db.add(line)
         lines.append(line)
     db.flush()
@@ -338,9 +362,10 @@ def list_orders(
     item_q: str | None = None,
     lot: str | None = None,
 ) -> list[ProductionOrderListItem]:
+    ctx = get_tenant()
     stmt = (
         select(ProductionOrder)
-        .where(ProductionOrder.deleted_at.is_(None))
+        .where(ProductionOrder.co_id == ctx.co_id, ProductionOrder.deleted_at.is_(None))
         .order_by(ProductionOrder.production_order_id.desc())
     )
     if status:
@@ -368,9 +393,10 @@ def list_orders(
 
 
 def suggest_production_lots(db: Session, q: str | None = None, *, limit: int = 20) -> list[str]:
+    ctx = get_tenant()
     stmt = (
         select(ProductionOrder.lot)
-        .where(ProductionOrder.deleted_at.is_(None))
+        .where(ProductionOrder.co_id == ctx.co_id, ProductionOrder.deleted_at.is_(None))
         .distinct()
         .order_by(ProductionOrder.lot.asc())
     )
@@ -386,9 +412,11 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
     base = _to_list_item(db, row)
     lines_raw = _order_lines(db, order_id)
 
+    ctx = get_tenant()
     inputs_raw = db.scalars(
         select(ProductionOrderInput)
         .where(
+            ProductionOrderInput.co_id == ctx.co_id,
             ProductionOrderInput.production_order_id == order_id,
             ProductionOrderInput.deleted_at.is_(None),
         )
@@ -397,6 +425,7 @@ def get_order(db: Session, order_id: int) -> ProductionOrderRead:
     outputs_raw = db.scalars(
         select(ProductionOrderOutput)
         .where(
+            ProductionOrderOutput.co_id == ctx.co_id,
             ProductionOrderOutput.production_order_id == order_id,
             ProductionOrderOutput.deleted_at.is_(None),
         )
@@ -514,6 +543,7 @@ def create_order(
     *,
     source_type: str = "manual",
 ) -> ProductionOrderRead:
+    ctx = get_tenant()
     _get_item_or_error(db, payload.parent_item_id)
     now = _now()
     row = ProductionOrder(
@@ -529,6 +559,7 @@ def create_order(
         created_at=now,
         updated_at=now,
     )
+    stamp_new(row, ctx)
     db.add(row)
     db.flush()
 
@@ -548,10 +579,12 @@ def create_order(
 
 
 def _order_inputs(db: Session, order_id: int) -> list[ProductionOrderInput]:
+    ctx = get_tenant()
     return list(
         db.scalars(
             select(ProductionOrderInput)
             .where(
+                ProductionOrderInput.co_id == ctx.co_id,
                 ProductionOrderInput.production_order_id == order_id,
                 ProductionOrderInput.deleted_at.is_(None),
             )
@@ -566,6 +599,7 @@ def _patch_approved_actuals(
     payload: ProductionOrderUpdate,
 ) -> None:
     """Approved orders: only actual_qty on process lines and consume_qty on inputs."""
+    ctx = get_tenant()
     now = _now()
     if payload.lines is not None:
         by_id = {int(ln.prd_order_line_id): ln for ln in _order_lines(db, order.production_order_id)}
@@ -576,10 +610,11 @@ def _patch_approved_actuals(
             if ln is None:
                 raise ProductionError(f"Process line {line.prd_order_line_id} not found.")
             ln.actual_qty = Decimal(line.actual_qty) if line.actual_qty is not None else None
-            ln.updated_at = now
+            stamp_update(ln, ctx)
     if payload.inputs is not None:
         existing = db.scalars(
             select(ProductionOrderInput).where(
+                ProductionOrderInput.co_id == ctx.co_id,
                 ProductionOrderInput.production_order_id == order.production_order_id,
                 ProductionOrderInput.deleted_at.is_(None),
             )
@@ -592,7 +627,7 @@ def _patch_approved_actuals(
             if row_inp is None:
                 raise ProductionError(f"Input line {inp.prd_order_input_id} not found.")
             row_inp.consume_qty = Decimal(inp.consume_qty)
-            row_inp.updated_at = now
+            stamp_update(row_inp, ctx)
     if payload.actual_qty is not None:
         order.actual_qty = Decimal(payload.actual_qty)
 
@@ -618,7 +653,7 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
         if payload.lines is None and payload.inputs is None and payload.actual_qty is None:
             raise ProductionError("No actual quantity fields to update.")
         _patch_approved_actuals(db, row, payload)
-        row.updated_at = _now()
+        stamp_update(row, get_tenant())
         db.flush()
         return get_order(db, order_id)
     if row.status != "registered":
@@ -649,7 +684,7 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
             row.parent_item_id = new_parent_id
             parent_item_changed = True
 
-    row.updated_at = _now()
+    stamp_update(row, get_tenant())
 
     if parent_item_changed and payload.lines is None:
         _replace_lines(db, row, [])
@@ -685,10 +720,12 @@ def recalculate_inputs(
     if any(ln.status == "completed" for ln in lines):
         raise ProductionError("Cannot recalculate after a process step is completed.")
     basis = Decimal(payload.basis_qty)
-    row.updated_at = _now()
+    stamp_update(row, get_tenant())
 
+    ctx = get_tenant()
     current_inputs = db.scalars(
         select(ProductionOrderInput).where(
+            ProductionOrderInput.co_id == ctx.co_id,
             ProductionOrderInput.production_order_id == order_id,
             ProductionOrderInput.deleted_at.is_(None),
         )
@@ -763,9 +800,11 @@ def complete_line(
     qty = Decimal(actual_qty)
     now = _now()
 
+    ctx = get_tenant()
     inputs = db.scalars(
         select(ProductionOrderInput)
         .where(
+            ProductionOrderInput.co_id == ctx.co_id,
             ProductionOrderInput.production_order_id == order_id,
             ProductionOrderInput.deleted_at.is_(None),
         )
@@ -822,32 +861,33 @@ def complete_line(
     line.status = "completed"
     line.actual_qty = qty
     line.completed_at = now
-    line.updated_at = now
+    stamp_update(line, ctx)
 
     out_line_no = (
         db.scalar(
             select(func.max(ProductionOrderOutput.line_no)).where(
+                ProductionOrderOutput.co_id == ctx.co_id,
                 ProductionOrderOutput.production_order_id == order_id,
                 ProductionOrderOutput.deleted_at.is_(None),
             )
         )
         or 0
     )
-    db.add(
-        ProductionOrderOutput(
-            production_order_id=row.production_order_id,
-            prd_order_line_id=line.prd_order_line_id,
-            line_no=int(out_line_no) + 1,
-            item_id=_line_output_item_id(db, line, row),
-            output_qty=qty,
-            location_id=line.wip_location_id,
-            lot=row.lot,
-            created_at=now,
-            updated_at=now,
-        )
+    output_row = ProductionOrderOutput(
+        production_order_id=row.production_order_id,
+        prd_order_line_id=line.prd_order_line_id,
+        line_no=int(out_line_no) + 1,
+        item_id=_line_output_item_id(db, line, row),
+        output_qty=qty,
+        location_id=line.wip_location_id,
+        lot=row.lot,
+        created_at=now,
+        updated_at=now,
     )
+    stamp_new(output_row, ctx)
+    db.add(output_row)
 
-    row.updated_at = now
+    stamp_update(row, ctx)
     db.flush()
     return get_order(db, order_id)
 
@@ -916,9 +956,11 @@ def _reverse_all_posted_steps(db: Session, order: ProductionOrder, *, actual_at:
     if not completed:
         return
 
+    ctx = get_tenant()
     inputs = list(
         db.scalars(
             select(ProductionOrderInput).where(
+                ProductionOrderInput.co_id == ctx.co_id,
                 ProductionOrderInput.production_order_id == order.production_order_id,
                 ProductionOrderInput.deleted_at.is_(None),
             )
@@ -939,21 +981,23 @@ def _reverse_all_posted_steps(db: Session, order: ProductionOrder, *, actual_at:
         raise ProductionError(str(e)) from e
 
     now = _now()
+    ctx = get_tenant()
     outputs = db.scalars(
         select(ProductionOrderOutput).where(
+            ProductionOrderOutput.co_id == ctx.co_id,
             ProductionOrderOutput.production_order_id == order.production_order_id,
             ProductionOrderOutput.deleted_at.is_(None),
         )
     ).all()
     for out in outputs:
         out.deleted_at = now
-        out.updated_at = now
+        stamp_update(out, ctx)
 
     for line in completed:
         line.status = "planned"
         line.actual_qty = None
         line.completed_at = None
-        line.updated_at = now
+        stamp_update(line, ctx)
 
 
 def approve_order(db: Session, order_id: int) -> ProductionOrderRead:
@@ -968,7 +1012,7 @@ def approve_order(db: Session, order_id: int) -> ProductionOrderRead:
     now = _now()
     row.status = "approved"
     row.approved_at = now
-    row.updated_at = now
+    stamp_update(row, get_tenant())
     db.flush()
     return get_order(db, order_id)
 
@@ -985,7 +1029,7 @@ def cancel_order(db: Session, order_id: int) -> ProductionOrderRead:
     row.approved_at = None
     row.actual_qty = None
     row.cancelled_at = None
-    row.updated_at = now
+    stamp_update(row, get_tenant())
     db.flush()
     return get_order(db, order_id)
 
@@ -995,12 +1039,13 @@ def delete_order(db: Session, order_id: int) -> None:
     if row.status != "registered":
         raise ProductionError("Only registered orders can be deleted.")
 
+    ctx = get_tenant()
     now = _now()
     if _has_posted_lines(db, order_id):
         _reverse_all_posted_steps(db, row, actual_at=now)
     for line in _order_lines(db, order_id):
         line.deleted_at = now
-        line.updated_at = now
+        stamp_update(line, ctx)
 
     for child in (
         ProductionOrderInput,
@@ -1008,14 +1053,15 @@ def delete_order(db: Session, order_id: int) -> None:
     ):
         rows = db.scalars(
             select(child).where(
+                child.co_id == ctx.co_id,
                 child.production_order_id == order_id,
                 child.deleted_at.is_(None),
             )
         ).all()
         for ln in rows:
             ln.deleted_at = now
-            ln.updated_at = now
+            stamp_update(ln, ctx)
 
     row.deleted_at = now
-    row.updated_at = now
+    stamp_update(row, ctx)
     db.flush()

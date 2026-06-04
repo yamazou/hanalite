@@ -5,6 +5,7 @@ from sqlalchemy import Date, DateTime, Enum, ForeignKey, Integer, Numeric, Strin
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.models.tenant_mixin import TenantMixin
 
 ProductionStatus = Enum(
     "registered",
@@ -26,7 +27,7 @@ ProductionSourceType = Enum(
 )
 
 
-class ProductionOrder(Base):
+class ProductionOrder(TenantMixin, Base):
     __tablename__ = "prd_orders"
 
     production_order_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -46,7 +47,7 @@ class ProductionOrder(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class ProductionOrderLine(Base):
+class ProductionOrderLine(TenantMixin, Base):
     __tablename__ = "prd_order_lines"
 
     prd_order_line_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -64,7 +65,7 @@ class ProductionOrderLine(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class ProductionOrderInput(Base):
+class ProductionOrderInput(TenantMixin, Base):
     __tablename__ = "prd_order_inputs"
 
     prd_order_input_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -82,7 +83,7 @@ class ProductionOrderInput(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class ProductionOrderOutput(Base):
+class ProductionOrderOutput(TenantMixin, Base):
     __tablename__ = "prd_order_outputs"
 
     prd_order_output_id: Mapped[int] = mapped_column(Integer, primary_key=True)

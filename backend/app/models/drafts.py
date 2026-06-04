@@ -6,6 +6,7 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.tenant_mixin import TenantMixin
 
 if TYPE_CHECKING:
     from app.models.masters import Item, Location, Supplier
@@ -14,7 +15,7 @@ DraftStatus = Enum("registered", "approved", "cancelled", name="draft_status")
 SourceType = Enum("manual", "excel", "pdf", name="source_type")
 
 
-class InvReceiptDraft(Base):
+class InvReceiptDraft(TenantMixin, Base):
     __tablename__ = "pch_receipt_draft"
 
     inv_receipt_draft_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -37,7 +38,7 @@ class InvReceiptDraft(Base):
     lines: Mapped[list["InvReceiptDraftLine"]] = relationship(back_populates="draft")
 
 
-class InvReceiptDraftLine(Base):
+class InvReceiptDraftLine(TenantMixin, Base):
     __tablename__ = "pch_receipt_draft_lines"
 
     inv_receipt_draft_line_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -58,7 +59,7 @@ class InvReceiptDraftLine(Base):
     location: Mapped["Location"] = relationship()
 
 
-class SlsDeliveryDraft(Base):
+class SlsDeliveryDraft(TenantMixin, Base):
     __tablename__ = "sls_delivery_draft"
 
     sls_delivery_draft_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -78,7 +79,7 @@ class SlsDeliveryDraft(Base):
     lines: Mapped[list["SlsDeliveryDraftLine"]] = relationship(back_populates="draft")
 
 
-class SlsDeliveryDraftLine(Base):
+class SlsDeliveryDraftLine(TenantMixin, Base):
     __tablename__ = "sls_delivery_draft_lines"
 
     sls_delivery_draft_line_id: Mapped[int] = mapped_column(Integer, primary_key=True)

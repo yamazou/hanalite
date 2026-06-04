@@ -1,5 +1,31 @@
 import { createContext, useContext } from 'react'
+import { Navigate } from 'react-router-dom'
 import type { AppRouteTarget } from '../utils/appRoute'
+
+const TabPanelActiveContext = createContext(true)
+
+export function TabPanelActiveProvider({
+  active,
+  children,
+}: {
+  active: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <TabPanelActiveContext.Provider value={active}>{children}</TabPanelActiveContext.Provider>
+  )
+}
+
+function useTabPanelActive(): boolean {
+  return useContext(TabPanelActiveContext)
+}
+
+/** In-app redirect that must not run on hidden tab panels (would change the browser URL). */
+export function ActiveTabNavigate({ to, replace = true }: { to: string; replace?: boolean }) {
+  const active = useTabPanelActive()
+  if (!active) return null
+  return <Navigate to={to} replace={replace} />
+}
 
 export type AppNavigateOptions = {
   replace?: boolean

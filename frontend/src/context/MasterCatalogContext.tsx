@@ -60,6 +60,18 @@ export type MasterCatalogValue = MasterCatalogSnapshot & {
 
 const MasterCatalogContext = createContext<MasterCatalogValue | null>(null)
 
+function catalogSnapshotSignature(snapshot: MasterCatalogSnapshot): string {
+  const lastItem = snapshot.itemsMaster[snapshot.itemsMaster.length - 1]
+  return [
+    snapshot.itemsMaster.length,
+    lastItem?.item_id ?? 0,
+    snapshot.suppliersMaster.length,
+    snapshot.locations.length,
+    snapshot.itemtyps.length,
+    snapshot.movetyps.length,
+  ].join(':')
+}
+
 async function fetchMasterCatalogSnapshot(): Promise<MasterCatalogSnapshot> {
   const [itemRows, supplierRows, customerRows, locationRows, typRows, moveRows] =
     await Promise.all([
@@ -95,16 +107,22 @@ export function MasterCatalogProvider({ children }: { children: ReactNode }) {
   const refreshLockRef = useRef<Promise<MasterCatalogSnapshot> | null>(null)
   const pendingRefreshRef = useRef(false)
   const readyRef = useRef(false)
+  const snapshotSigRef = useRef('')
 
   const applySnapshot = useCallback((snapshot: MasterCatalogSnapshot) => {
+    const sig = catalogSnapshotSignature(snapshot)
+    const changed = sig !== snapshotSigRef.current
+    snapshotSigRef.current = sig
     setItemsMaster(snapshot.itemsMaster)
     setSuppliersMaster(snapshot.suppliersMaster)
     setCustomers(snapshot.customers)
     setLocations(snapshot.locations)
     setItemtyps(snapshot.itemtyps)
     setMovetyps(snapshot.movetyps)
-    setRevision((prev) => prev + 1)
-    clearMasterSuggestCaches()
+    if (changed) {
+      setRevision((prev) => prev + 1)
+      clearMasterSuggestCaches()
+    }
     readyRef.current = true
     setReady(true)
   }, [])
@@ -137,11 +155,6 @@ export function MasterCatalogProvider({ children }: { children: ReactNode }) {
   }, [applySnapshot, reloadItemTypColors])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  useEffect(() => {
-    if (!readyRef.current) return
     void refresh().catch(() => {
       // ignore background refresh errors
     })

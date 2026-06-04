@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useGridLayoutScope } from '../context/AuthContext'
 import {
   DEFAULT_PANEL_SPLIT_LAYOUT,
   loadPanelSplitLayout,
@@ -8,12 +9,21 @@ import {
 } from '../utils/splitLayoutStorage'
 
 export function useProductionPanelSplitLayout(layoutId: string) {
-  const [layout, setLayout] = useState<StoredPanelSplitLayout>(() =>
-    loadPanelSplitLayout(layoutId, DEFAULT_PANEL_SPLIT_LAYOUT)
+  const layoutScope = useGridLayoutScope()
+
+  const load = useCallback(
+    () => loadPanelSplitLayout(layoutId, DEFAULT_PANEL_SPLIT_LAYOUT, layoutScope),
+    [layoutId, layoutScope]
   )
-  const [savedLayout, setSavedLayout] = useState<StoredPanelSplitLayout>(() =>
-    loadPanelSplitLayout(layoutId, DEFAULT_PANEL_SPLIT_LAYOUT)
-  )
+
+  const [layout, setLayout] = useState<StoredPanelSplitLayout>(load)
+  const [savedLayout, setSavedLayout] = useState<StoredPanelSplitLayout>(load)
+
+  useEffect(() => {
+    const loaded = load()
+    setLayout(loaded)
+    setSavedLayout(loaded)
+  }, [load])
 
   const setProcessHeightRatio = useCallback((processHeightRatio: number) => {
     setLayout((prev) => ({ ...prev, processHeightRatio }))
@@ -33,9 +43,9 @@ export function useProductionPanelSplitLayout(layoutId: string) {
 
   const saveLayout = useCallback(() => {
     const snapshot: StoredPanelSplitLayout = { ...layout }
-    persistPanelSplitLayout(layoutId, snapshot)
+    persistPanelSplitLayout(layoutId, snapshot, layoutScope)
     setSavedLayout(snapshot)
-  }, [layoutId, layout])
+  }, [layoutId, layout, layoutScope])
 
   const isDirty = useMemo(
     () => !panelSplitLayoutsEqual(layout, savedLayout),

@@ -1,12 +1,13 @@
 import type { MoveTypMaster } from '../types/masters'
 import { buildRecordSnapshotMap } from './gridRowChange'
+import { EMPTY_MASTER_ROW_DATES, type MasterRowDates } from './masterGridDates'
 
 export type EditMoveTypRow = {
   key: string
   movetyps_id?: number
   movetyps_cd: string
   movetyps_nm: string
-}
+} & MasterRowDates
 
 let nextKey = 0
 
@@ -21,6 +22,8 @@ export function listRowToEditMoveTypRow(row: MoveTypMaster): EditMoveTypRow {
     movetyps_id: row.movetyps_id,
     movetyps_cd: row.movetyps_cd,
     movetyps_nm: row.movetyps_nm ?? '',
+    created_at: row.created_at ?? null,
+    updated_at: row.updated_at ?? null,
   }
 }
 
@@ -29,6 +32,7 @@ export function emptyEditMoveTypRow(): EditMoveTypRow {
     key: newMoveTypEditKey(),
     movetyps_cd: '',
     movetyps_nm: '',
+    ...EMPTY_MASTER_ROW_DATES,
   }
 }
 

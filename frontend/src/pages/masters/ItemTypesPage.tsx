@@ -5,6 +5,8 @@ import { ErpScreen } from '../../components/erp/ErpScreen'
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterItemTypEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
+import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
 import {
   buildItemTypPayload,
   emptyEditItemTypRow,
@@ -19,6 +21,8 @@ import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../../utils/
 import { toFilterCellValue } from '../../utils/gridColumnFilter'
 import { mergeItemTypImportRows } from '../../utils/itemTypExcelImport'
 import { normalizeItemTypColor } from '../../utils/itemTypColor'
+import type { LocationTyp } from '../../types/masters'
+import { locationTypDropdownLabel } from '../../utils/locationTypMasterEdit'
 import { GridRowSelectButtons } from '../../components/GridRowSelectButtons'
 import { MasterGridToolbarActions } from '../../components/masters/MasterGridToolbar'
 import { ItemTypColorCell } from '../../components/masters/ItemTypColorCell'
@@ -27,10 +31,18 @@ import { useItemTypColors } from '../../context/ItemTypColorContext'
 import {
   changedActiveRows,
   deleteSelectedConfirm,
+  masterPersistResultMessage,
+  persistedIdsPendingDelete,
   removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
 import { selectableDisplayRows, selectedSelectableCount } from '../../utils/gridRowSelection'
+import {
+  isMasterDateColumn,
+  masterDateCellText,
+  masterDateExportValue,
+  masterDateFilterValue,
+} from '../../utils/masterGridDates'
 
 export function ItemTypesPage() {
   const refreshMasterCatalog = useRefreshMasterCatalogAfterSave()
@@ -43,21 +55,38 @@ export function ItemTypesPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
+  const {
+    success,
+    setSuccess,
+    rowError,
+    setRowError,
+    clearToolbarFeedback,
+    beginToolbarAction,
+  } = useMasterGridToolbarFeedback()
+  const [locationtyps, setLocationtyps] = useState<LocationTyp[]>([])
+
+  const locationTypLabelById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const t of locationtyps) {
+      map.set(t.locationtyp_id, locationTypDropdownLabel(t))
+    }
+    return map
+  }, [locationtyps])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    setSuccess(null)
     try {
-      const rows = await api.listItemtyps()
+      const [rows, locRows] = await Promise.all([
+        api.listItemtyps(),
+        api.listLocationtypsMaster(),
+      ])
+      setLocationtyps(locRows)
       const dataRows = listRowsToEditItemTypRows(rows)
       setSavedSnapshots(itemTypRowSnapshotsFromEditRows(dataRows))
       setEditRows(
         ensureTrailingBlankRow(dataRows, isBlankItemTypRow, () => emptyEditItemTypRow())
       )
-      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -83,25 +112,38 @@ export function ItemTypesPage() {
         return toFilterCellValue(row.itemtyp_cd)
       case 'name':
         return toFilterCellValue(row.itemtyp_nm)
+      case 'locationtyp':
+        return toFilterCellValue(
+          row.locationtyp_id === ''
+            ? ''
+            : (locationTypLabelById.get(row.locationtyp_id) ?? '')
+        )
       case 'color':
         return toFilterCellValue(row.itemtyp_color)
       default:
-        return toFilterCellValue('')
+        return masterDateFilterValue(row, col)
     }
-  }, [])
+  }, [locationTypLabelById])
 
-  const itemTypExportValue = useCallback((row: EditItemTypRow, col: string) => {
-    switch (col) {
-      case 'code':
-        return row.itemtyp_cd
-      case 'name':
-        return row.itemtyp_nm
-      case 'color':
-        return row.itemtyp_color
-      default:
-        return ''
-    }
-  }, [])
+  const itemTypExportValue = useCallback(
+    (row: EditItemTypRow, col: string) => {
+      switch (col) {
+        case 'code':
+          return row.itemtyp_cd
+        case 'name':
+          return row.itemtyp_nm
+        case 'locationtyp':
+          return row.locationtyp_id === ''
+            ? ''
+            : (locationTypLabelById.get(row.locationtyp_id) ?? '')
+        case 'color':
+          return row.itemtyp_color
+        default:
+          return masterDateExportValue(row, col)
+      }
+    },
+    [locationTypLabelById]
+  )
 
   const deleteRowsRef = useRef<() => void>(() => {})
 
@@ -121,7 +163,12 @@ export function ItemTypesPage() {
     },
     excelImport: {
       applyParsedRows: async (parsed) => {
-        const { rows, updated, added } = mergeItemTypImportRows(parsed, editRows)
+        beginToolbarAction()
+        const { rows, updated, added } = mergeItemTypImportRows(
+          parsed,
+          editRows,
+          locationtyps
+        )
         setEditRows(
           ensureTrailingBlankRow(rows, isBlankItemTypRow, () => emptyEditItemTypRow())
         )
@@ -139,12 +186,19 @@ export function ItemTypesPage() {
     [grid.displayRows]
   )
 
+  const rowNav = useGridRowKeyboardNav({
+    wrapId: 'masters-item-types',
+    displayRows: grid.displayRows,
+    isBlankRow: isBlankItemTypRow,
+  })
+
   const selectedCount = useMemo(
     () => selectedSelectableCount(selectableRows, selectedKeys, (row) => row.key),
     [selectableRows, selectedKeys]
   )
 
   const updateRow = (key: string, patch: Partial<EditItemTypRow>) => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       updateRowWithTrailingBlank(
         rows,
@@ -194,9 +248,9 @@ export function ItemTypesPage() {
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item type(s)'))) return
+    beginToolbarAction()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.itemtyp_id != null)
@@ -222,12 +276,20 @@ export function ItemTypesPage() {
   }
 
   const handleSave = async () => {
+    beginToolbarAction()
+    const pendingDeleteIds = persistedIdsPendingDelete(
+      editRows,
+      savedSnapshots,
+      (row) => row.itemtyp_id ?? null
+    )
     const active = editRows.filter(isActiveItemTypRow)
     const incompletePersisted = editRows.filter(
       (row) => row.itemtyp_id != null && !isActiveItemTypRow(row)
     )
     if (incompletePersisted.length > 0) {
-      setRowError('Complete Item Type Code and Name for saved rows, or delete those rows.')
+      setRowError(
+        'Complete Item Type Code, Name, and Location Type for saved rows, or delete those rows.'
+      )
       return
     }
     const invalidColorRow = active.find((row) => {
@@ -240,7 +302,7 @@ export function ItemTypesPage() {
       )
       return
     }
-    if (active.length === 0) {
+    if (active.length === 0 && pendingDeleteIds.length === 0) {
       setRowError('Add at least one item type row.')
       return
     }
@@ -257,17 +319,17 @@ export function ItemTypesPage() {
       (row) => row.itemtyp_id,
       (row) => (isActiveItemTypRow(row) ? buildItemTypPayload(row) : null)
     )
-    if (toSave.length === 0) {
-      setRowError(null)
+    if (toSave.length === 0 && pendingDeleteIds.length === 0) {
       setSuccess(savedCountMessage(0, 'item type'))
       return
     }
 
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
+      for (const id of pendingDeleteIds) {
+        await api.deleteItemTyp(id)
+      }
       for (const row of toSave) {
         const payload = buildItemTypPayload(row)
         if (row.itemtyp_id != null) {
@@ -276,10 +338,14 @@ export function ItemTypesPage() {
           await api.createItemTyp(payload)
         }
       }
-      setSuccess(savedCountMessage(toSave.length, 'item type'))
-      refreshMasterCatalog()
-      await load()
-      await reloadItemTypColors()
+      setSuccess(
+        masterPersistResultMessage(toSave.length, pendingDeleteIds.length, 'item type')
+      )
+      if (pendingDeleteIds.length > 0 || toSave.length > 0) {
+        refreshMasterCatalog()
+        await load()
+        await reloadItemTypColors()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -297,7 +363,10 @@ export function ItemTypesPage() {
         columns={masterItemTypEditColumns}
         loading={loading}
         isEmpty={false}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          beginToolbarAction()
+          void load()
+        }}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableRows.length}
@@ -318,6 +387,7 @@ export function ItemTypesPage() {
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
+        gridRowNavWrapId="masters-item-types"
         onLayoutReady={grid.onLayoutReady}
         onGridContextMenu={grid.openContextMenu}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
@@ -331,9 +401,16 @@ export function ItemTypesPage() {
               return (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
-                    selectedKeys.has(row.key) ? ' selected' : ''
-                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                  {...rowNav.getTrProps(row)}
+                  className={[
+                    'erp-grid-row-editing',
+                    rowNav.rowHighlightClass(index, row.key) ??
+                      (index % 2 === 1 ? 'row-alt' : undefined),
+                    selectedKeys.has(row.key) ? 'selected' : undefined,
+                    isSentinel ? 'erp-grid-row-sentinel' : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -390,6 +467,33 @@ export function ItemTypesPage() {
                             />
                           </td>
                         )
+                      case 'locationtyp':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <select
+                              className={`erp-grid-input${
+                                row.locationtyp_id === '' ? ' erp-input-empty' : ''
+                              }`}
+                              value={row.locationtyp_id}
+                              aria-label="Location Type"
+                              data-itemtyp-grid-cell={`${row.key}:locationtyp`}
+                              onChange={(e) =>
+                                updateRow(row.key, {
+                                  locationtyp_id:
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              onKeyDown={(e) => handleCellKeyDown(e, row)}
+                            >
+                              <option value="">{isSentinel ? '' : 'Location Type'}</option>
+                              {locationtyps.map((t) => (
+                                <option key={t.locationtyp_id} value={t.locationtyp_id}>
+                                  {locationTypDropdownLabel(t)}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )
                       case 'color':
                         return (
                           <td key={col.key} className="erp-grid-cell-edit erp-col-color">
@@ -403,6 +507,13 @@ export function ItemTypesPage() {
                           </td>
                         )
                       default:
+                        if (isMasterDateColumn(col.key)) {
+                          return (
+                            <td key={col.key} className="erp-grid-cell-readonly">
+                              {masterDateCellText(row, col.key)}
+                            </td>
+                          )
+                        }
                         return <td key={col.key} />
                     }
                   })}

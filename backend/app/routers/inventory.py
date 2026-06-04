@@ -1,6 +1,8 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.deps import require_tenant
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -28,7 +30,11 @@ from app.services.inventory_query import (
     trace_lot,
 )
 
-router = APIRouter(prefix="/inventory", tags=["inventory"])
+router = APIRouter(
+    prefix="/inventory",
+    tags=["inventory"],
+    dependencies=[Depends(require_tenant)],
+)
 
 
 @router.get("/currents", response_model=list[CurrentStockItem])

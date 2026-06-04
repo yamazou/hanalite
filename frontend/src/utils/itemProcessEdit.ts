@@ -1,4 +1,6 @@
 import type { CustomerMaster, ItemListRow, ItemTyp, LocationMaster } from '../types/masters'
+import { resolveInputFromLocationCdForStep, resolveInputFromLocationIdForStep } from './inputFromLocation'
+import { EMPTY_MASTER_ROW_DATES, type MasterRowDates } from './masterGridDates'
 import type { ItemProcessesOut, ItemProcessesSave } from '../types/itemprocs'
 import { buildRecordSnapshotMap, isChangedActiveRow } from './gridRowChange'
 import { ensureTrailingBlankRow } from './gridTrailingBlankRow'
@@ -39,7 +41,7 @@ export type EditFinalItemRow = {
   item_nm: string
   itemtyp_cd: string
   customer_cd: string
-}
+} & MasterRowDates
 
 export type FinalItemCatalogLookups = {
   itemtypCodeById: Map<number, string>
@@ -62,18 +64,35 @@ export function buildFinalItemCatalogLookups(
 }
 
 export function finalItemFieldsFromCatalogItem(
-  item: Pick<ItemListRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_id' | 'customer1_id'>,
+  item: Pick<
+    ItemListRow,
+    | 'item_id'
+    | 'item_cd'
+    | 'item_nm'
+    | 'itemtyp_id'
+    | 'customer1_id'
+    | 'created_at'
+    | 'updated_at'
+  >,
   lookups: FinalItemCatalogLookups
-): Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'> {
+): Pick<
+  EditFinalItemRow,
+  'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd' | 'created_at' | 'updated_at'
+> {
   return {
     item_id: item.item_id,
     item_cd: item.item_cd,
     item_nm: item.item_nm,
-    itemtyp_cd: lookups.itemtypCodeById.get(item.itemtyp_id) ?? '',
+    itemtyp_cd:
+      item.itemtyp_id != null
+        ? lookups.itemtypCodeById.get(item.itemtyp_id) ?? ''
+        : '',
     customer_cd:
       item.customer1_id != null
         ? lookups.customerCodeById.get(item.customer1_id) ?? ''
         : '',
+    created_at: item.created_at ?? null,
+    updated_at: item.updated_at ?? null,
   }
 }
 
@@ -85,6 +104,7 @@ export function emptyEditFinalItemRow(): EditFinalItemRow {
     item_nm: '',
     itemtyp_cd: '',
     customer_cd: '',
+    ...EMPTY_MASTER_ROW_DATES,
   }
 }
 
@@ -155,7 +175,13 @@ export function isOutputItemListDirty(
 export function finalItemListToEditRows(
   items: Pick<
     EditFinalItemRow,
-    'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'
+    | 'item_id'
+    | 'item_cd'
+    | 'item_nm'
+    | 'itemtyp_cd'
+    | 'customer_cd'
+    | 'created_at'
+    | 'updated_at'
   >[]
 ): EditFinalItemRow[] {
   return items.map((item) => ({
@@ -165,6 +191,8 @@ export function finalItemListToEditRows(
     item_nm: item.item_nm,
     itemtyp_cd: item.itemtyp_cd,
     customer_cd: item.customer_cd,
+    created_at: item.created_at ?? null,
+    updated_at: item.updated_at ?? null,
   }))
 }
 
@@ -172,7 +200,13 @@ export function finalItemListToEditRows(
 export function mergeFinalItemRowsForDisplay(
   apiItems: Pick<
     EditFinalItemRow,
-    'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'
+    | 'item_id'
+    | 'item_cd'
+    | 'item_nm'
+    | 'itemtyp_cd'
+    | 'customer_cd'
+    | 'created_at'
+    | 'updated_at'
   >[],
   localRows: EditFinalItemRow[],
   catalog: ItemListRow[],
@@ -202,6 +236,8 @@ export function mergeFinalItemRowsForDisplay(
       item_nm: row.item_nm,
       itemtyp_cd: row.itemtyp_cd,
       customer_cd: row.customer_cd,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
     }
   })
   const seenIds = new Set<number>()
@@ -223,24 +259,44 @@ export function finalItemCdFieldPatch(
   items: ItemListRow[],
   lookups: FinalItemCatalogLookups,
   value: string
-): Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'> {
+): Pick<
+  EditFinalItemRow,
+  'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd' | 'created_at' | 'updated_at'
+> {
   const match = findItemListRowByCd(items, value)
   if (match) {
     return finalItemFieldsFromCatalogItem(match, lookups)
   }
-  return { item_id: '', item_cd: value, item_nm: '', itemtyp_cd: '', customer_cd: '' }
+  return {
+    item_id: '',
+    item_cd: value,
+    item_nm: '',
+    itemtyp_cd: '',
+    customer_cd: '',
+    ...EMPTY_MASTER_ROW_DATES,
+  }
 }
 
 export function finalItemNmFieldPatch(
   items: ItemListRow[],
   lookups: FinalItemCatalogLookups,
   value: string
-): Pick<EditFinalItemRow, 'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd'> {
+): Pick<
+  EditFinalItemRow,
+  'item_id' | 'item_cd' | 'item_nm' | 'itemtyp_cd' | 'customer_cd' | 'created_at' | 'updated_at'
+> {
   const match = findItemListRowByNm(items, value)
   if (match) {
     return finalItemFieldsFromCatalogItem(match, lookups)
   }
-  return { item_id: '', item_cd: '', item_nm: value, itemtyp_cd: '', customer_cd: '' }
+  return {
+    item_id: '',
+    item_cd: '',
+    item_nm: value,
+    itemtyp_cd: '',
+    customer_cd: '',
+    ...EMPTY_MASTER_ROW_DATES,
+  }
 }
 
 export function itemProcessesToEditProcessRows(processes: ItemProcessesOut['processes']): EditProcessRow[] {
@@ -269,7 +325,7 @@ export function itemProcessesToEditInputRows(processes: ItemProcessesOut['proces
         item_id: inp.item_id,
         item_cd: inp.item_cd,
         item_nm: inp.item_nm,
-        from_location_id: inp.from_location_id ?? '',
+        from_location_id: '',
         req_qty: inp.req_qty != null ? String(inp.req_qty) : '',
         consume_qty: '',
         lot: '',
@@ -280,36 +336,69 @@ export function itemProcessesToEditInputRows(processes: ItemProcessesOut['proces
   return rows
 }
 
+/** Align grid from-location with current item-type warehouse rules (not stale API ids). */
+export function syncItemProcessInputFromLocations(
+  inputRows: EditInputRow[],
+  processRows: EditProcessRow[],
+  locations: LocationMaster[],
+  items: { item_id: number; itemtyp_id?: number }[],
+  itemtyps: ItemTyp[]
+): EditInputRow[] {
+  return inputRows.map((row) => {
+    if (row.item_id === '') return row
+    const from_location_id = resolveItemProcessInputFromLocationId(
+      row.line_no,
+      row.item_id,
+      processRows,
+      locations,
+      items,
+      itemtyps
+    )
+    return { ...row, from_location_id }
+  })
+}
+
 export function isBlankItemProcessRow(row: EditProcessRow): boolean {
   return row.wip_location_id === ''
 }
 
-/** First process step issues from RM location; later steps from previous WIP. */
+/** First process step: item type's location-type warehouse; later steps: previous WIP. */
 export function resolveItemProcessInputFromLocationId(
   lineNo: number,
+  inputItemId: number | '',
   processRows: EditProcessRow[],
-  locations: LocationMaster[]
+  locations: LocationMaster[],
+  items: { item_id: number; itemtyp_id?: number }[],
+  itemtyps: ItemTyp[]
 ): number | '' {
-  const activeProcesses = processRows
-    .filter((row) => !isBlankItemProcessRow(row))
-    .sort((a, b) => a.line_no - b.line_no)
-  const idx = activeProcesses.findIndex((p) => p.line_no === lineNo)
-  if (idx <= 0) {
-    const rm = locations.find((loc) => loc.location_type === 'RM')
-    return rm?.location_id ?? ''
-  }
-  const prev = activeProcesses[idx - 1]
-  return prev.wip_location_id !== '' ? prev.wip_location_id : ''
+  return resolveInputFromLocationIdForStep(
+    lineNo,
+    inputItemId,
+    processRows,
+    locations,
+    items,
+    itemtyps,
+    isBlankItemProcessRow
+  )
 }
 
 export function resolveItemProcessInputFromLocationCd(
   lineNo: number,
+  inputItemId: number | '',
   processRows: EditProcessRow[],
-  locations: LocationMaster[]
+  locations: LocationMaster[],
+  items: { item_id: number; itemtyp_id?: number }[],
+  itemtyps: ItemTyp[]
 ): string {
-  const locId = resolveItemProcessInputFromLocationId(lineNo, processRows, locations)
-  if (locId === '') return ''
-  return locations.find((loc) => loc.location_id === locId)?.location_cd ?? ''
+  return resolveInputFromLocationCdForStep(
+    lineNo,
+    inputItemId,
+    processRows,
+    locations,
+    items,
+    itemtyps,
+    isBlankItemProcessRow
+  )
 }
 
 /** Trailing row until item_id is resolved (partial Item Code/Name typing stays on sentinel row). */

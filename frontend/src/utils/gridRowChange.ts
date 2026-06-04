@@ -79,3 +79,43 @@ export function savedCountMessage(count: number, entityLabel: string): string {
   if (count === 0) return 'No changes to save.'
   return count === 1 ? `1 ${entityLabel} saved.` : `${count} ${entityLabel} saved.`
 }
+
+/** Persisted rows removed from the grid (context-menu Delete row) — deleted on Update. */
+export function persistedIdsPendingDelete<TRow, TId extends number>(
+  rows: TRow[],
+  savedSnapshots: Map<TId, unknown>,
+  getRecordId: (row: TRow) => TId | null | undefined
+): TId[] {
+  const present = new Set<TId>()
+  for (const row of rows) {
+    const id = getRecordId(row)
+    if (id != null) present.add(id)
+  }
+  const pending: TId[] = []
+  for (const id of savedSnapshots.keys()) {
+    if (!present.has(id)) pending.push(id)
+  }
+  return pending
+}
+
+export function masterPersistResultMessage(
+  savedCount: number,
+  deletedCount: number,
+  entityLabel: string
+): string {
+  if (savedCount === 0 && deletedCount === 0) return savedCountMessage(0, entityLabel)
+  const parts: string[] = []
+  if (deletedCount > 0) {
+    parts.push(
+      deletedCount === 1
+        ? `1 ${entityLabel} deleted`
+        : `${deletedCount} ${entityLabel} deleted`
+    )
+  }
+  if (savedCount > 0) {
+    parts.push(
+      savedCount === 1 ? `1 ${entityLabel} saved` : `${savedCount} ${entityLabel} saved`
+    )
+  }
+  return `${parts.join(', ')}.`
+}

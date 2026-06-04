@@ -5,8 +5,10 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.deps import get_tenant
 from app.schemas.drafts import DraftLineCreate
 from app.models.masters import Item
 from app.services.masters import MasterError, resolve_location_by_ref
@@ -82,7 +84,10 @@ def _resolve_item_for_import(
     item_nm = str(item_nm_raw).strip() if item_nm_raw is not None and str(item_nm_raw).strip() else None
 
     if parsed_item_id is not None:
-        item = db.get(Item, parsed_item_id)
+        ctx = get_tenant()
+        item = db.scalar(
+            select(Item).where(Item.item_id == parsed_item_id, Item.co_id == ctx.co_id)
+        )
         if not item or item.deleted_at is not None:
             raise ExcelImportError(f"Item id {parsed_item_id} not found.", row_num)
         return item.item_id, item_cd or item.item_cd, item_nm or item.item_nm

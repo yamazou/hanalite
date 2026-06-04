@@ -57,8 +57,8 @@ export function ItemSearchPicker({
   )
 
   const catalog = useMemo((): (GridItemDatalistItem & {
-    itemtyp_id: number
-    itemtyp_nm: string
+    itemtyp_id: number | null
+    itemtyp_nm: string | null
   })[] => {
     if (!ready) return []
     const rows =

@@ -7,6 +7,8 @@ import { MasterGridToolbarActions } from '../../components/masters/MasterGridToo
 import { GridRowNumCell } from '../../components/GridRowNumCell'
 import { masterItemEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
+import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
+import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
 import type { ItemTyp } from '../../types/masters'
 import {
   buildItemPayload,
@@ -31,9 +33,17 @@ import { useItemTypColors } from '../../context/ItemTypColorContext'
 import { itemTextColorStyle } from '../../utils/itemTypColor'
 import {
   deleteSelectedConfirm,
+  masterPersistResultMessage,
+  persistedIdsPendingDelete,
   removeSelectedGridRows,
   savedCountMessage,
 } from '../../utils/gridRowChange'
+import {
+  isMasterDateColumn,
+  masterDateCellText,
+  masterDateExportValue,
+  masterDateFilterValue,
+} from '../../utils/masterGridDates'
 import {
   selectableDisplayRows as getSelectableDisplayRows,
   selectedSelectableCount as countSelectedSelectable,
@@ -53,14 +63,18 @@ export function ItemsPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [rowError, setRowError] = useState<string | null>(null)
+  const {
+    success,
+    setSuccess,
+    rowError,
+    setRowError,
+    clearToolbarFeedback,
+    beginToolbarAction,
+  } = useMasterGridToolbarFeedback()
   const [activeFilter, setActiveFilter] = useState<ItemsTabFilter>('ALL')
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
       const items = await api.listItemsMaster()
       const dataRows = listRowsToEditItemRows(items)
@@ -72,7 +86,6 @@ export function ItemsPage() {
           () => emptyEditItemRow(trailingRowItemtypId())
         )
       )
-      setRowError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
@@ -103,6 +116,10 @@ export function ItemsPage() {
       setActiveFilter('ALL')
     }
   }, [activeFilter, itemtypIds])
+
+  useEffect(() => {
+    clearToolbarFeedback()
+  }, [activeFilter, clearToolbarFeedback])
 
   const itemtypCodeById = useMemo(() => {
     const map = new Map<number, string>()
@@ -135,9 +152,10 @@ export function ItemsPage() {
   )
 
   const matchesItemTab = useCallback(
-    (itemtypId: number | '' | undefined): boolean => {
+    (itemtypId: number | '' | null | undefined): boolean => {
       if (activeFilter === 'ALL') return true
-      return itemtypId !== '' && itemtypId === activeFilter
+      if (itemtypId == null || itemtypId === '') return false
+      return itemtypId === activeFilter
     },
     [activeFilter]
   )
@@ -178,7 +196,7 @@ export function ItemsPage() {
         case 'customer2':
           return partyFilterValue(row.customer_ids[1], customerLabelById)
         default:
-          return toFilterCellValue('')
+          return masterDateFilterValue(row, col)
       }
     },
     [itemtypCodeById, partyFilterValue, supplierLabelById, customerLabelById]
@@ -214,7 +232,7 @@ export function ItemsPage() {
             ? customerLabelById.get(row.customer_ids[1] as number) ?? ''
             : ''
         default:
-          return ''
+          return masterDateExportValue(row, col)
       }
     },
     [itemtypCodeById, supplierLabelById, customerLabelById]
@@ -262,6 +280,7 @@ export function ItemsPage() {
     },
     excelImport: {
       applyParsedRows: (parsed) => {
+        beginToolbarAction()
         let added = 0
         let updated = 0
         setEditRows((prev) => {
@@ -279,7 +298,6 @@ export function ItemsPage() {
             () => emptyEditItemRow(trailingRowItemtypId())
           )
         })
-        setRowError(null)
         setSuccess(
           added + updated > 0
             ? `Import: ${added} added, ${updated} updated. Click Save to persist.`
@@ -294,12 +312,19 @@ export function ItemsPage() {
     [grid.displayRows]
   )
 
+  const rowNav = useGridRowKeyboardNav({
+    wrapId: 'masters-items',
+    displayRows: grid.displayRows,
+    isBlankRow: isBlankItemRow,
+  })
+
   const selectedCount = useMemo(
     () => countSelectedSelectable(selectableRows, selectedKeys, (row) => row.key),
     [selectableRows, selectedKeys]
   )
 
   const setSupplier = (key: string, index: number, value: number | '') => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       rows.map((row) => {
         if (row.key !== key) return row
@@ -311,6 +336,7 @@ export function ItemsPage() {
   }
 
   const setCustomer = (key: string, index: number, value: number | '') => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       rows.map((row) => {
         if (row.key !== key) return row
@@ -360,6 +386,7 @@ export function ItemsPage() {
   )
 
   const updateRow = (key: string, patch: Partial<EditItemRow>) => {
+    clearToolbarFeedback()
     setEditRows((rows) =>
       updateRowWithTrailingBlank(
         rows,
@@ -411,9 +438,9 @@ export function ItemsPage() {
   const deleteSelected = async () => {
     if (selectedKeys.size === 0) return
     if (!confirm(deleteSelectedConfirm(selectedKeys.size, 'item(s)'))) return
+    beginToolbarAction()
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
     try {
       const selected = editRows.filter((row) => selectedKeys.has(row.key))
       const toDelete = selected.filter((row) => row.item_id != null)
@@ -440,6 +467,12 @@ export function ItemsPage() {
   }
 
   const handleSave = async () => {
+    beginToolbarAction()
+    const pendingDeleteIds = persistedIdsPendingDelete(
+      editRows,
+      savedSnapshots,
+      (row) => row.item_id ?? null
+    )
     const active = editRows.filter(isActiveItemRow)
     const incomplete = editRows.filter(
       (row) =>
@@ -451,13 +484,12 @@ export function ItemsPage() {
       setRowError('Enter Item Code and Item Type for each row, or clear empty rows.')
       return
     }
-    if (active.length === 0) {
+    if (active.length === 0 && pendingDeleteIds.length === 0) {
       setRowError('Add at least one item row.')
       return
     }
     const toSave = changedActiveItemRows(editRows, savedSnapshots)
-    if (toSave.length === 0) {
-      setRowError(null)
+    if (toSave.length === 0 && pendingDeleteIds.length === 0) {
       setSuccess(savedCountMessage(0, 'item'))
       return
     }
@@ -469,9 +501,10 @@ export function ItemsPage() {
 
     setSubmitting(true)
     setError(null)
-    setSuccess(null)
-    setRowError(null)
     try {
+      for (const id of pendingDeleteIds) {
+        await api.deleteItem(id)
+      }
       for (const row of toSave) {
         const payload = buildItemPayload(row)
         if (row.item_id != null) {
@@ -480,9 +513,11 @@ export function ItemsPage() {
           await api.createItem(payload)
         }
       }
-      setSuccess(savedCountMessage(toSave.length, 'item'))
-      await load()
-      await refreshMasterCatalog()
+      setSuccess(masterPersistResultMessage(toSave.length, pendingDeleteIds.length, 'item'))
+      if (pendingDeleteIds.length > 0 || toSave.length > 0) {
+        await load()
+        await refreshMasterCatalog()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
@@ -495,7 +530,10 @@ export function ItemsPage() {
       <button
         type="button"
         className={`erp-tab${activeFilter === 'ALL' ? ' active' : ''}`}
-        onClick={() => setActiveFilter('ALL')}
+        onClick={() => {
+          clearToolbarFeedback()
+          setActiveFilter('ALL')
+        }}
       >
         All
       </button>
@@ -504,7 +542,10 @@ export function ItemsPage() {
           key={t.itemtyp_id}
           type="button"
           className={`erp-tab${activeFilter === t.itemtyp_id ? ' active' : ''}`}
-          onClick={() => setActiveFilter(t.itemtyp_id)}
+          onClick={() => {
+            clearToolbarFeedback()
+            setActiveFilter(t.itemtyp_id)
+          }}
         >
           {itemTypTabLabel(t)}
         </button>
@@ -522,7 +563,10 @@ export function ItemsPage() {
         columns={masterItemEditColumns}
         loading={loading}
         isEmpty={false}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          beginToolbarAction()
+          void load()
+        }}
         selectColumnHeader={
           <GridRowSelectButtons
             rowCount={selectableRows.length}
@@ -546,6 +590,7 @@ export function ItemsPage() {
         }
         showSaveGridButton
         panelClassName="erp-panel-grow"
+        gridRowNavWrapId="masters-items"
         onLayoutReady={grid.onLayoutReady}
         onGridContextMenu={grid.openContextMenu}
         layoutOptions={{ pinFirst: ['rownum', 'select'] }}
@@ -559,9 +604,16 @@ export function ItemsPage() {
               return (
                 <tr
                   key={row.key}
-                  className={`erp-grid-row-editing${index % 2 === 1 ? ' row-alt' : ''}${
-                    selectedKeys.has(row.key) ? ' selected' : ''
-                  }${isSentinel ? ' erp-grid-row-sentinel' : ''}`}
+                  {...rowNav.getTrProps(row)}
+                  className={[
+                    'erp-grid-row-editing',
+                    rowNav.rowHighlightClass(index, row.key) ??
+                      (index % 2 === 1 ? 'row-alt' : undefined),
+                    selectedKeys.has(row.key) ? 'selected' : undefined,
+                    isSentinel ? 'erp-grid-row-sentinel' : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
                 >
                   {layout.orderedColumns.map((col) => {
                     switch (col.key) {
@@ -683,6 +735,13 @@ export function ItemsPage() {
                           </td>
                         )
                       default:
+                        if (isMasterDateColumn(col.key)) {
+                          return (
+                            <td key={col.key} className="erp-grid-cell-readonly">
+                              {masterDateCellText(row, col.key)}
+                            </td>
+                          )
+                        }
                         return <td key={col.key} />
                     }
                   })}
