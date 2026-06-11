@@ -12,7 +12,6 @@ import {
   AppShellProvider,
   TabPanelActiveProvider,
 } from '../context/AppNavigateContext'
-import { ApiReadinessGate } from './ApiReadinessGate'
 import { useAuth } from '../context/AuthContext'
 import { ItemTypColorProvider } from '../context/ItemTypColorContext'
 import { MasterCatalogProvider } from '../context/MasterCatalogContext'
@@ -30,6 +29,15 @@ import {
 } from '../utils/appRoute'
 
 type NavLink = { to: string; label: string }
+type NavDivider = { divider: true }
+type NavItem = NavLink | NavDivider
+
+function isNavLink(item: NavItem): item is NavLink {
+  return !('divider' in item)
+}
+
+const NAV_DIVIDER: NavDivider = { divider: true }
+
 /** `to` = pathname (tab key); `search` = query string including `?` when set. */
 type OpenTab = { to: string; search: string; label: string; pinned?: boolean }
 
@@ -106,17 +114,14 @@ function getInitialShellState(location: Location): {
 type NavGroup = {
   id: 'Purchase' | 'Sales' | 'Inventory' | 'Production' | 'Masters'
   label: string
-  items: NavLink[]
+  items: NavItem[]
 }
 
 const navGroups: NavGroup[] = [
   {
     id: 'Purchase',
     label: 'Purchase',
-    items: [
-      { to: '/', label: 'Receipt List' },
-      { to: '/drafts/import-pdf', label: 'PDF Import' },
-    ],
+    items: [{ to: '/', label: 'Receipt List' }],
   },
   {
     id: 'Sales',
@@ -145,14 +150,20 @@ const navGroups: NavGroup[] = [
     id: 'Masters',
     label: 'Masters',
     items: [
-      { to: '/masters/item-processes', label: 'Item Processes' },
       { to: '/masters/items', label: 'Items' },
+      { to: '/masters/itemtyps', label: 'Item Types' },
+      { to: '/masters/item-processes', label: 'Item Processes' },
+      NAV_DIVIDER,
+      { to: '/masters/numbering-patterns', label: 'Numbering Patterns' },
+      { to: '/masters/numbering-elements', label: 'Numbering Elements' },
+      NAV_DIVIDER,
       { to: '/masters/locations', label: 'Locations' },
       { to: '/masters/locationtyps', label: 'Location Types' },
-      { to: '/masters/itemtyps', label: 'Item Types' },
       { to: '/masters/movetyps', label: 'Move Types' },
+      NAV_DIVIDER,
       { to: '/masters/suppliers', label: 'Suppliers' },
       { to: '/masters/customers', label: 'Customers' },
+      NAV_DIVIDER,
       { to: '/masters/companies', label: 'Companies' },
       { to: '/masters/users', label: 'Users' },
     ],
@@ -175,7 +186,7 @@ function openKeysForPath(pathname: string): string[] {
 }
 
 function groupHasActive(pathname: string, group: NavGroup): boolean {
-  return group.items.some((item) => isActive(pathname, item.to))
+  return group.items.some((item) => isNavLink(item) && isActive(pathname, item.to))
 }
 
 function normalizeAndDedupeTabs(
@@ -209,6 +220,7 @@ function labelForPath(pathname: string): string {
   let best: NavLink | null = null
   for (const group of navGroups) {
     for (const item of group.items) {
+      if (!isNavLink(item)) continue
       const matched = item.to === '/' ? pathname === '/' : pathname === item.to || pathname.startsWith(`${item.to}/`)
       if (!matched) continue
       if (!best || item.to.length > best.to.length) best = item
@@ -456,7 +468,6 @@ export function Layout() {
   return (
     <ItemTypColorProvider>
     <AppShellProvider navigate={appNavigate} viewRoute={viewRoute}>
-    <ApiReadinessGate>
     <MasterCatalogProvider>
     <div className="app">
       <aside className="sidebar">
@@ -471,14 +482,22 @@ export function Layout() {
         </div>
         {session ? (
           <div className="sidebar-session">
-            <div className="sidebar-session-meta">
-              <span className="sidebar-session-company">{session.company_cd}</span>
-              <span className="sidebar-session-user">
-                {session.user_cd}
-                {session.user_nm ? ` (${session.user_nm})` : ''}
-              </span>
-            </div>
-            <button type="button" className="sidebar-logout" onClick={() => logout()}>
+            <span
+              className="sidebar-session-account"
+              title={
+                session.user_nm
+                  ? `${session.user_cd}@${session.company_cd} (${session.user_nm})`
+                  : `${session.user_cd}@${session.company_cd}`
+              }
+            >
+              {session.user_cd}@{session.company_cd}
+            </span>
+            <button
+              type="button"
+              className="sidebar-logout"
+              onClick={() => logout()}
+              title="Sign out"
+            >
               Sign out
             </button>
           </div>
@@ -503,16 +522,25 @@ export function Layout() {
                   </span>
                 </button>
                 <div className="nav-submenu">
-                  {group.items.map((item) => (
-                    <button
-                      key={item.to}
-                      type="button"
-                      className={`nav-link${isActive(navActivePath, item.to) ? ' active' : ''}`}
-                      onClick={() => openTab(item.to, item.label)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                  {group.items.map((item, itemIndex) =>
+                    isNavLink(item) ? (
+                      <button
+                        key={item.to}
+                        type="button"
+                        className={`nav-link${isActive(navActivePath, item.to) ? ' active' : ''}`}
+                        onClick={() => openTab(item.to, item.label)}
+                      >
+                        {item.label}
+                      </button>
+                    ) : (
+                      <div
+                        key={`${groupKey}-divider-${itemIndex}`}
+                        className="nav-submenu-divider"
+                        role="separator"
+                        aria-hidden="true"
+                      />
+                    )
+                  )}
                 </div>
               </div>
             )
@@ -619,7 +647,6 @@ export function Layout() {
       </main>
     </div>
     </MasterCatalogProvider>
-    </ApiReadinessGate>
     </AppShellProvider>
     </ItemTypColorProvider>
   )

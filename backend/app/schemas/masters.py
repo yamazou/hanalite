@@ -155,6 +155,90 @@ class LocationUpdate(BaseModel):
     locationtyp_id: int | None = Field(default=None, gt=0)
 
 
+class NumberingElementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    numbering_element_id: int
+    numbering_element_cd: str
+    numbering_element_nm: str
+    element_kind: str
+    seq_width: int | None = None
+    literal_text: str | None = None
+    preview_sample: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class NumberingElementCreate(BaseModel):
+    numbering_element_cd: str = Field(min_length=1, max_length=50)
+    numbering_element_nm: str = Field(min_length=1, max_length=100)
+    element_kind: str = Field(min_length=1, max_length=30)
+    seq_width: int | None = Field(default=None, ge=1, le=20)
+    literal_text: str | None = Field(default=None, max_length=50)
+    preview_sample: str = Field(default="", max_length=20)
+
+
+class NumberingElementUpdate(BaseModel):
+    numbering_element_cd: str = Field(min_length=1, max_length=50)
+    numbering_element_nm: str = Field(min_length=1, max_length=100)
+    element_kind: str = Field(min_length=1, max_length=30)
+    seq_width: int | None = Field(default=None, ge=1, le=20)
+    literal_text: str | None = Field(default=None, max_length=50)
+    preview_sample: str = Field(default="", max_length=20)
+
+
+class NumberingPatternOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    numbering_pattern_id: int
+    numbering_pattern_cd: str
+    numbering_pattern_nm: str
+    element_1: str | None = None
+    element_2: str | None = None
+    element_3: str | None = None
+    element_4: str | None = None
+    element_5: str | None = None
+    element_6: str | None = None
+    element_7: str | None = None
+    element_8: str | None = None
+    element_9: str | None = None
+    element_10: str | None = None
+    seq_reset_scope: str
+    numbering_image: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class NumberingPatternCreate(BaseModel):
+    numbering_pattern_cd: str = Field(min_length=1, max_length=50)
+    numbering_pattern_nm: str = Field(min_length=1, max_length=100)
+    element_1: str | None = Field(default=None, max_length=50)
+    element_2: str | None = Field(default=None, max_length=50)
+    element_3: str | None = Field(default=None, max_length=50)
+    element_4: str | None = Field(default=None, max_length=50)
+    element_5: str | None = Field(default=None, max_length=50)
+    element_6: str | None = Field(default=None, max_length=50)
+    element_7: str | None = Field(default=None, max_length=50)
+    element_8: str | None = Field(default=None, max_length=50)
+    element_9: str | None = Field(default=None, max_length=50)
+    element_10: str | None = Field(default=None, max_length=50)
+    seq_reset_scope: str = Field(default="daily")
+
+
+class NumberingPatternUpdate(BaseModel):
+    numbering_pattern_cd: str = Field(min_length=1, max_length=50)
+    numbering_pattern_nm: str = Field(min_length=1, max_length=100)
+    element_1: str | None = Field(default=None, max_length=50)
+    element_2: str | None = Field(default=None, max_length=50)
+    element_3: str | None = Field(default=None, max_length=50)
+    element_4: str | None = Field(default=None, max_length=50)
+    element_5: str | None = Field(default=None, max_length=50)
+    element_6: str | None = Field(default=None, max_length=50)
+    element_7: str | None = Field(default=None, max_length=50)
+    element_8: str | None = Field(default=None, max_length=50)
+    element_9: str | None = Field(default=None, max_length=50)
+    element_10: str | None = Field(default=None, max_length=50)
+    seq_reset_scope: str = Field(default="daily")
+
+
 class ItemListOut(BaseModel):
     item_id: int
     item_cd: str
@@ -169,6 +253,9 @@ class ItemListOut(BaseModel):
     customer1_nm: str | None = None
     customer2_id: int | None = None
     customer2_nm: str | None = None
+    numbering_pattern_id: int | None = None
+    numbering_pattern_cd: str | None = None
+    numbering_pattern_nm: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -193,6 +280,7 @@ class ItemDetailOut(BaseModel):
     supplier3_id: int | None = None
     customer1_id: int | None = None
     customer2_id: int | None = None
+    numbering_pattern_id: int | None = None
 
 
 class ItemCreate(BaseModel):
@@ -204,6 +292,7 @@ class ItemCreate(BaseModel):
     supplier3_id: int | None = None
     customer1_id: int | None = None
     customer2_id: int | None = None
+    numbering_pattern_id: int | None = Field(default=None, gt=0)
 
 
 class ItemUpdate(BaseModel):
@@ -215,5 +304,6 @@ class ItemUpdate(BaseModel):
     supplier3_id: int | None = None
     customer1_id: int | None = None
     customer2_id: int | None = None
+    numbering_pattern_id: int | None = Field(default=None, gt=0)
 
 

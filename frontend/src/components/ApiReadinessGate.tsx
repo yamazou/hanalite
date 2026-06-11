@@ -10,18 +10,28 @@ type Props = {
 
 type GatePhase = 'checking' | 'ready' | 'unreachable' | 'database'
 
+/** Survives Layout mount/unmount so sign-in does not re-show the waiting panel. */
+let apiReadyCached = false
+
 export function ApiReadinessGate({ children }: Props) {
-  const [phase, setPhase] = useState<GatePhase>('checking')
+  const [phase, setPhase] = useState<GatePhase>(() =>
+    apiReadyCached ? 'ready' : 'checking'
+  )
   const [attempt, setAttempt] = useState(0)
   const [databaseError, setDatabaseError] = useState<string | null>(null)
 
   const check = useCallback(async () => {
+    if (apiReadyCached) {
+      setPhase('ready')
+      return
+    }
     setPhase('checking')
     setDatabaseError(null)
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       setAttempt(i + 1)
       const result = await probeApiHealth()
       if (result.state === 'ready') {
+        apiReadyCached = true
         setPhase('ready')
         return
       }

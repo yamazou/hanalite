@@ -5,7 +5,10 @@ import type { GridColumnLayoutOptions } from '../../hooks/useGridColumnLayoutOpt
 import { ErpPanelTitleBar } from './ErpPanelTitleBar'
 import { ErpTitleBarActions } from './ErpTitleBarActions'
 
-import type { GridFilterAnchorRect } from '../../utils/gridFilterAnchor'
+import type {
+  FilterMenuPointerAtOpen,
+  GridFilterAnchorRect,
+} from '../../utils/gridFilterAnchor'
 import { GRID_ROW_NAV_WRAP_ATTR } from '../../utils/headerListKeyboardNav'
 
 type Props = {
@@ -39,7 +42,12 @@ type Props = {
   isColumnSortable?: (columnKey: string) => boolean
   isColumnFilterable?: (columnKey: string) => boolean
   isColumnFilterActive?: (columnKey: string) => boolean
-  onFilterClick?: (columnKey: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => void
+  onFilterClick?: (
+    columnKey: string,
+    anchor: HTMLElement,
+    anchorRect: GridFilterAnchorRect,
+    pointerAtOpen: FilterMenuPointerAtOpen
+  ) => void
   layoutOptions?: GridColumnLayoutOptions
   /** Auto-fit rownum column to visible row count (Excel-like). */
   rowCount?: number

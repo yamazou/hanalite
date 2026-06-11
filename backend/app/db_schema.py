@@ -737,12 +737,129 @@ def ensure_m_items_nullable_itemtyp_id() -> None:
         )
 
 
+def ensure_numbering_masters() -> None:
+    """Numbering Elements / Patterns masters and item link."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if not insp.has_table("m_numbering_elements"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_numbering_elements (
+                        numbering_element_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        numbering_element_cd VARCHAR(50) NOT NULL,
+                        numbering_element_nm VARCHAR(100) NOT NULL,
+                        element_kind VARCHAR(30) NOT NULL,
+                        seq_width INT UNSIGNED NULL DEFAULT NULL,
+                        literal_text VARCHAR(50) NULL DEFAULT NULL,
+                        preview_sample VARCHAR(20) NOT NULL DEFAULT '',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        PRIMARY KEY (numbering_element_id),
+                        UNIQUE KEY uk_numbering_elements_cd (numbering_element_cd)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            )
+        if not insp.has_table("m_numbering_patterns"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_numbering_patterns (
+                        numbering_pattern_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        numbering_pattern_cd VARCHAR(50) NOT NULL,
+                        numbering_pattern_nm VARCHAR(100) NOT NULL,
+                        element_1 VARCHAR(50) NULL DEFAULT NULL,
+                        element_2 VARCHAR(50) NULL DEFAULT NULL,
+                        element_3 VARCHAR(50) NULL DEFAULT NULL,
+                        element_4 VARCHAR(50) NULL DEFAULT NULL,
+                        element_5 VARCHAR(50) NULL DEFAULT NULL,
+                        element_6 VARCHAR(50) NULL DEFAULT NULL,
+                        element_7 VARCHAR(50) NULL DEFAULT NULL,
+                        element_8 VARCHAR(50) NULL DEFAULT NULL,
+                        element_9 VARCHAR(50) NULL DEFAULT NULL,
+                        element_10 VARCHAR(50) NULL DEFAULT NULL,
+                        seq_reset_scope ENUM('never', 'daily', 'monthly', 'yearly')
+                            NOT NULL DEFAULT 'daily',
+                        numbering_image VARCHAR(100) NOT NULL DEFAULT '',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        deleted_at DATETIME NULL DEFAULT NULL,
+                        PRIMARY KEY (numbering_pattern_id),
+                        UNIQUE KEY uk_numbering_patterns_cd (numbering_pattern_cd)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            )
+        if not insp.has_table("m_numbering_sequences"):
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE m_numbering_sequences (
+                        numbering_sequence_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                        numbering_pattern_id INT UNSIGNED NOT NULL,
+                        scope_key VARCHAR(100) NOT NULL DEFAULT '',
+                        period_key VARCHAR(20) NOT NULL DEFAULT '',
+                        last_value INT UNSIGNED NOT NULL DEFAULT 0,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (numbering_sequence_id),
+                        UNIQUE KEY uk_numbering_sequences_scope (
+                            numbering_pattern_id, scope_key, period_key
+                        ),
+                        KEY idx_numbering_sequences_pattern (numbering_pattern_id),
+                        CONSTRAINT fk_numbering_sequences_pattern
+                            FOREIGN KEY (numbering_pattern_id)
+                            REFERENCES m_numbering_patterns (numbering_pattern_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """
+                )
+            )
+        if insp.has_table("m_items"):
+            cols = {c["name"] for c in insp.get_columns("m_items")}
+            if "numbering_pattern_id" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE m_items "
+                        "ADD COLUMN numbering_pattern_id INT UNSIGNED NULL DEFAULT NULL "
+                        "AFTER customer2_id"
+                    )
+                )
+                cols.add("numbering_pattern_id")
+            if "numbering_pattern_id" in cols:
+                fk_rows = conn.execute(
+                    text(
+                        """
+                        SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = 'm_items'
+                          AND CONSTRAINT_NAME = 'fk_items_numbering_pattern'
+                        """
+                    )
+                ).fetchall()
+                if not fk_rows and insp.has_table("m_numbering_patterns"):
+                    conn.execute(
+                        text(
+                            "ALTER TABLE m_items "
+                            "ADD CONSTRAINT fk_items_numbering_pattern "
+                            "FOREIGN KEY (numbering_pattern_id) "
+                            "REFERENCES m_numbering_patterns (numbering_pattern_id)"
+                        )
+                    )
+
+
 _TENANT_TABLES = (
     "m_locationtyps",
     "m_itemtyps",
     "m_suppliers",
     "m_customers",
     "m_locations",
+    "m_numbering_elements",
+    "m_numbering_patterns",
+    "m_numbering_sequences",
     "m_items",
     "m_itemprocs",
     "m_itemproc_inputs",

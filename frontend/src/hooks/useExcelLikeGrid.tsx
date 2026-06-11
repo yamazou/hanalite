@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -20,6 +21,7 @@ import { parseGridExcelFile } from '../utils/importGridExcel'
 import {
   readAnchorRect,
   resolveFilterGridRoot,
+  type FilterMenuPointerAtOpen,
   type GridFilterAnchorRect,
 } from '../utils/gridFilterAnchor'
 
@@ -70,6 +72,8 @@ type Options<T> = {
   rowDelete?: GridRowDelete
   /** Share column filter state across multiple grids (e.g. Production List Input Item). */
   columnFiltersApi?: GridColumnFiltersApi
+  /** Bump when async filter-option sources change (e.g. item-process cache). */
+  filterOptionsRevision?: number
 }
 
 export function useExcelLikeGrid<T>({
@@ -88,6 +92,7 @@ export function useExcelLikeGrid<T>({
   contextMenuItems = [],
   rowDelete,
   columnFiltersApi,
+  filterOptionsRevision = 0,
 }: Options<T>) {
   const sort = useGridSort()
   const internalFilters = useGridColumnFilters()
@@ -97,7 +102,9 @@ export function useExcelLikeGrid<T>({
     label: string
     anchor: HTMLElement
     anchorRect: GridFilterAnchorRect
+    pointerAtOpen: FilterMenuPointerAtOpen
     gridRoot: Element | null
+    openNonce: number
   } | null>(null)
   const [contextMenu, setContextMenu] = useState<GridContextMenuState>(null)
   const [contextMenuDeleteMode, setContextMenuDeleteMode] = useState(false)
@@ -105,7 +112,18 @@ export function useExcelLikeGrid<T>({
   const importInputRef = useRef<HTMLInputElement>(null)
   const rowDeleteRef = useRef(rowDelete)
   rowDeleteRef.current = rowDelete
+  const getFilterOptionRowsRef = useRef(getFilterOptionRows)
+  getFilterOptionRowsRef.current = getFilterOptionRows
+  const getFilterOptionsRef = useRef(getFilterOptions)
+  getFilterOptionsRef.current = getFilterOptions
+  const filterOptionRowsRef = useRef(filterOptionRows)
+  filterOptionRowsRef.current = filterOptionRows
   const [importBusy, setImportBusy] = useState(false)
+
+  useEffect(() => {
+    if (filterOptionsRevision === 0) return
+    setFilterMenu(null)
+  }, [filterOptionsRevision])
 
   const resolveSortValue = getSortValue ?? getFilterValue
 
@@ -122,25 +140,26 @@ export function useExcelLikeGrid<T>({
 
   const resolveFilterOptionValue = getFilterOptionValue ?? getFilterValue
 
-  const filterOptions = useMemo(() => {
-    if (!filterMenu) return []
-    const filterOptionSource = getFilterOptionRows?.() ?? filterOptionRows ?? rows
-    if (getFilterOptionRows || filterOptionRows || !getFilterOptions) {
-      return collectUniqueFilterValues(
-        filterOptionSource,
-        filterMenu.key,
-        resolveFilterOptionValue
-      )
-    }
-    return getFilterOptions(filterMenu.key)
-  }, [
-    filterMenu,
-    filterOptionRows,
-    rows,
-    getFilterOptionRows,
-    getFilterOptions,
-    resolveFilterOptionValue,
-  ])
+  // Recompute every render while the menu is open (BOM cache can load after open).
+  void filterOptionsRevision
+  const filterOptions =
+    filterMenu == null
+      ? []
+      : (() => {
+          if (getFilterOptionsRef.current) {
+            return getFilterOptionsRef.current(filterMenu.key)
+          }
+          const filterOptionSource = getFilterOptionRowsRef.current
+            ? getFilterOptionRowsRef.current()
+            : filterOptionRowsRef.current !== undefined
+              ? filterOptionRowsRef.current
+              : rows
+          return collectUniqueFilterValues(
+            filterOptionSource,
+            filterMenu.key,
+            resolveFilterOptionValue
+          )
+        })()
 
   const filterColumnLabel =
     columns.find((c) => c.key === filterMenu?.key)?.label ?? filterMenu?.label ?? ''
@@ -230,21 +249,34 @@ export function useExcelLikeGrid<T>({
     isColumnSortable: isGridDataColumn,
     isColumnFilterable: isGridDataColumn,
     isColumnFilterActive: filters.isActive,
-    onFilterClick: (key: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => {
+    onFilterClick: (
+      key: string,
+      anchor: HTMLElement,
+      anchorRect: GridFilterAnchorRect,
+      pointerAtOpen: FilterMenuPointerAtOpen
+    ) => {
       const col = columns.find((c) => c.key === key)
       setFilterMenu({
         key,
         label: col?.label ?? key,
         anchor,
         anchorRect,
+        pointerAtOpen,
         gridRoot: resolveFilterGridRoot(anchor),
+        openNonce: Date.now(),
       })
     },
   }
 
+  const filterMenuOptionsKey =
+    filterMenu != null
+      ? `${filterMenu.openNonce}:${filterMenu.key}:${filterOptions.length}`
+      : ''
+
   const filterMenuElement: ReactNode =
     filterMenu != null ? (
       <GridColumnFilterMenu
+        key={filterMenuOptionsKey}
         columnLabel={filterColumnLabel}
         filterColumnKey={filterMenu.key}
         filterGridRoot={filterMenu.gridRoot}
@@ -252,6 +284,7 @@ export function useExcelLikeGrid<T>({
         selected={filters.getSelected(filterMenu.key, filterOptions)}
         anchorEl={filterMenu.anchor}
         anchorRectAtOpen={filterMenu.anchorRect}
+        pointerAtOpen={filterMenu.pointerAtOpen}
         onApply={(selected) =>
           filters.applySelection(filterMenu.key, selected, filterOptions)
         }

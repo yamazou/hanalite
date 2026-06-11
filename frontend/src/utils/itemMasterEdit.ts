@@ -9,6 +9,7 @@ export type EditItemRow = {
   itemtyp_id: number | ''
   supplier_ids: (number | '')[]
   customer_ids: (number | '')[]
+  numbering_pattern_id: number | ''
 } & MasterRowDates
 
 let nextKey = 0
@@ -31,6 +32,7 @@ export function listRowToEditItemRow(row: ItemListRow): EditItemRow {
       row.supplier3_id ?? '',
     ],
     customer_ids: [row.customer1_id ?? '', row.customer2_id ?? ''],
+    numbering_pattern_id: row.numbering_pattern_id ?? '',
     created_at: row.created_at ?? null,
     updated_at: row.updated_at ?? null,
   }
@@ -44,6 +46,7 @@ export function emptyEditItemRow(defaultItemtypId?: number | ''): EditItemRow {
     itemtyp_id: defaultItemtypId ?? '',
     supplier_ids: ['', '', ''],
     customer_ids: ['', ''],
+    numbering_pattern_id: '',
     ...EMPTY_MASTER_ROW_DATES,
   }
 }
@@ -74,6 +77,8 @@ export function buildItemPayload(row: EditItemRow): ItemPayload {
     supplier3_id: supplierIds[2] !== '' ? Number(supplierIds[2]) : null,
     customer1_id: customerIds[0] !== '' ? Number(customerIds[0]) : null,
     customer2_id: customerIds[1] !== '' ? Number(customerIds[1]) : null,
+    numbering_pattern_id:
+      row.numbering_pattern_id === '' ? null : Number(row.numbering_pattern_id),
   }
 }
 
@@ -87,6 +92,7 @@ export type ItemRowSnapshot = {
   supplier3_id: number | null
   customer1_id: number | null
   customer2_id: number | null
+  numbering_pattern_id: number | null
 }
 
 export function itemRowSnapshot(row: EditItemRow): ItemRowSnapshot | null {
@@ -101,6 +107,7 @@ export function itemRowSnapshot(row: EditItemRow): ItemRowSnapshot | null {
     supplier3_id: payload.supplier3_id,
     customer1_id: payload.customer1_id,
     customer2_id: payload.customer2_id,
+    numbering_pattern_id: payload.numbering_pattern_id,
   }
 }
 

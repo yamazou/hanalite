@@ -101,12 +101,40 @@ export const masterItemTypEditColumns: GridColumnDef[] = [
   ...MASTER_CREATED_UPDATED_COLUMNS,
 ]
 
+export const masterNumberingElementEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'code', label: 'Element Code', defaultWidth: 88, headerRequired: true },
+  { key: 'name', label: 'Element Name', defaultWidth: 140 },
+  { key: 'kind', label: 'Kind', defaultWidth: 100 },
+  { key: 'seq_width', label: 'Width', defaultWidth: 56, className: 'erp-col-num' },
+  { key: 'literal', label: 'Literal', defaultWidth: 80 },
+  { key: 'preview', label: 'Preview', defaultWidth: 72 },
+  ...MASTER_CREATED_UPDATED_COLUMNS,
+]
+
+export const masterNumberingPatternEditColumns: GridColumnDef[] = [
+  GRID_ROWNUM_COLUMN,
+  GRID_SELECT_COLUMN,
+  { key: 'code', label: 'Numbering Pattern', defaultWidth: 88, headerRequired: true },
+  { key: 'name', label: 'Pattern Name', defaultWidth: 140 },
+  ...Array.from({ length: 10 }, (_, i) => ({
+    key: `element_${i + 1}`,
+    label: `Element ${i + 1}`,
+    defaultWidth: 72,
+  })),
+  { key: 'seq_reset', label: 'SEQ Reset', defaultWidth: 80 },
+  { key: 'image', label: 'Numbering Image', defaultWidth: 120 },
+  ...MASTER_CREATED_UPDATED_COLUMNS,
+]
+
 export const masterItemEditColumns: GridColumnDef[] = [
   GRID_ROWNUM_COLUMN,
   GRID_SELECT_COLUMN,
   { key: 'code', label: 'Item Code', defaultWidth: 96, headerRequired: true },
   { key: 'name', label: 'Item Name', defaultWidth: 160 },
   { key: 'type', label: 'Item Type', defaultWidth: 72, headerRequired: true },
+  { key: 'numbering_pattern', label: 'Numbering Pattern', defaultWidth: 120 },
   { key: 'supplier1', label: 'Supplier 1', defaultWidth: 120 },
   { key: 'supplier2', label: 'Supplier 2', defaultWidth: 120 },
   { key: 'supplier3', label: 'Supplier 3', defaultWidth: 120 },

@@ -155,6 +155,14 @@ export function DraftDetailPanel({
       {error && <Alert type="error" message={error} />}
       {message && <Alert type="success" message={message} />}
 
+      {copy.detailLinesSectionTitle ? (
+        <div className="erp-production-detail-section-title">
+          <span className="erp-production-detail-section-title-label">
+            {copy.detailLinesSectionTitle}
+          </span>
+        </div>
+      ) : null}
+
       {canEdit ? (
         <DraftEditableLineGrid
           variant={variant}

@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { appRouteObjects } from './appRoutes'
+import { ApiReadinessGate } from './components/ApiReadinessGate'
 import { Layout } from './components/Layout'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { LoginPage } from './pages/LoginPage'
@@ -35,7 +36,9 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <AuthenticatedApp />
+        <ApiReadinessGate>
+          <AuthenticatedApp />
+        </ApiReadinessGate>
       </BrowserRouter>
     </AuthProvider>
   )

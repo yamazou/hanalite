@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -47,6 +47,60 @@ class Supplier(TenantMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class NumberingElement(TenantMixin, Base):
+    __tablename__ = "m_numbering_elements"
+
+    numbering_element_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    numbering_element_cd: Mapped[str] = mapped_column(String(50))
+    numbering_element_nm: Mapped[str] = mapped_column(String(100))
+    element_kind: Mapped[str] = mapped_column(String(30))
+    seq_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    literal_text: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    preview_sample: Mapped[str] = mapped_column(String(20), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NumberingPattern(TenantMixin, Base):
+    __tablename__ = "m_numbering_patterns"
+
+    numbering_pattern_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    numbering_pattern_cd: Mapped[str] = mapped_column(String(50))
+    numbering_pattern_nm: Mapped[str] = mapped_column(String(100))
+    element_1: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_2: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_3: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_4: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_5: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_6: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_7: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_8: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_9: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    element_10: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    seq_reset_scope: Mapped[str] = mapped_column(
+        Enum("never", "daily", "monthly", "yearly", name="numbering_seq_reset_scope"),
+        default="daily",
+    )
+    numbering_image: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class NumberingSequence(TenantMixin, Base):
+    __tablename__ = "m_numbering_sequences"
+
+    numbering_sequence_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    numbering_pattern_id: Mapped[int] = mapped_column(
+        ForeignKey("m_numbering_patterns.numbering_pattern_id")
+    )
+    scope_key: Mapped[str] = mapped_column(String(100), default="")
+    period_key: Mapped[str] = mapped_column(String(20), default="")
+    last_value: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class Customer(TenantMixin, Base):
     __tablename__ = "m_customers"
 
@@ -88,6 +142,9 @@ class Item(TenantMixin, Base):
     supplier3_id: Mapped[int | None] = mapped_column(ForeignKey("m_suppliers.suppliers_id"), nullable=True)
     customer1_id: Mapped[int | None] = mapped_column(ForeignKey("m_customers.customers_id"), nullable=True)
     customer2_id: Mapped[int | None] = mapped_column(ForeignKey("m_customers.customers_id"), nullable=True)
+    numbering_pattern_id: Mapped[int | None] = mapped_column(
+        ForeignKey("m_numbering_patterns.numbering_pattern_id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime)
     updated_at: Mapped[datetime] = mapped_column(DateTime)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

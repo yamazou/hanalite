@@ -19,6 +19,8 @@ import { CustomersPage } from './pages/masters/CustomersPage'
 import { SuppliersPage } from './pages/masters/SuppliersPage'
 import { CompaniesPage } from './pages/masters/CompaniesPage'
 import { UsersPage } from './pages/masters/UsersPage'
+import { NumberingElementsPage } from './pages/masters/NumberingElementsPage'
+import { NumberingPatternsPage } from './pages/masters/NumberingPatternsPage'
 import { ApiDocsPage } from './pages/ApiDocsPage'
 import { ProductionOrdersPage } from './pages/ProductionOrdersPage'
 import { ProductionEntryPage } from './pages/ProductionEntryPage'
@@ -59,6 +61,8 @@ export const appRouteObjects: RouteObject[] = [
   { path: 'masters/items', element: <ItemsPage /> },
   { path: 'masters/boms', element: <ActiveTabNavigate to="/masters/items" replace /> },
   { path: 'masters/item-processes', element: <ItemProcessesPage /> },
+  { path: 'masters/numbering-elements', element: <NumberingElementsPage /> },
+  { path: 'masters/numbering-patterns', element: <NumberingPatternsPage /> },
   { path: 'api-docs', element: <ApiDocsPage /> },
   { path: '*', element: <ActiveTabNavigate to="/home" replace /> },
 ]

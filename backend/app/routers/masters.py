@@ -29,6 +29,12 @@ from app.schemas.masters import (
     MoveTypCreate,
     MoveTypMasterOut,
     MoveTypUpdate,
+    NumberingElementCreate,
+    NumberingElementOut,
+    NumberingElementUpdate,
+    NumberingPatternCreate,
+    NumberingPatternOut,
+    NumberingPatternUpdate,
     CustomerCreate,
     CustomerOut,
     CustomerUpdate,
@@ -51,6 +57,8 @@ from app.services.masters import (
     create_location,
     create_locationtyp,
     create_movetyp,
+    create_numbering_element,
+    create_numbering_pattern,
     create_supplier,
     delete_customer,
     delete_item,
@@ -58,6 +66,8 @@ from app.services.masters import (
     delete_location,
     delete_locationtyp,
     delete_movetyp,
+    delete_numbering_element,
+    delete_numbering_pattern,
     delete_supplier,
     get_item,
     list_items,
@@ -65,6 +75,8 @@ from app.services.masters import (
     list_locations,
     list_locationtyps,
     list_movetyps,
+    list_numbering_elements,
+    list_numbering_patterns,
     list_customers,
     list_suppliers,
     search_items,
@@ -74,6 +86,8 @@ from app.services.masters import (
     update_location,
     update_locationtyp,
     update_movetyp,
+    update_numbering_element,
+    update_numbering_pattern,
     update_supplier,
 )
 
@@ -380,6 +394,98 @@ def api_update_item(item_id: int, payload: ItemUpdate, db: Annotated[Session, De
 def api_delete_item(item_id: int, db: Annotated[Session, Depends(get_db)]):
     try:
         delete_item(db, item_id)
+        db.commit()
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/numbering-elements", response_model=list[NumberingElementOut])
+def api_list_numbering_elements(db: Annotated[Session, Depends(get_db)]):
+    rows = list_numbering_elements(db)
+    db.commit()
+    return rows
+
+
+@router.post("/numbering-elements", response_model=NumberingElementOut, status_code=201)
+def api_create_numbering_element(
+    payload: NumberingElementCreate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = create_numbering_element(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/numbering-elements/{numbering_element_id}", response_model=NumberingElementOut)
+def api_update_numbering_element(
+    numbering_element_id: int,
+    payload: NumberingElementUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        row = update_numbering_element(db, numbering_element_id, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.delete("/numbering-elements/{numbering_element_id}", status_code=204, response_class=Response)
+def api_delete_numbering_element(
+    numbering_element_id: int, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        delete_numbering_element(db, numbering_element_id)
+        db.commit()
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.get("/numbering-patterns", response_model=list[NumberingPatternOut])
+def api_list_numbering_patterns(db: Annotated[Session, Depends(get_db)]):
+    return list_numbering_patterns(db)
+
+
+@router.post("/numbering-patterns", response_model=NumberingPatternOut, status_code=201)
+def api_create_numbering_pattern(
+    payload: NumberingPatternCreate, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        row = create_numbering_pattern(db, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.put("/numbering-patterns/{numbering_pattern_id}", response_model=NumberingPatternOut)
+def api_update_numbering_pattern(
+    numbering_pattern_id: int,
+    payload: NumberingPatternUpdate,
+    db: Annotated[Session, Depends(get_db)],
+):
+    try:
+        row = update_numbering_pattern(db, numbering_pattern_id, payload)
+        db.commit()
+        return row
+    except MasterError as e:
+        db.rollback()
+        raise _handle_error(e) from e
+
+
+@router.delete("/numbering-patterns/{numbering_pattern_id}", status_code=204, response_class=Response)
+def api_delete_numbering_pattern(
+    numbering_pattern_id: int, db: Annotated[Session, Depends(get_db)]
+):
+    try:
+        delete_numbering_pattern(db, numbering_pattern_id)
         db.commit()
     except MasterError as e:
         db.rollback()

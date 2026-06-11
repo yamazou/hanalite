@@ -35,6 +35,7 @@ from app.services.itemprocs import (
     resolve_rm_location_id_for_itemproc_step,
 )
 from app.services.masters import MasterError
+from app.services.numbering import NumberingError, resolve_lot_for_item
 from app.tenant import stamp_new, stamp_update
 
 
@@ -259,6 +260,13 @@ def _replace_inputs(db: Session, order: ProductionOrder, inputs: list[Production
     for idx, line in enumerate(inputs, start=1):
         _get_item_or_error(db, line.item_id)
         _get_location_or_error(db, line.from_location_id)
+        raw_lot = line.lot.strip() if line.lot else ""
+        try:
+            resolved_lot = resolve_lot_for_item(
+                db, item_id=line.item_id, lot=raw_lot or "*"
+            )
+        except NumberingError as e:
+            raise ProductionError(str(e)) from e
         new_inp = ProductionOrderInput(
             production_order_id=order.production_order_id,
             line_no=line.line_no or idx,
@@ -266,7 +274,7 @@ def _replace_inputs(db: Session, order: ProductionOrder, inputs: list[Production
             from_location_id=line.from_location_id,
             req_qty=Decimal(line.req_qty),
             consume_qty=Decimal(line.consume_qty),
-            lot=(line.lot.strip() if line.lot else None),
+            lot=resolved_lot,
             created_at=now,
             updated_at=now,
         )
@@ -545,6 +553,12 @@ def create_order(
 ) -> ProductionOrderRead:
     ctx = get_tenant()
     _get_item_or_error(db, payload.parent_item_id)
+    try:
+        output_lot = resolve_lot_for_item(
+            db, item_id=payload.parent_item_id, lot=payload.lot
+        )
+    except NumberingError as e:
+        raise ProductionError(str(e)) from e
     now = _now()
     row = ProductionOrder(
         status="registered",
@@ -554,7 +568,7 @@ def create_order(
         parent_item_id=payload.parent_item_id,
         planned_qty=Decimal(payload.planned_qty),
         actual_qty=None,
-        lot=payload.lot.strip(),
+        lot=output_lot,
         notes=(payload.notes.strip() if payload.notes else None),
         created_at=now,
         updated_at=now,
@@ -668,7 +682,12 @@ def update_order(db: Session, order_id: int, payload: ProductionOrderUpdate) -> 
     if payload.actual_qty is not None:
         row.actual_qty = Decimal(payload.actual_qty)
     if payload.lot is not None:
-        row.lot = payload.lot.strip()
+        try:
+            row.lot = resolve_lot_for_item(
+                db, item_id=row.parent_item_id, lot=payload.lot
+            )
+        except NumberingError as e:
+            raise ProductionError(str(e)) from e
     if payload.notes is not None:
         row.notes = payload.notes.strip() or None
     if payload.status is not None:

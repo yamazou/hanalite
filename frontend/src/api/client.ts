@@ -50,6 +50,18 @@ const API_PREFIX = '/api/v1'
 let apiAuthToken: string | null = null
 let apiUnauthorizedHandler: (() => void) | null = null
 
+/** Thrown when the session ended (sign-out or 401). Do not show as a screen error. */
+export class SessionEndedError extends Error {
+  constructor() {
+    super('')
+    this.name = 'SessionEndedError'
+  }
+}
+
+export function isSessionEndedError(error: unknown): boolean {
+  return error instanceof SessionEndedError
+}
+
 export function setApiAuthToken(token: string | null): void {
   apiAuthToken = token
 }
@@ -210,8 +222,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(API_UNAVAILABLE_MSG)
   }
 
-  if (res.status === 401 && !path.startsWith('/auth/companies') && !path.startsWith('/auth/login')) {
-    apiUnauthorizedHandler?.()
+  const isLoginApi =
+    path.startsWith('/auth/companies') || path.startsWith('/auth/login')
+  if (res.status === 401 && !isLoginApi) {
+    if (apiAuthToken) {
+      apiUnauthorizedHandler?.()
+    }
+    throw new SessionEndedError()
   }
 
   if (!res.ok) {
@@ -455,6 +472,42 @@ export const api = {
     }),
   deleteMoveTyp: (movetyps_id: number) =>
     request<void>(`/masters/movetyps/${movetyps_id}`, { method: 'DELETE' }),
+
+  listNumberingElementsMaster: () =>
+    request<import('../types/masters').NumberingElementMaster[]>('/masters/numbering-elements'),
+  createNumberingElement: (payload: import('../types/masters').NumberingElementPayload) =>
+    request<import('../types/masters').NumberingElementMaster>('/masters/numbering-elements', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateNumberingElement: (
+    numbering_element_id: number,
+    payload: import('../types/masters').NumberingElementPayload
+  ) =>
+    request<import('../types/masters').NumberingElementMaster>(
+      `/masters/numbering-elements/${numbering_element_id}`,
+      { method: 'PUT', body: JSON.stringify(payload) }
+    ),
+  deleteNumberingElement: (numbering_element_id: number) =>
+    request<void>(`/masters/numbering-elements/${numbering_element_id}`, { method: 'DELETE' }),
+
+  listNumberingPatternsMaster: () =>
+    request<import('../types/masters').NumberingPatternMaster[]>('/masters/numbering-patterns'),
+  createNumberingPattern: (payload: import('../types/masters').NumberingPatternPayload) =>
+    request<import('../types/masters').NumberingPatternMaster>('/masters/numbering-patterns', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateNumberingPattern: (
+    numbering_pattern_id: number,
+    payload: import('../types/masters').NumberingPatternPayload
+  ) =>
+    request<import('../types/masters').NumberingPatternMaster>(
+      `/masters/numbering-patterns/${numbering_pattern_id}`,
+      { method: 'PUT', body: JSON.stringify(payload) }
+    ),
+  deleteNumberingPattern: (numbering_pattern_id: number) =>
+    request<void>(`/masters/numbering-patterns/${numbering_pattern_id}`, { method: 'DELETE' }),
 
   listLocationsMaster: () => request<LocationMaster[]>('/masters/locations'),
   createLocation: (payload: {

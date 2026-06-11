@@ -53,8 +53,9 @@ import { ensureTrailingBlankRow, updateRowWithTrailingBlank } from '../utils/gri
 import { deleteSelectedConfirm, removeSelectedGridRows, savedCountMessage } from '../utils/gridRowChange'
 import {
   aggregateProductionInputsFromOrders,
-  aggregateTraceabilityInputRows,
+  buildTraceabilityAggregatedRows,
   orderIdsMatchingInputColumnFilters,
+  type TraceabilityFilterLiveEdits,
 } from '../utils/productionOrderInputAggregate'
 import {
   buildProductionOrderExportBodyRows,
@@ -262,6 +263,8 @@ function ProductionOrdersListMain() {
   const [itemProcessCache, setItemProcessCache] = useState<Map<number, ItemProcessesOut>>(
     () => new Map()
   )
+  const itemProcessCacheRef = useRef(itemProcessCache)
+  itemProcessCacheRef.current = itemProcessCache
   const orderLayoutRef = useRef<GridColumnLayout | null>(null)
   const ordersGridRef = useRef<{ displayRows: ProductionOrderListItem[] } | null>(null)
   const detailRequestRef = useRef(0)
@@ -295,19 +298,44 @@ function ProductionOrdersListMain() {
     []
   )
 
+  const handleOrderTraceabilityChange = useCallback((enabled: boolean) => {
+    setOrderTraceabilityEnabled(enabled)
+    if (!enabled) {
+      setTraceabilityBomReady(false)
+      setLoadingTraceabilityData(false)
+      return
+    }
+    traceabilityLoadPassRef.current += 1
+    setTraceabilityBomReady(false)
+    setLoadingTraceabilityData(true)
+  }, [])
+
   useEffect(() => {
     setInputColumnFilters({})
   }, [orderTraceabilityEnabled])
+
+  useEffect(() => {
+    if (orderTraceabilityEnabled) return
+    setInputColumnFilters({})
+    setAllOrdersDetailCache(new Map())
+    setLoadingAllOrderInputs(false)
+    setTraceabilityBomReady(false)
+    setLoadingTraceabilityData(false)
+  }, [statusFilter, orderTraceabilityEnabled])
   const [allOrdersDetailCache, setAllOrdersDetailCache] = useState<
     Map<number, ProductionOrderDetail>
   >(() => new Map())
   const [loadingAllOrderInputs, setLoadingAllOrderInputs] = useState(false)
+  /** Material-to-Lot Trace: order details + item-process BOM (single pipeline). */
+  const [loadingTraceabilityData, setLoadingTraceabilityData] = useState(false)
+  const [traceabilityBomReady, setTraceabilityBomReady] = useState(false)
+  const [traceabilityBomRevision, setTraceabilityBomRevision] = useState(0)
+  const traceabilityLoadPassRef = useRef(0)
 
   const loadOrders = useCallback(async () => {
     const keepListGridVisible = statusFilter === 'registered'
     if (!keepListGridVisible) {
       setLoading(true)
-      setOrdersHydrated(false)
     }
     setError(null)
     try {
@@ -479,8 +507,14 @@ function ProductionOrdersListMain() {
       itemtyps,
       useEditRows: canEditDetail,
     })
+    const seedIds = [...new Set([...wipIds, panelDetail.parent_item_id])]
     void (async () => {
-      const next = await loadWipItemProcessCache(wipIds, masterItems, itemtyps, new Map())
+      const next = await loadWipItemProcessCache(
+        seedIds,
+        masterItems,
+        itemtyps,
+        new Map(itemProcessCacheRef.current)
+      )
       if (!cancelled) {
         setItemProcessCache((prev) => {
           const merged = new Map(prev)
@@ -1206,10 +1240,9 @@ function ProductionOrdersListMain() {
       setLoadingAllOrderInputs(false)
       return
     }
-    const needsAllOrderDetails =
-      orderTraceabilityEnabled || Object.keys(inputColumnFilters).length > 0
-    if (!needsAllOrderDetails) {
-      setLoadingAllOrderInputs(false)
+    const needsAllOrderDetails = Object.keys(inputColumnFilters).length > 0
+    if (!needsAllOrderDetails || orderTraceabilityEnabled) {
+      if (!orderTraceabilityEnabled) setLoadingAllOrderInputs(false)
       return
     }
     let cancelled = false
@@ -1244,6 +1277,110 @@ function ProductionOrdersListMain() {
     }
   }, [visibleOrders, orderTraceabilityEnabled, inputColumnFilters])
 
+  useEffect(() => {
+    if (!orderTraceabilityEnabled) {
+      setLoadingTraceabilityData(false)
+      setTraceabilityBomReady(false)
+      return
+    }
+    const orderIds = visibleOrders.map((row) => row.production_order_id)
+    if (orderIds.length === 0) {
+      setLoadingTraceabilityData(false)
+      setTraceabilityBomReady(false)
+      return
+    }
+    traceabilityLoadPassRef.current += 1
+    const loadPass = traceabilityLoadPassRef.current
+    setLoadingTraceabilityData(true)
+    let cancelled = false
+    void (async () => {
+      try {
+        const fetched = new Map<number, ProductionOrderDetail>()
+        for (const orderId of orderIds) {
+          if (cancelled) return
+          try {
+            fetched.set(orderId, await api.getProductionOrder(orderId))
+          } catch {
+            /* skip orders that fail to load */
+          }
+        }
+        if (cancelled) return
+
+        setAllOrdersDetailCache((prev) => {
+          const next = new Map(prev)
+          for (const [id, row] of fetched) next.set(id, row)
+          for (const id of [...next.keys()]) {
+            if (!orderIds.includes(id)) next.delete(id)
+          }
+          return next
+        })
+
+        const orders = [...fetched.values()]
+        const seedIds = new Set<number>()
+        for (const order of orders) {
+          seedIds.add(order.parent_item_id)
+          for (const inp of order.inputs) {
+            if (inp.item_id) seedIds.add(inp.item_id)
+          }
+        }
+
+        // Fresh BOM walk so nested process masters load (avoid incomplete cached parents).
+        let cacheAfterBom = await loadWipItemProcessCache(
+          [...seedIds],
+          masterItems,
+          itemtyps,
+          new Map()
+        )
+        for (const order of orders) {
+          const parentData = cacheAfterBom.get(order.parent_item_id)
+          if (parentData?.processes.length) continue
+          try {
+            const fresh = await api.getItemProcesses(order.parent_item_id)
+            cacheAfterBom.set(order.parent_item_id, fresh)
+          } catch {
+            /* FG may have no process master */
+          }
+        }
+        cacheAfterBom = await loadWipItemProcessCache(
+          [...seedIds],
+          masterItems,
+          itemtyps,
+          cacheAfterBom
+        )
+        if (cancelled || loadPass !== traceabilityLoadPassRef.current) return
+
+        const hasProcessMaster = orders.some((order) => {
+          const data = cacheAfterBom.get(order.parent_item_id)
+          return (data?.processes.length ?? 0) > 0
+        })
+        if (!hasProcessMaster) {
+          setTraceabilityBomReady(false)
+          setLoadingTraceabilityData(false)
+          return
+        }
+
+        flushSync(() => {
+          setItemProcessCache((prev) => {
+            const merged = new Map(prev)
+            for (const [itemId, data] of cacheAfterBom) merged.set(itemId, data)
+            return merged
+          })
+          setTraceabilityBomRevision((revision) => revision + 1)
+        })
+        flushSync(() => {
+          setTraceabilityBomReady(true)
+        })
+      } finally {
+        if (!cancelled && loadPass === traceabilityLoadPassRef.current) {
+          setLoadingTraceabilityData(false)
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [orderTraceabilityEnabled, visibleOrders, masterItems, itemtyps])
+
   const allOrdersForHeaderFilter = useMemo(
     () =>
       visibleOrders
@@ -1253,7 +1390,7 @@ function ProductionOrdersListMain() {
   )
 
   useEffect(() => {
-    if (allOrdersForHeaderFilter.length === 0) return
+    if (orderTraceabilityEnabled || allOrdersForHeaderFilter.length === 0) return
     const parentIds = [
       ...new Set(allOrdersForHeaderFilter.map((order) => order.parent_item_id)),
     ]
@@ -1284,31 +1421,61 @@ function ProductionOrdersListMain() {
     return () => {
       cancelled = true
     }
-  }, [allOrdersForHeaderFilter])
+  }, [allOrdersForHeaderFilter, orderTraceabilityEnabled])
+
+  const headerTraceabilityLiveEdits = useMemo(() => {
+    const map = new Map<number, TraceabilityFilterLiveEdits>()
+    const headerLiveOrderId = panelDetail?.production_order_id ?? selectedId ?? null
+    if (headerLiveOrderId != null && panelDetail && canEditPlan) {
+      map.set(headerLiveOrderId, {
+        processRows: editProcessRows,
+        inputRows: editInputRows,
+      })
+    }
+    return map
+  }, [
+    panelDetail,
+    selectedId,
+    canEditPlan,
+    editProcessRows,
+    editInputRows,
+  ])
 
   const aggregatedInputsForHeaderFilter = useMemo(() => {
     if (allOrdersForHeaderFilter.length === 0) return []
     if (orderTraceabilityEnabled) {
-      return aggregateTraceabilityInputRows({
+      return buildTraceabilityAggregatedRows({
         orders: allOrdersForHeaderFilter,
-        selectedOrderId: detail?.production_order_id ?? null,
-        liveInputRows: detail && canEditPlan ? editInputRows : undefined,
         locations: masterLocations,
+        items: masterItems,
+        itemtyps,
+        itemProcessCache,
+        traceabilityFilterReady: traceabilityBomReady,
+        selectedOrderId: panelDetail?.production_order_id ?? selectedId ?? null,
+        liveEditsByOrderId: headerTraceabilityLiveEdits,
+        includeTree: true,
       })
     }
     return aggregateProductionInputsFromOrders({
       orders: allOrdersForHeaderFilter,
-      selectedOrderId: detail?.production_order_id ?? null,
-      liveInputRows: detail && canEditPlan ? editInputRows : undefined,
+      selectedOrderId: panelDetail?.production_order_id ?? selectedId ?? null,
+      liveInputRows: panelDetail && canEditPlan ? editInputRows : undefined,
       locations: masterLocations,
     })
   }, [
     allOrdersForHeaderFilter,
-    detail?.production_order_id,
+    panelDetail,
+    selectedId,
     orderTraceabilityEnabled,
     canEditPlan,
     editInputRows,
+    editProcessRows,
     masterLocations,
+    itemProcessCache,
+    masterItems,
+    itemtyps,
+    traceabilityBomReady,
+    headerTraceabilityLiveEdits,
   ])
 
   const headerOrderIdsFromInputFilter = useMemo(
@@ -1316,18 +1483,57 @@ function ProductionOrdersListMain() {
     [aggregatedInputsForHeaderFilter, inputColumnFilters]
   )
 
-  const ordersForHeaderGrid = useMemo(() => {
-    if (!headerOrderIdsFromInputFilter) return visibleOrders
-    return visibleOrders.filter((row) =>
-      headerOrderIdsFromInputFilter.has(row.production_order_id)
-    )
-  }, [visibleOrders, headerOrderIdsFromInputFilter])
+  const applyInputFilterToHeader =
+    orderTraceabilityEnabled &&
+    headerOrderIdsFromInputFilter != null &&
+    !loadingTraceabilityData
 
-  /** Traceability grid + filter pick-list: all header-list orders (not narrowed by Input filters). */
+  const ordersForHeaderGrid = useMemo(() => {
+    if (!applyInputFilterToHeader) return visibleOrders
+    return visibleOrders.filter((row) =>
+      headerOrderIdsFromInputFilter!.has(row.production_order_id)
+    )
+  }, [visibleOrders, headerOrderIdsFromInputFilter, applyInputFilterToHeader])
+
+  /** Traceability Input grid: orders that match active Input column filters (same as header list). */
   const allOrdersForInput = useMemo(() => {
     if (!orderTraceabilityEnabled) return []
-    return allOrdersForHeaderFilter
-  }, [orderTraceabilityEnabled, allOrdersForHeaderFilter])
+    if (!applyInputFilterToHeader || !headerOrderIdsFromInputFilter) {
+      return allOrdersForHeaderFilter
+    }
+    return allOrdersForHeaderFilter.filter((order) =>
+      headerOrderIdsFromInputFilter.has(order.production_order_id)
+    )
+  }, [
+    orderTraceabilityEnabled,
+    allOrdersForHeaderFilter,
+    headerOrderIdsFromInputFilter,
+    applyInputFilterToHeader,
+  ])
+
+  useEffect(() => {
+    if (!orderTraceabilityEnabled) return
+    if (loadingTraceabilityData) return
+    if (headerOrderIdsFromInputFilter === null) return
+    if (ordersForHeaderGrid.length === 0) {
+      if (selectedId !== null) setSelectedId(null)
+      return
+    }
+    if (
+      selectedId != null &&
+      headerOrderIdsFromInputFilter.has(selectedId)
+    ) {
+      return
+    }
+    const nextId = ordersForHeaderGrid[0]?.production_order_id ?? null
+    if (selectedId !== nextId) setSelectedId(nextId)
+  }, [
+    orderTraceabilityEnabled,
+    loadingTraceabilityData,
+    headerOrderIdsFromInputFilter,
+    ordersForHeaderGrid,
+    selectedId,
+  ])
 
   const headerGridDeleteSelectionCount = useMemo(() => {
     const orderCount = ordersForHeaderGrid.filter((row) =>
@@ -2008,13 +2214,14 @@ function ProductionOrdersListMain() {
       onSaveGrid={handleSaveAllGridLayouts}
       saveGridIsDirty={saveGridIsDirty}
     >
-      {ordersGrid.filterMenuElement}
       {ordersGrid.contextMenuElement}
       {ordersHydrated ? (
       <ListDetailSplitLayout
         listHeightRatio={panelSplit.layout.listHeightRatio}
         onListHeightRatioChange={panelSplit.setListHeightRatio}
         list={
+      <>
+      {ordersGrid.filterMenuElement}
       <ErpGridPanel
         gridId="production-orders-v6"
         titleBarStyle="section"
@@ -2438,6 +2645,7 @@ function ProductionOrdersListMain() {
           </tbody>
         )}
       </ErpGridPanel>
+      </>
         }
         detail={
       <ProductionDetailSplit
@@ -2468,11 +2676,25 @@ function ProductionOrdersListMain() {
               detail={panelDetail}
               emptyMessage="Enter Item Code."
               orderTraceabilityEnabled={orderTraceabilityEnabled}
-              onOrderTraceabilityChange={setOrderTraceabilityEnabled}
+              onOrderTraceabilityChange={handleOrderTraceabilityChange}
               allOrdersForInput={allOrdersForInput}
               allOrdersForHeaderFilter={allOrdersForHeaderFilter}
-              loadingAllOrderInputs={loadingAllOrderInputs}
+              loadingAllOrderInputs={
+                orderTraceabilityEnabled
+                  ? loadingTraceabilityData && !traceabilityBomReady
+                  : loadingAllOrderInputs
+              }
+              traceabilityRefreshing={
+                orderTraceabilityEnabled &&
+                loadingTraceabilityData &&
+                traceabilityBomReady
+              }
+              traceabilityFilterReady={traceabilityBomReady}
+              traceabilityBomRevision={traceabilityBomRevision}
               panelResetNonce={panelResetNonce}
+              inputColumnFilters={
+                orderTraceabilityEnabled ? inputColumnFilters : undefined
+              }
               onInputColumnFiltersChange={
                 orderTraceabilityEnabled ? handleInputColumnFiltersChange : undefined
               }

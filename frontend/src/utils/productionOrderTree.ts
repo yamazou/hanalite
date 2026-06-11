@@ -90,7 +90,7 @@ function appendWipSubtreesForInput(
   cache: Map<number, ItemProcessesOut> | undefined,
   visited: Set<number>
 ): void {
-  if (itemId == null || !cache?.has(itemId) || !isWipCatalogItem(items, itemtyps, itemId)) return
+  if (itemId == null || !cache?.has(itemId)) return
   const saved = cache.get(itemId)
   if (!saved?.processes.length) return
   appendSavedItemProcessSubtree(lines, 3, itemId, items, locations, cache, visited, itemtyps)

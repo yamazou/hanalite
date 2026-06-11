@@ -12,6 +12,9 @@
   --erp-toolbar: #e0f0e0;
   --erp-bar-row-height: 30px;
   --erp-detail-section-title-height: 24px;
+  --erp-grid-data-row-height: 22px;
+  --erp-filter-checkbox-size: 13px;
+  --erp-filter-item-row-height: 18px;
   --erp-grid-head: #d8e8d8;
   --erp-grid-alt: #eef7ee;
   --erp-grid-hover: #d4ecd4;
@@ -160,6 +163,12 @@ body,
 
 .nav-section.is-open .nav-submenu {
   display: block;
+}
+
+.nav-submenu-divider {
+  height: 1px;
+  margin: 4px 12px 4px 28px;
+  background: var(--erp-border);
 }
 
 .nav-module-toggle {
@@ -2304,6 +2313,7 @@ select.erp-input option {
 }
 
 .erp-grid-wrap {
+  position: relative;
   overflow: auto;
   border-top: none;
   flex: 1;
@@ -2509,11 +2519,13 @@ body.erp-col-dragging .erp-th-drag-handle {
   background: #fff;
   border: 1px solid var(--erp-border);
   box-shadow: 2px 4px 12px rgba(61, 107, 61, 0.2);
-  font-size: 0.64rem;
+  font-size: 0.68rem;
   color: var(--erp-text);
   display: flex;
   flex-direction: column;
   text-align: left;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .erp-col-filter-search {
@@ -2525,10 +2537,12 @@ body.erp-col-dragging .erp-th-drag-handle {
 }
 
 .erp-col-filter-list {
-  overflow-y: auto;
+  overflow-y: scroll;
+  overflow-x: hidden;
   padding: 2px 0;
   border-top: 1px solid var(--erp-border);
-  min-height: 48px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .erp-col-filter-item-select-all {
@@ -2547,18 +2561,24 @@ body.erp-col-dragging .erp-th-drag-handle {
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  padding: 1px 2px;
+  min-height: var(--erp-filter-item-row-height);
+  padding: 1px 8px;
   cursor: pointer;
   font-size: 0.64rem;
   text-align: left;
-  line-height: 1.2;
+  line-height: var(--erp-filter-item-row-height);
+  box-sizing: border-box;
 }
 
 .erp-col-filter-item input[type='checkbox'] {
   margin: 0;
   flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
+  width: var(--erp-filter-checkbox-size);
+  height: var(--erp-filter-checkbox-size);
+  min-width: var(--erp-filter-checkbox-size);
+  min-height: var(--erp-filter-checkbox-size);
+  cursor: pointer;
+  accent-color: var(--erp-accent);
 }
 
 .erp-col-filter-item span {
@@ -2580,6 +2600,7 @@ body.erp-col-dragging .erp-th-drag-handle {
 
 .erp-col-filter-footer {
   display: flex;
+  flex-shrink: 0;
   justify-content: flex-end;
   gap: 6px;
   padding: 6px 8px 8px;
@@ -3218,6 +3239,26 @@ a.erp-link-cell:hover {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+/* Drop sticky on scrollable detail grids (breaks filter menu anchor); keep relative for ▼ button layout. */
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-detail thead th,
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-detail .erp-grid-resizable th,
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-static thead th,
+.erp-production-detail-section-split .erp-grid-wrap.erp-grid-wrap-static .erp-grid-resizable th {
+  position: relative !important;
+  top: auto !important;
+  z-index: 1;
+}
+
+/* Aggregated / traceability input grids: disable sticky header (breaks filter anchor on rAF/layout). */
+.erp-production-detail-section .erp-grid-wrap.erp-grid-wrap-static thead th,
+.erp-production-detail-section .erp-grid-wrap.erp-grid-wrap-static .erp-grid-resizable th,
+.erp-detail-content .erp-grid-wrap.erp-grid-wrap-static thead th,
+.erp-detail-content .erp-grid-wrap.erp-grid-wrap-static .erp-grid-resizable th {
+  position: relative !important;
+  top: auto !important;
+  z-index: 1;
 }
 
 /* Stacked detail sections (no split): size grid to row count, not pane height. */
@@ -3913,39 +3954,45 @@ body.erp-split-row-resizing {
 }
 
 .sidebar-session {
-  margin: 0 12px 12px;
-  padding: 10px 12px;
-  background: var(--erp-surface);
-  border: 1px solid var(--erp-border);
-  border-radius: 6px;
-  font-size: 0.78rem;
-}
-
-.sidebar-session-meta {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 5px 10px 6px;
+  border-bottom: 1px solid var(--erp-border);
+  background: transparent;
+  font-size: 0.7rem;
+  line-height: 1.25;
   color: var(--erp-text);
 }
 
-.sidebar-session-company {
+.sidebar-session-account {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   color: var(--erp-title-dark);
 }
 
 .sidebar-logout {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--erp-border);
-  border-radius: 4px;
-  background: var(--erp-toolbar);
-  color: var(--erp-text);
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--erp-link);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
   cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .sidebar-logout:hover {
-  background: var(--erp-grid-hover);
+  color: var(--erp-title-dark);
 }

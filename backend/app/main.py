@@ -25,6 +25,7 @@ from app.db_schema import (
     ensure_m_locationtyps_and_itemtyp_link,
     ensure_m_locations_locationtyp_id,
     ensure_m_items_nullable_itemtyp_id,
+    ensure_numbering_masters,
     ensure_prd_order_inputs_columns,
     ensure_prd_order_lines_columns,
     ensure_prd_orders_header_columns,
@@ -53,6 +54,7 @@ def _run_startup_schema_patches() -> None:
         ensure_m_locationtyps_and_itemtyp_link,
         ensure_m_locations_locationtyp_id,
         ensure_m_items_nullable_itemtyp_id,
+        ensure_numbering_masters,
     )
     max_attempts = 30
     delay_seconds = 2.0

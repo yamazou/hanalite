@@ -79,11 +79,6 @@ export function appendSavedItemProcessSubtree(
   if (visited.has(itemId)) return
   const saved = cache.get(itemId)
   if (!saved?.processes.length) return
-  const wip =
-    itemtyps != null
-      ? isWipCatalogItem(items, itemtyps, itemId)
-      : isWipItem(items as ItemListRow[], itemId)
-  if (!wip) return
 
   visited.add(itemId)
   const parent = { item_id: saved.item_id, item_cd: saved.item_cd }
@@ -132,11 +127,8 @@ export function appendSavedItemProcessSubtree(
           startIndent + 1
         )
       )
-      const nestedWip =
-        itemtyps != null
-          ? isWipCatalogItem(items, itemtyps, inp.item_id)
-          : isWipItem(items as ItemListRow[], inp.item_id)
-      if (nestedWip) {
+      const nested = cache.get(inp.item_id)
+      if (nested?.processes.length) {
         appendSavedItemProcessSubtree(
           lines,
           startIndent + 2,

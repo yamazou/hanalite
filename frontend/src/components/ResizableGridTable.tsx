@@ -1,6 +1,10 @@
 import type { MouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { GridColumnLayout } from '../hooks/useGridColumnLayout'
-import { readAnchorRect, type GridFilterAnchorRect } from '../utils/gridFilterAnchor'
+import {
+  readAnchorRect,
+  type FilterMenuPointerAtOpen,
+  type GridFilterAnchorRect,
+} from '../utils/gridFilterAnchor'
 
 export type GridColumnDef = {
   key: string
@@ -23,7 +27,12 @@ type Props = {
   isColumnSortable?: (columnKey: string) => boolean
   isColumnFilterable?: (columnKey: string) => boolean
   isColumnFilterActive?: (columnKey: string) => boolean
-  onFilterClick?: (columnKey: string, anchor: HTMLElement, anchorRect: GridFilterAnchorRect) => void
+  onFilterClick?: (
+    columnKey: string,
+    anchor: HTMLElement,
+    anchorRect: GridFilterAnchorRect,
+    pointerAtOpen: FilterMenuPointerAtOpen
+  ) => void
 }
 
 export function ResizableGridTable({
@@ -130,7 +139,10 @@ export function ResizableGridTable({
                     onClick={(event) => {
                       event.stopPropagation()
                       const anchor = event.currentTarget
-                      onFilterClick?.(col.key, anchor, readAnchorRect(anchor))
+                      onFilterClick?.(col.key, anchor, readAnchorRect(anchor), {
+                        clientX: event.clientX,
+                        clientY: event.clientY,
+                      })
                     }}
                     data-filter-col={col.key}
                   >

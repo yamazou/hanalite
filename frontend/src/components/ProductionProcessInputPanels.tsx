@@ -9,13 +9,14 @@ import {
   productionInputColumns,
   productionLineColumns,
 } from './erp/masterGridColumns'
-import { OrderTraceabilityToggle } from './OrderTraceabilityToggle'
+import { MaterialToLotTraceToggle } from './MaterialToLotTraceToggle'
 import {
   aggregateProductionInputsFromOrders,
-  aggregateTraceabilityInputRows,
+  buildTraceabilityAggregatedRows,
+  collectTraceabilityFilterItemCds,
   productionAggregatedInputFilterValue,
-  rowsForTraceabilityFilterPicklist,
   type AggregatedProductionInputRow,
+  type TraceabilityFilterLiveEdits,
 } from '../utils/productionOrderInputAggregate'
 import { isBlankItemProcessInputRow, isBlankItemProcessRow } from '../utils/itemProcessEdit'
 import { GridRowSelectButtons } from './GridRowSelectButtons'
@@ -27,7 +28,7 @@ import { ResizableGridTable, type GridColumnDef } from './ResizableGridTable'
 import { useGridColumnLayout } from '../hooks/useGridColumnLayout'
 import { useExcelLikeGrid } from '../hooks/useExcelLikeGrid'
 import { useGridColumnFilters } from '../hooks/useGridColumnFilters'
-import { toFilterCellValue } from '../utils/gridColumnFilter'
+import { collectUniqueFilterValues, toFilterCellValue } from '../utils/gridColumnFilter'
 import { isGridDataColumn } from '../utils/excelLikeGrid'
 import { gridColumnLayoutOptions } from '../hooks/useGridColumnLayoutOptions'
 import type { Item } from '../types'
@@ -254,9 +255,16 @@ type Props = {
   allOrdersForInput?: ProductionOrderDetail[]
   /** All list-visible orders (for matching Input filters → header grid). */
   allOrdersForHeaderFilter?: ProductionOrderDetail[]
+  /** Parent-owned Input filters (kept when moving between header rows). */
+  inputColumnFilters?: Record<string, Set<string>>
   onInputColumnFiltersChange?: (filters: Record<string, Set<string>>) => void
   /** Production List: loading all visible order details for the all-orders Input view. */
   loadingAllOrderInputs?: boolean
+  /** Tab/list reload while BOM is already ready (keep grid visible). */
+  traceabilityRefreshing?: boolean
+  /** Production List traceability: order details + BOM load finished (safe to open filters). */
+  traceabilityFilterReady?: boolean
+  traceabilityBomRevision?: number
   /** Bumped when Production List Reset clears detail-panel grid filters. */
   panelResetNonce?: number
 }
@@ -321,8 +329,12 @@ export function ProductionProcessInputPanels({
   onOrderTraceabilityChange,
   allOrdersForInput = [],
   allOrdersForHeaderFilter = [],
+  inputColumnFilters,
   onInputColumnFiltersChange,
   loadingAllOrderInputs = false,
+  traceabilityRefreshing = false,
+  traceabilityFilterReady = true,
+  traceabilityBomRevision = 0,
   panelResetNonce = 0,
 }: Props) {
   const { revision: catalogRevision } = useMasterCatalog()
@@ -690,17 +702,31 @@ export function ProductionProcessInputPanels({
       )
   }, [showAllOrdersInputs, detail, selectedProcessKey, processGroups])
 
-  /** Traceability grid rows (saved inputs + edit grid for selected order). */
+  const traceabilityLiveEditsByOrderId = useMemo(() => {
+    const map = new Map<number, TraceabilityFilterLiveEdits>()
+    if (detail?.production_order_id != null && (canEditPlan || canEditActuals)) {
+      map.set(detail.production_order_id, { processRows, inputRows })
+    }
+    return map
+  }, [detail?.production_order_id, canEditPlan, canEditActuals, processRows, inputRows])
+
+  /** Traceability grid rows: saved inputs + BOM/tree lines (same universe as filter pick-list). */
   const fullAggregatedInputRows = useMemo(() => {
     const orders = showAllOrdersInputs ? allOrdersForInput : allOrdersForHeaderFilter
     if (orders.length === 0) return []
     if (showAllOrdersInputs) {
-      return aggregateTraceabilityInputRows({
+      return buildTraceabilityAggregatedRows({
         orders,
+        locations,
+        items,
+        itemtyps,
+        itemProcessCache,
+        traceabilityFilterReady,
         selectedOrderId: detail?.production_order_id ?? null,
         liveInputRows:
           detail && (canEditPlan || canEditActuals) ? inputRows : undefined,
-        locations,
+        liveEditsByOrderId: traceabilityLiveEditsByOrderId,
+        includeTree: true,
       })
     }
     return aggregateProductionInputsFromOrders({
@@ -719,6 +745,13 @@ export function ProductionProcessInputPanels({
     canEditActuals,
     inputRows,
     locations,
+    traceabilityFilterReady,
+    itemProcessCache,
+    items,
+    itemtyps,
+    traceabilityLiveEditsByOrderId,
+    traceabilityBomRevision,
+    itemProcessCache?.size,
   ])
 
   const makeBlankProcessRow = (existing: EditProcessRow[]) =>
@@ -1084,13 +1117,63 @@ export function ProductionProcessInputPanels({
 
   const inputColumnFiltersEnabled = onInputColumnFiltersChange != null
 
-  const getTraceabilityFilterOptionRows = useCallback(
-    () =>
-      rowsForTraceabilityFilterPicklist({
-        gridRows: fullAggregatedInputRows,
-      }),
-    [fullAggregatedInputRows]
+  const traceabilityDataLoading =
+    showAllOrdersInputs &&
+    orderTraceabilityEnabled &&
+    !traceabilityFilterReady
+  const traceabilityReloading =
+    showAllOrdersInputs && orderTraceabilityEnabled && traceabilityRefreshing
+
+  const traceabilityItemCdFilterOptions = useMemo(() => {
+    if (!showAllOrdersInputs || !traceabilityFilterReady || allOrdersForInput.length === 0) {
+      return []
+    }
+    return collectTraceabilityFilterItemCds({
+      gridRows: fullAggregatedInputRows,
+      orders: allOrdersForInput,
+      itemProcessCache,
+      items,
+      itemtyps,
+      locations,
+      liveEditsByOrderId: traceabilityLiveEditsByOrderId,
+    })
+  }, [
+    showAllOrdersInputs,
+    traceabilityFilterReady,
+    allOrdersForInput,
+    fullAggregatedInputRows,
+    itemProcessCache,
+    items,
+    itemtyps,
+    locations,
+    detail?.production_order_id,
+    canEditPlan,
+    canEditActuals,
+    processRows,
+    inputRows,
+    traceabilityBomRevision,
+    itemProcessCache?.size,
+    traceabilityLiveEditsByOrderId,
+  ])
+
+  const getTraceabilityInputFilterOptions = useCallback(
+    (columnKey: string) => {
+      if (columnKey === 'item_cd') {
+        return traceabilityItemCdFilterOptions
+      }
+      return collectUniqueFilterValues(
+        fullAggregatedInputRows,
+        columnKey,
+        productionAggregatedInputFilterValue
+      )
+    },
+    [traceabilityItemCdFilterOptions, fullAggregatedInputRows]
   )
+
+  const traceabilityGetFilterOptions =
+    inputColumnFiltersEnabled && showAllOrdersInputs
+      ? getTraceabilityInputFilterOptions
+      : undefined
 
   const getAggregatedInputFilterOptionValue = useCallback(
     (row: AggregatedProductionInputRow, col: string) =>
@@ -1101,7 +1184,8 @@ export function ProductionProcessInputPanels({
   const inputEditExcel = useExcelLikeGrid({
     columns: editInputColumnsActive,
     rows: visibleEditInputs,
-    getFilterOptionRows: inputColumnFiltersEnabled ? getTraceabilityFilterOptionRows : undefined,
+    getFilterOptions: traceabilityGetFilterOptions,
+    filterOptionsRevision: traceabilityBomRevision,
     getFilterValue: inputEditFilterValue,
     getFilterOptionValue: inputColumnFiltersEnabled
       ? getAggregatedInputFilterOptionValue
@@ -1144,7 +1228,8 @@ export function ProductionProcessInputPanels({
   const inputReadExcel = useExcelLikeGrid({
     columns: inputGridColumns,
     rows: inputReadUsesAggregatedRows ? fullAggregatedInputRows : visibleInputs,
-    getFilterOptionRows: inputColumnFiltersEnabled ? getTraceabilityFilterOptionRows : undefined,
+    getFilterOptions: traceabilityGetFilterOptions,
+    filterOptionsRevision: traceabilityBomRevision,
     getFilterValue: inputReadFilterValue,
     getFilterOptionValue: inputColumnFiltersEnabled
       ? getAggregatedInputFilterOptionValue
@@ -1353,6 +1438,15 @@ export function ProductionProcessInputPanels({
   }, [orderTraceabilityEnabled, isProductionListInputScope])
 
   useEffect(() => {
+    if (!inputColumnFilters || !onInputColumnFiltersChange) return
+    sharedInputColumnFilters.replaceFilters(inputColumnFilters)
+  }, [
+    inputColumnFilters,
+    onInputColumnFiltersChange,
+    sharedInputColumnFilters.replaceFilters,
+  ])
+
+  useEffect(() => {
     if (!onInputColumnFiltersChange) return
     onInputColumnFiltersChange(sharedInputColumnFilters.filters)
   }, [onInputColumnFiltersChange, sharedInputColumnFilters.filters])
@@ -1377,24 +1471,42 @@ export function ProductionProcessInputPanels({
     () => ({
       ...inputReadExcel.tableProps,
       isColumnFilterable: (key: string) =>
-        inputColumnFiltersEnabled && isGridDataColumn(key),
+        inputColumnFiltersEnabled &&
+        isGridDataColumn(key) &&
+        !(showAllOrdersInputs && traceabilityDataLoading) &&
+        !loadingAllOrderInputs,
       onFilterClick: inputColumnFiltersEnabled
         ? inputReadExcel.tableProps.onFilterClick
         : undefined,
     }),
-    [inputReadExcel.tableProps, inputColumnFiltersEnabled]
+    [
+      inputReadExcel.tableProps,
+      inputColumnFiltersEnabled,
+      showAllOrdersInputs,
+      traceabilityDataLoading,
+      loadingAllOrderInputs,
+    ]
   )
 
   const inputEditTableProps = useMemo(
     () => ({
       ...inputEditExcel.tableProps,
       isColumnFilterable: (key: string) =>
-        inputColumnFiltersEnabled && isGridDataColumn(key),
+        inputColumnFiltersEnabled &&
+        isGridDataColumn(key) &&
+        !(showAllOrdersInputs && traceabilityDataLoading) &&
+        !loadingAllOrderInputs,
       onFilterClick: inputColumnFiltersEnabled
         ? inputEditExcel.tableProps.onFilterClick
         : undefined,
     }),
-    [inputEditExcel.tableProps, inputColumnFiltersEnabled]
+    [
+      inputEditExcel.tableProps,
+      inputColumnFiltersEnabled,
+      showAllOrdersInputs,
+      traceabilityDataLoading,
+      loadingAllOrderInputs,
+    ]
   )
 
   const inputLayout = useGridColumnLayout(inputGridId, inputGridColumns, {
@@ -1433,7 +1545,7 @@ export function ProductionProcessInputPanels({
     if (!canEditRef.current) {
       return [bundle.lineLayout, bundle.inputLayout]
     }
-    // Order Traceability uses read/aggregate grid (inputLayout); per-order edit uses inputEditLayout.
+    // Material-to-Lot Trace uses read/aggregate grid (inputLayout); per-order edit uses inputEditLayout.
     const activeInputLayout = showAllOrdersInputsRef.current
       ? bundle.inputLayout
       : bundle.inputEditLayout
@@ -1497,9 +1609,16 @@ export function ProductionProcessInputPanels({
   const inputItemSectionTitle = (
     <div className="erp-production-detail-section-title">
       <span className="erp-production-detail-section-title-label">Input Item</span>
+      {traceabilityDataLoading || traceabilityReloading ? (
+        <span className="muted erp-production-traceability-loading">
+          {traceabilityReloading
+            ? 'Refreshing order inputs and BOM…'
+            : 'Loading order inputs and BOM…'}
+        </span>
+      ) : null}
       {onOrderTraceabilityChange ? (
         <div className="erp-production-detail-section-title-actions">
-          <OrderTraceabilityToggle
+          <MaterialToLotTraceToggle
             checked={orderTraceabilityEnabled}
             onChange={onOrderTraceabilityChange}
           />
@@ -1517,10 +1636,10 @@ export function ProductionProcessInputPanels({
     >
       <ResizableGridTable layout={inputLayout} {...inputReadTableProps}>
         <tbody>
-          {loadingAllOrderInputs ? (
+          {traceabilityDataLoading || loadingAllOrderInputs ? (
             <tr>
               <td colSpan={inputLayout.orderedColumns.length} className="erp-grid-empty-cell">
-                Loading input items for orders in the list…
+                Loading order inputs and BOM for column filters…
               </td>
             </tr>
           ) : fullAggregatedInputRows.length === 0 ? (
@@ -2048,9 +2167,7 @@ export function ProductionProcessInputPanels({
               onSave={showSectionSaveButtons ? onSaveInput : undefined}
             />
             ) : null}
-            {loadingAllOrderInputs && showAllOrdersInputs ? (
-              <p className="muted erp-grid-empty">Loading input items for orders in the list…</p>
-            ) : showExpandedInputView ? (
+            {showExpandedInputView ? (
               allOrdersInputGrid
             ) : selectedProcessLineNo == null ? (
               <p className="muted erp-grid-empty">{GRID_COPY.inputSelectProcessMsg}</p>

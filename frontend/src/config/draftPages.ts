@@ -22,6 +22,8 @@ export type DraftPageCopy = {
   detailSaveLinesBtn: string
   searchPanelTitle: string
   headerGridTitle: string
+  /** Receipt List detail: section title above line grid. */
+  detailLinesSectionTitle?: string
   dateColumn: string
   createTitle: string
   createDesc: string
@@ -142,6 +144,7 @@ const receiptCopy: DraftPageCopy = {
   detailSaveLinesBtn: 'Save lines',
   searchPanelTitle: 'Search Conditions',
   headerGridTitle: 'Header',
+  detailLinesSectionTitle: 'Item Receipt List',
   dateColumn: 'Receipt Date',
   createTitle: 'Receipt Entry',
   createDesc: 'Enter header and rows, then save as Registered.',

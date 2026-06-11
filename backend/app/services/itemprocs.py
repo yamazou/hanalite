@@ -30,6 +30,7 @@ from app.schemas.itemprocs import (
 )
 from app.schemas.production import ProductionOrderInputWrite
 from app.services.inventory_query import pick_oldest_gr_lot_for_item
+from app.services.numbering import generate_lot_for_item
 from app.tenant import stamp_new, stamp_update
 
 
@@ -237,9 +238,13 @@ def expand_inputs_from_itemprocs(
                 db, int(inp.item_id), step, steps
             )
             req_qty = Decimal(inp.req_qty)
-            assigned_lot = pick_oldest_gr_lot_for_item(
-                db, int(inp.item_id), location_id=from_location_id
-            )
+            generated_lot = generate_lot_for_item(db, item_id=int(inp.item_id))
+            if generated_lot:
+                assigned_lot = generated_lot
+            else:
+                assigned_lot = pick_oldest_gr_lot_for_item(
+                    db, int(inp.item_id), location_id=from_location_id
+                )
             inputs.append(
                 ProductionOrderInputWrite(
                     line_no=int(step.line_no),

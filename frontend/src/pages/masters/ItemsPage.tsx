@@ -9,7 +9,7 @@ import { masterItemEditColumns } from '../../components/erp/masterGridColumns'
 import { useExcelLikeGrid } from '../../hooks/useExcelLikeGrid'
 import { useGridRowKeyboardNav } from '../../hooks/useGridRowKeyboardNav'
 import { useMasterGridToolbarFeedback } from '../../hooks/useMasterGridToolbarFeedback'
-import type { ItemTyp } from '../../types/masters'
+import type { ItemTyp, NumberingPatternMaster } from '../../types/masters'
 import {
   buildItemPayload,
   changedActiveItemRows,
@@ -72,11 +72,16 @@ export function ItemsPage() {
     beginToolbarAction,
   } = useMasterGridToolbarFeedback()
   const [activeFilter, setActiveFilter] = useState<ItemsTabFilter>('ALL')
+  const [numberingPatterns, setNumberingPatterns] = useState<NumberingPatternMaster[]>([])
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const items = await api.listItemsMaster()
+      const [items, patterns] = await Promise.all([
+        api.listItemsMaster(),
+        api.listNumberingPatternsMaster(),
+      ])
+      setNumberingPatterns(patterns)
       const dataRows = listRowsToEditItemRows(items)
       setSavedSnapshots(itemRowSnapshotsFromEditRows(dataRows))
       setEditRows(
@@ -137,6 +142,14 @@ export function ItemsPage() {
     return map
   }, [suppliers])
 
+  const numberingPatternLabelById = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const p of numberingPatterns) {
+      map.set(p.numbering_pattern_id, `${p.numbering_pattern_cd} / ${p.numbering_pattern_nm}`)
+    }
+    return map
+  }, [numberingPatterns])
+
   const customerLabelById = useMemo(() => {
     const map = new Map<number, string>()
     for (const c of customers) {
@@ -185,6 +198,12 @@ export function ItemsPage() {
           return toFilterCellValue(row.item_nm)
         case 'type':
           return toFilterCellValue(itemtypCodeById.get(row.itemtyp_id as number) ?? null)
+        case 'numbering_pattern':
+          return toFilterCellValue(
+            row.numbering_pattern_id !== ''
+              ? numberingPatternLabelById.get(row.numbering_pattern_id as number) ?? null
+              : null
+          )
         case 'supplier1':
           return partyFilterValue(row.supplier_ids[0], supplierLabelById)
         case 'supplier2':
@@ -199,7 +218,7 @@ export function ItemsPage() {
           return masterDateFilterValue(row, col)
       }
     },
-    [itemtypCodeById, partyFilterValue, supplierLabelById, customerLabelById]
+    [itemtypCodeById, numberingPatternLabelById, partyFilterValue, supplierLabelById, customerLabelById]
   )
 
   const itemExportValue = useCallback(
@@ -211,6 +230,10 @@ export function ItemsPage() {
           return row.item_nm
         case 'type':
           return itemtypCodeById.get(row.itemtyp_id as number) ?? ''
+        case 'numbering_pattern':
+          return row.numbering_pattern_id !== ''
+            ? numberingPatternLabelById.get(row.numbering_pattern_id as number) ?? ''
+            : ''
         case 'supplier1':
           return row.supplier_ids[0] !== ''
             ? supplierLabelById.get(row.supplier_ids[0] as number) ?? ''
@@ -235,7 +258,7 @@ export function ItemsPage() {
           return masterDateExportValue(row, col)
       }
     },
-    [itemtypCodeById, supplierLabelById, customerLabelById]
+    [itemtypCodeById, numberingPatternLabelById, supplierLabelById, customerLabelById]
   )
 
   /** Type preset on trailing row: blank on All, selected tab's type otherwise. */
@@ -699,6 +722,29 @@ export function ItemsPage() {
                               {itemtyps.map((t) => (
                                 <option key={t.itemtyp_id} value={t.itemtyp_id}>
                                   {itemTypDropdownLabel(t)}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                        )
+                      case 'numbering_pattern':
+                        return (
+                          <td key={col.key} className="erp-grid-cell-edit">
+                            <select
+                              className={`erp-grid-input${row.numbering_pattern_id === '' ? ' erp-input-empty' : ''}`}
+                              value={row.numbering_pattern_id}
+                              onChange={(e) =>
+                                updateRow(row.key, {
+                                  numbering_pattern_id:
+                                    e.target.value === '' ? '' : Number(e.target.value),
+                                })
+                              }
+                              onKeyDown={(e) => handleItemCellKeyDown(e, row)}
+                            >
+                              <option value="">{isSentinel ? '' : 'Pattern'}</option>
+                              {numberingPatterns.map((p) => (
+                                <option key={p.numbering_pattern_id} value={p.numbering_pattern_id}>
+                                  {p.numbering_pattern_cd} / {p.numbering_pattern_nm}
                                 </option>
                               ))}
                             </select>

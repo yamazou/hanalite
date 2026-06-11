@@ -33,9 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    setApiAuthToken(null)
     clearStoredAuth()
-    applyAuth(null, null)
-  }, [applyAuth])
+    setAccessToken(null)
+    setSession(null)
+  }, [])
 
   useEffect(() => {
     const stored = readStoredAuth()

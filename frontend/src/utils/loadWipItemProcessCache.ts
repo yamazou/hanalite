@@ -1,48 +1,49 @@
 import { api } from '../api/client'
 import type { ItemProcessesOut } from '../types/itemprocs'
 import type { ItemTyp } from '../types/masters'
-import { isWipCatalogItem } from './itemProcessTree'
-
-/** Load Item Process definitions for WIP items (includes nested WIP subprocesses). */
+/**
+ * Load Item Process definitions reachable from seed item ids (FG parent and/or WIP).
+ * Walks every input on each loaded process and fetches nested definitions when present
+ * (purchase/RM items usually have no process master — those calls are skipped via catch).
+ */
 export async function loadWipItemProcessCache(
-  seedWipIds: number[],
-  items: { item_id: number; itemtyp_id?: number }[],
-  itemtyps: ItemTyp[],
+  seedItemIds: number[],
+  _items: { item_id: number; itemtyp_id?: number }[],
+  _itemtyps: ItemTyp[],
   existing: Map<number, ItemProcessesOut> = new Map()
 ): Promise<Map<number, ItemProcessesOut>> {
   const merged = new Map(existing)
+  let added = false
   const fetched = new Set<number>()
-  const queue = [...seedWipIds]
+  const queue = [...seedItemIds]
+
+  const enqueueInputs = (data: ItemProcessesOut) => {
+    for (const proc of data.processes) {
+      for (const inp of proc.inputs) {
+        if (!fetched.has(inp.item_id)) {
+          queue.push(inp.item_id)
+        }
+      }
+    }
+  }
 
   while (queue.length > 0) {
     const itemId = queue.shift()!
     if (fetched.has(itemId)) continue
     fetched.add(itemId)
     if (merged.has(itemId)) {
-      const saved = merged.get(itemId)!
-      for (const proc of saved.processes) {
-        for (const inp of proc.inputs) {
-          if (isWipCatalogItem(items, itemtyps, inp.item_id) && !fetched.has(inp.item_id)) {
-            queue.push(inp.item_id)
-          }
-        }
-      }
+      enqueueInputs(merged.get(itemId)!)
       continue
     }
     try {
       const data = await api.getItemProcesses(itemId)
+      if (!merged.has(itemId)) added = true
       merged.set(itemId, data)
-      for (const proc of data.processes) {
-        for (const inp of proc.inputs) {
-          if (isWipCatalogItem(items, itemtyps, inp.item_id) && !fetched.has(inp.item_id)) {
-            queue.push(inp.item_id)
-          }
-        }
-      }
+      enqueueInputs(data)
     } catch {
-      // no subprocess definition for this WIP
+      // no subprocess definition for this item (typical for RM / purchase parts)
     }
   }
 
-  return merged
+  return added ? merged : existing
 }

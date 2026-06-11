@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api } from '../api/client'
+import { api, isSessionEndedError } from '../api/client'
 import type { Item, Supplier } from '../types'
 import type { MoveTyp } from '../types/inventory'
 import type {
@@ -155,8 +155,9 @@ export function MasterCatalogProvider({ children }: { children: ReactNode }) {
   }, [applySnapshot, reloadItemTypColors])
 
   useEffect(() => {
-    void refresh().catch(() => {
-      // ignore background refresh errors
+    void refresh().catch((e) => {
+      if (isSessionEndedError(e)) return
+      // ignore other background refresh errors
     })
   }, [pathname, refresh])
 

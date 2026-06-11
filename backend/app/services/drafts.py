@@ -24,6 +24,7 @@ from app.services.draft_item_resolve import (
 from app.services.draft_search import draft_line_matches_item_q
 from app.services.inventory import InventoryError, apply_cancel_reversal, apply_gr
 from app.services.masters import MasterError, resolve_location_id
+from app.services.numbering import NumberingError, resolve_lot_for_item
 from app.tenant import stamp_new, stamp_update
 
 
@@ -162,6 +163,10 @@ def _add_line_entity(
         location_id = resolve_location_id(db, line.location_id)
     except MasterError as e:
         raise DraftServiceError(str(e)) from e
+    try:
+        resolved_lot = resolve_lot_for_item(db, item_id=item_id, lot=line.lot)
+    except NumberingError as e:
+        raise DraftServiceError(str(e)) from e
     entity = InvReceiptDraftLine(
         inv_receipt_draft_id=draft_id,
         line_no=line.line_no or default_line_no,
@@ -169,7 +174,7 @@ def _add_line_entity(
         item_cd=item_cd,
         item_nm=item_nm,
         location_id=location_id,
-        lot=line.lot.strip(),
+        lot=resolved_lot,
         qty=line.qty,
         created_at=now,
         updated_at=now,
@@ -262,7 +267,10 @@ def _apply_line_upsert(
             entity.item_cd = item_cd
             entity.item_nm = item_nm
             entity.location_id = location_id
-            entity.lot = line_in.lot.strip()
+            try:
+                entity.lot = resolve_lot_for_item(db, item_id=item_id, lot=line_in.lot)
+            except NumberingError as e:
+                raise DraftServiceError(str(e)) from e
             entity.qty = line_in.qty
             entity.line_no = line_no
             stamp_update(entity, ctx)

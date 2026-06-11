@@ -10,7 +10,16 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.deps import get_tenant
 from app.models.inventory import MoveTyp
-from app.models.masters import Customer, Item, ItemTyp, Location, LocationTyp, Supplier
+from app.models.masters import (
+    Customer,
+    Item,
+    ItemTyp,
+    Location,
+    LocationTyp,
+    NumberingElement,
+    NumberingPattern,
+    Supplier,
+)
 from app.schemas.masters import (
     CustomerCreate,
     CustomerOut,
@@ -33,9 +42,16 @@ from app.schemas.masters import (
     ItemUpdate,
     MoveTypCreate,
     MoveTypMasterOut,
+    NumberingElementCreate,
+    NumberingElementOut,
+    NumberingElementUpdate,
+    NumberingPatternCreate,
+    NumberingPatternOut,
+    NumberingPatternUpdate,
     SupplierCreate,
     SupplierOut,
 )
+from app.services.numbering import ELEMENT_SLOT_FIELDS, preview_numbering_image, _load_element_map
 from app.tenant import TenantContext, stamp_new, stamp_update
 
 
@@ -776,6 +792,15 @@ def _validate_item_refs(db: Session, payload: ItemCreate | ItemUpdate) -> None:
         )
         if not customer or customer.deleted_at is not None:
             raise MasterError(f"Customer {cid} not found.")
+    if payload.numbering_pattern_id is not None:
+        pattern = db.scalar(
+            select(NumberingPattern).where(
+                NumberingPattern.numbering_pattern_id == payload.numbering_pattern_id,
+                NumberingPattern.co_id == ctx.co_id,
+            )
+        )
+        if not pattern or pattern.deleted_at is not None:
+            raise MasterError("Numbering pattern not found.")
 
 
 def list_items(db: Session) -> list[ItemListOut]:
@@ -783,12 +808,22 @@ def list_items(db: Session) -> list[ItemListOut]:
     s1 = Supplier.__table__.alias("s1")
     c1 = Customer.__table__.alias("c1")
     c2 = Customer.__table__.alias("c2")
+    np = NumberingPattern.__table__.alias("np")
     stmt = (
-        select(Item, ItemTyp.itemtyp_nm, s1.c.suppliers_nm, c1.c.customers_nm, c2.c.customers_nm)
+        select(
+            Item,
+            ItemTyp.itemtyp_nm,
+            s1.c.suppliers_nm,
+            c1.c.customers_nm,
+            c2.c.customers_nm,
+            np.c.numbering_pattern_cd,
+            np.c.numbering_pattern_nm,
+        )
         .outerjoin(ItemTyp, ItemTyp.itemtyp_id == Item.itemtyp_id)
         .outerjoin(s1, s1.c.suppliers_id == Item.supplier1_id)
         .outerjoin(c1, c1.c.customers_id == Item.customer1_id)
         .outerjoin(c2, c2.c.customers_id == Item.customer2_id)
+        .outerjoin(np, np.c.numbering_pattern_id == Item.numbering_pattern_id)
         .where(Item.co_id == ctx.co_id, Item.deleted_at.is_(None))
         .order_by(Item.item_id)
     )
@@ -808,10 +843,13 @@ def list_items(db: Session) -> list[ItemListOut]:
             customer1_nm=customer1_nm,
             customer2_id=item.customer2_id,
             customer2_nm=customer2_nm,
+            numbering_pattern_id=item.numbering_pattern_id,
+            numbering_pattern_cd=numbering_pattern_cd,
+            numbering_pattern_nm=numbering_pattern_nm,
             created_at=item.created_at,
             updated_at=item.updated_at,
         )
-        for item, itemtyp_nm, supplier1_nm, customer1_nm, customer2_nm in rows
+        for item, itemtyp_nm, supplier1_nm, customer1_nm, customer2_nm, numbering_pattern_cd, numbering_pattern_nm in rows
     ]
 
 
@@ -830,6 +868,7 @@ def get_item(db: Session, item_id: int) -> ItemDetailOut:
         supplier3_id=row.supplier3_id,
         customer1_id=row.customer1_id,
         customer2_id=row.customer2_id,
+        numbering_pattern_id=row.numbering_pattern_id,
     )
 
 
@@ -846,6 +885,7 @@ def create_item(db: Session, payload: ItemCreate) -> ItemDetailOut:
         supplier3_id=payload.supplier3_id,
         customer1_id=payload.customer1_id,
         customer2_id=payload.customer2_id,
+        numbering_pattern_id=payload.numbering_pattern_id,
     )
     stamp_new(row, ctx)
     db.add(row)
@@ -871,6 +911,7 @@ def update_item(db: Session, item_id: int, payload: ItemUpdate) -> ItemDetailOut
     row.supplier3_id = payload.supplier3_id
     row.customer1_id = payload.customer1_id
     row.customer2_id = payload.customer2_id
+    row.numbering_pattern_id = payload.numbering_pattern_id
     stamp_update(row, ctx)
     db.flush()
     return get_item(db, item_id)
@@ -881,4 +922,241 @@ def delete_item(db: Session, item_id: int) -> None:
     row = db.scalar(select(Item).where(Item.item_id == item_id, Item.co_id == ctx.co_id))
     if not row or row.deleted_at is not None:
         raise MasterError("Item not found.")
+    _soft_delete(row, ctx)
+
+
+_DEFAULT_NUMBERING_ELEMENTS: tuple[tuple[str, str, str, int | None, str | None, str], ...] = (
+    ("YY", "Year (2-digit)", "date_yy", None, None, "YY"),
+    ("MM", "Month (2-digit)", "date_mm", None, None, "MM"),
+    ("DD", "Day (2-digit)", "date_dd", None, None, "DD"),
+    ("YYYY", "Year (4-digit)", "date_yyyy", None, None, "YYYY"),
+    ("SEQ", "Serial number", "sequence", 2, None, "**"),
+    ("REVNO", "Revision number", "revision", 2, None, "RR"),
+    ("Fix", "Fixed Value", "literal", None, None, "Fix"),
+)
+
+
+def _ensure_default_numbering_elements(db: Session) -> None:
+    ctx = get_tenant()
+    existing = {
+        row.numbering_element_cd.upper()
+        for row in db.scalars(
+            select(NumberingElement).where(
+                NumberingElement.co_id == ctx.co_id,
+                NumberingElement.deleted_at.is_(None),
+            )
+        ).all()
+    }
+    added = False
+    for cd, nm, kind, width, literal, preview in _DEFAULT_NUMBERING_ELEMENTS:
+        if cd.upper() in existing:
+            continue
+        row = NumberingElement(
+            numbering_element_cd=cd,
+            numbering_element_nm=nm,
+            element_kind=kind,
+            seq_width=width,
+            literal_text=literal,
+            preview_sample=preview,
+        )
+        stamp_new(row, ctx)
+        db.add(row)
+        added = True
+    if added:
+        db.flush()
+
+
+def list_numbering_elements(db: Session) -> list[NumberingElementOut]:
+    ctx = get_tenant()
+    _ensure_default_numbering_elements(db)
+    rows = db.scalars(
+        select(NumberingElement)
+        .where(NumberingElement.co_id == ctx.co_id, NumberingElement.deleted_at.is_(None))
+        .order_by(NumberingElement.numbering_element_id)
+    ).all()
+    return [NumberingElementOut.model_validate(r) for r in rows]
+
+
+def create_numbering_element(
+    db: Session, payload: NumberingElementCreate
+) -> NumberingElementOut:
+    ctx = get_tenant()
+    row = NumberingElement(
+        numbering_element_cd=payload.numbering_element_cd.strip().upper(),
+        numbering_element_nm=payload.numbering_element_nm.strip(),
+        element_kind=payload.element_kind.strip(),
+        seq_width=payload.seq_width,
+        literal_text=(payload.literal_text.strip() if payload.literal_text else None),
+        preview_sample=payload.preview_sample.strip(),
+    )
+    stamp_new(row, ctx)
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Numbering element code already exists.") from e
+    return NumberingElementOut.model_validate(row)
+
+
+def update_numbering_element(
+    db: Session, numbering_element_id: int, payload: NumberingElementUpdate
+) -> NumberingElementOut:
+    ctx = get_tenant()
+    row = db.scalar(
+        select(NumberingElement).where(
+            NumberingElement.numbering_element_id == numbering_element_id,
+            NumberingElement.co_id == ctx.co_id,
+        )
+    )
+    if not row or row.deleted_at is not None:
+        raise MasterError("Numbering element not found.")
+    row.numbering_element_cd = payload.numbering_element_cd.strip().upper()
+    row.numbering_element_nm = payload.numbering_element_nm.strip()
+    row.element_kind = payload.element_kind.strip()
+    row.seq_width = payload.seq_width
+    row.literal_text = payload.literal_text.strip() if payload.literal_text else None
+    row.preview_sample = payload.preview_sample.strip()
+    stamp_update(row, ctx)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Numbering element code already exists.") from e
+    return NumberingElementOut.model_validate(row)
+
+
+def delete_numbering_element(db: Session, numbering_element_id: int) -> None:
+    ctx = get_tenant()
+    row = db.scalar(
+        select(NumberingElement).where(
+            NumberingElement.numbering_element_id == numbering_element_id,
+            NumberingElement.co_id == ctx.co_id,
+        )
+    )
+    if not row or row.deleted_at is not None:
+        raise MasterError("Numbering element not found.")
+    _soft_delete(row, ctx)
+
+
+def _normalize_pattern_elements(payload: NumberingPatternCreate | NumberingPatternUpdate) -> None:
+    for field in ELEMENT_SLOT_FIELDS:
+        raw = getattr(payload, field)
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        setattr(payload, field, s.upper() if s else None)
+
+
+def _validate_pattern_elements(db: Session, payload: NumberingPatternCreate | NumberingPatternUpdate) -> str:
+    slots = [
+        getattr(payload, field)
+        for field in ELEMENT_SLOT_FIELDS
+        if getattr(payload, field)
+    ]
+    if payload.seq_reset_scope not in ("never", "daily", "monthly", "yearly"):
+        raise MasterError("Invalid sequence reset scope.")
+    element_map = _load_element_map(db, [s for s in slots if s])
+    missing = [cd for cd in slots if cd and cd.upper() not in element_map]
+    if missing:
+        raise MasterError(f"Numbering element(s) not found: {', '.join(missing)}")
+    return preview_numbering_image([s for s in slots if s], element_map)
+
+
+def list_numbering_patterns(db: Session) -> list[NumberingPatternOut]:
+    ctx = get_tenant()
+    rows = db.scalars(
+        select(NumberingPattern)
+        .where(NumberingPattern.co_id == ctx.co_id, NumberingPattern.deleted_at.is_(None))
+        .order_by(NumberingPattern.numbering_pattern_id)
+    ).all()
+    return [NumberingPatternOut.model_validate(r) for r in rows]
+
+
+def create_numbering_pattern(
+    db: Session, payload: NumberingPatternCreate
+) -> NumberingPatternOut:
+    ctx = get_tenant()
+    _normalize_pattern_elements(payload)
+    image = _validate_pattern_elements(db, payload)
+    row = NumberingPattern(
+        numbering_pattern_cd=payload.numbering_pattern_cd.strip(),
+        numbering_pattern_nm=payload.numbering_pattern_nm.strip(),
+        element_1=payload.element_1,
+        element_2=payload.element_2,
+        element_3=payload.element_3,
+        element_4=payload.element_4,
+        element_5=payload.element_5,
+        element_6=payload.element_6,
+        element_7=payload.element_7,
+        element_8=payload.element_8,
+        element_9=payload.element_9,
+        element_10=payload.element_10,
+        seq_reset_scope=payload.seq_reset_scope,
+        numbering_image=image,
+    )
+    stamp_new(row, ctx)
+    db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Numbering pattern code already exists.") from e
+    return NumberingPatternOut.model_validate(row)
+
+
+def update_numbering_pattern(
+    db: Session, numbering_pattern_id: int, payload: NumberingPatternUpdate
+) -> NumberingPatternOut:
+    ctx = get_tenant()
+    row = db.scalar(
+        select(NumberingPattern).where(
+            NumberingPattern.numbering_pattern_id == numbering_pattern_id,
+            NumberingPattern.co_id == ctx.co_id,
+        )
+    )
+    if not row or row.deleted_at is not None:
+        raise MasterError("Numbering pattern not found.")
+    _normalize_pattern_elements(payload)
+    image = _validate_pattern_elements(db, payload)
+    row.numbering_pattern_cd = payload.numbering_pattern_cd.strip()
+    row.numbering_pattern_nm = payload.numbering_pattern_nm.strip()
+    row.element_1 = payload.element_1
+    row.element_2 = payload.element_2
+    row.element_3 = payload.element_3
+    row.element_4 = payload.element_4
+    row.element_5 = payload.element_5
+    row.element_6 = payload.element_6
+    row.element_7 = payload.element_7
+    row.element_8 = payload.element_8
+    row.element_9 = payload.element_9
+    row.element_10 = payload.element_10
+    row.seq_reset_scope = payload.seq_reset_scope
+    row.numbering_image = image
+    stamp_update(row, ctx)
+    try:
+        db.flush()
+    except IntegrityError as e:
+        raise MasterError("Numbering pattern code already exists.") from e
+    return NumberingPatternOut.model_validate(row)
+
+
+def delete_numbering_pattern(db: Session, numbering_pattern_id: int) -> None:
+    ctx = get_tenant()
+    row = db.scalar(
+        select(NumberingPattern).where(
+            NumberingPattern.numbering_pattern_id == numbering_pattern_id,
+            NumberingPattern.co_id == ctx.co_id,
+        )
+    )
+    if not row or row.deleted_at is not None:
+        raise MasterError("Numbering pattern not found.")
+    in_use = db.scalar(
+        select(func.count())
+        .select_from(Item)
+        .where(
+            Item.co_id == ctx.co_id,
+            Item.numbering_pattern_id == numbering_pattern_id,
+            Item.deleted_at.is_(None),
+        )
+    )
+    if in_use and int(in_use) > 0:
+        raise MasterError("Numbering pattern is linked to items.")
     _soft_delete(row, ctx)
